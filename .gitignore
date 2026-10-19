@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# SwiftPM / build output
+.build/
+build/
+.swiftpm/
+*.app
+*.dSYM
+
+# Xcode (if a project is ever generated)
+xcuserdata/
+DerivedData/
+*.xcuserstate
+
+# Local Claude Code settings
+.claude/settings.local.json
+
+# Signing material — never commit
+*.p12
+*.pem
+*.cer
