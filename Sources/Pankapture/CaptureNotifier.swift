@@ -63,6 +63,21 @@ final class CaptureNotifier: NSObject {
         }
     }
 
+    /// Confirms a saved recording, with Open and Show in Finder.
+    func notifyRecording(savedURL: URL) {
+        guard UserDefaults.standard.bool(forKey: PreferenceKey.showNotifications) else { return }
+        let content = UNMutableNotificationContent()
+        content.title = savedURL.pathExtension.lowercased() == "gif" ? "GIF saved" : "Recording saved"
+        content.body = savedURL.lastPathComponent
+        content.categoryIdentifier = ID.savedCategory
+        content.userInfo = [ID.fileKey: savedURL.path]
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        Task {
+            guard await authorize() else { return }
+            try? await center.add(request)
+        }
+    }
+
     /// Confirms "Capture Text": nil means nothing was recognized.
     func notifyText(_ text: String?) {
         guard UserDefaults.standard.bool(forKey: PreferenceKey.showNotifications) else { return }

@@ -6,6 +6,7 @@ import Library
 import Observation
 import Overlay
 import QuickAccess
+import Recording
 
 /// Routes user intents (shortcuts, menu items, URLs) to capture flows and owns
 /// post-capture behaviour: output actions, history, thumbnails, pins, editor.
@@ -16,6 +17,9 @@ final class CaptureCoordinator {
     private(set) var lastErrorMessage: String?
     /// Actions whose shortcut couldn't be registered (taken by another app).
     private(set) var shortcutConflicts: Set<ShortcutAction> = []
+
+    /// Screen recording (options panel, controller, recovery).
+    let recording = RecordingCoordinator()
 
     /// Capture history (nil only if the store couldn't be opened).
     @ObservationIgnored let library: CaptureLibrary?
@@ -43,6 +47,14 @@ final class CaptureCoordinator {
         }
         QuickAccessController.shared.onAction = { [weak self] action, item in
             self?.handleThumbnail(action, item: item)
+        }
+        recording.controller.onFinish = { [weak self] outcome in
+            self?.handleRecording(outcome)
+        }
+        Task { [weak self] in
+            await self?.recording.recoverInterruptedRecordings { url in
+                self?.recordingSaved(at: url, videoSize: .zero)
+            }
         }
     }
 
@@ -74,11 +86,19 @@ final class CaptureCoordinator {
             Task { await captureWindow() }
         case .captureText:
             Task { await captureText() }
+        case .scrollingCapture:
+            Task { [weak self] in
+                await ScrollingCaptureController.start { image, scale in
+                    Task {
+                        await self?.deliverStill(Capture(image: image, original: image, annotations: AnnotationDocument(),
+                                                         scale: scale, screenRect: nil))
+                    }
+                }
+            }
         case .openHistory:
             showLibrary()
-        default:
-            Log.app.info("\(action.title, privacy: .public) is not implemented yet (see docs/ROADMAP.md)")
-            NSSound.beep()
+        case .recordScreen:
+            recording.toggleFromShortcut()
         }
     }
 
@@ -387,6 +407,41 @@ final class CaptureCoordinator {
 
     func openRecording(_ url: URL) {
         NSWorkspace.shared.open(url)
+    }
+
+    // MARK: Recording results (M3, QA-5)
+
+    private func handleRecording(_ outcome: RecordingOutcome) {
+        switch outcome {
+        case let .finished(result, outputKind):
+            if outputKind == .gif {
+                convertToGIF(result)
+            } else {
+                recordingSaved(at: result.url, videoSize: result.videoSize)
+            }
+        case let .interrupted(error, result):
+            if let result { recordingSaved(at: result.url, videoSize: result.videoSize) }
+            OutputService.presentError("The recording stopped early", error)
+        case let .failed(error):
+            OutputService.presentError("Couldn't record the screen", error)
+        case .cancelled:
+            break
+        }
+    }
+
+    private func recordingSaved(at url: URL, videoSize: CGSize, kind: CaptureKind = .recording) {
+        lastCaptureURL = url
+        if UserDefaults.standard.bool(forKey: PreferenceKey.showThumbnail) {
+            QuickAccessController.shared.show(.video(url, size: videoSize), fileURL: url)
+        }
+        CaptureNotifier.shared.notifyRecording(savedURL: url)
+        Task { await library?.recordRecording(fileURL: url, kind: kind, sourceAppName: nil) }
+    }
+
+    /// GIF mode (REC-14) records an MP4 and converts it here.
+    private func convertToGIF(_ result: RecordingResult) {
+        // Replaced by the video editor's GIF exporter once that module lands.
+        recordingSaved(at: result.url, videoSize: result.videoSize)
     }
 
     // MARK: Pins and thumbnails

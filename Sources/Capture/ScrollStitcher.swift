@@ -108,6 +108,27 @@ public final class ScrollStitcher {
         return context.makeImage()
     }
 
+    /// A small rendering of the stitched result for live preview.
+    public func makePreview(maxWidth: Int) -> CGImage? {
+        guard let first = strips.first else { return nil }
+        let factor = min(1, CGFloat(maxWidth) / CGFloat(first.width))
+        let width = max(1, Int(CGFloat(first.width) * factor))
+        let total = max(1, Int(CGFloat(height) * factor))
+        guard let context = CGContext(
+            data: nil, width: width, height: total, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .low
+        var y: CGFloat = 0
+        for strip in strips {
+            let h = CGFloat(strip.height) * factor
+            context.draw(strip, in: CGRect(x: 0, y: CGFloat(total) - y - h, width: CGFloat(width), height: h))
+            y += h
+        }
+        return context.makeImage()
+    }
+
     // MARK: - Analysis (internal for tests)
 
     static func signatures(of image: CGImage) -> Signatures? {

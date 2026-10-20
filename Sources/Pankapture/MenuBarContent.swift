@@ -16,7 +16,7 @@ struct MenuBarContent: View {
             actionButton(.capturePreviousArea, symbol: "rectangle.dashed.badge.record")
             actionButton(.captureWindow, symbol: "macwindow")
             actionButton(.captureFullscreen, symbol: "display")
-            actionButton(.scrollingCapture, symbol: "arrow.up.and.down.text.horizontal", enabled: false)
+            actionButton(.scrollingCapture, symbol: "arrow.up.and.down.text.horizontal")
             actionButton(.captureText, symbol: "text.viewfinder")
             Menu {
                 ForEach([3, 5, 10], id: \.self) { seconds in
@@ -28,7 +28,21 @@ struct MenuBarContent: View {
         }
 
         Section("Recording") {
-            actionButton(.recordScreen, symbol: "record.circle", enabled: false)
+            if coordinator.recording.isRecording {
+                let recorder = coordinator.recording.recorder
+                Button("Stop Recording (\(recorder.formattedElapsed))", systemImage: "stop.circle") {
+                    coordinator.recording.stop()
+                }
+                Button(recorder.state == .paused ? "Resume" : "Pause",
+                       systemImage: recorder.state == .paused ? "play.circle" : "pause.circle") {
+                    recorder.state == .paused ? recorder.resume() : recorder.pause()
+                }
+            } else {
+                Button("Record Screen…", systemImage: "record.circle") {
+                    coordinator.recording.showOptions()
+                }
+                .keyboardShortcut(store.combo(for: .recordScreen).flatMap(\.menuShortcut))
+            }
         }
 
         Divider()

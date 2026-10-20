@@ -1,0 +1,139 @@
+import AppCore
+import AppKit
+import Capture
+import Overlay
+import Recording
+import SwiftUI
+
+/// App-side glue for screen recording (M3, M4): the options panel, area
+/// picking through the overlay, crash recovery, and the menu bar timer.
+@MainActor
+@Observable
+final class RecordingCoordinator {
+    let controller = RecordingController()
+    @ObservationIgnored private var optionsPanel: NSPanel?
+
+    var recorder: ScreenRecorder { controller.recorder }
+    var isRecording: Bool { controller.recorder.state.isActive }
+
+    init() {
+        controller.areaProvider = { await Self.pickArea() }
+    }
+
+    /// The recording options panel (sources, audio, camera, extras).
+    func showOptions() {
+        if let optionsPanel {
+            optionsPanel.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+            return
+        }
+        let host = NSHostingController(rootView: RecordingOptionsView(controller: controller) { [weak self] in
+            self?.closeOptions()
+        })
+        let panel = NSPanel(contentViewController: host)
+        panel.styleMask = [.titled, .closable, .fullSizeContentView, .utilityWindow]
+        panel.titleVisibility = .hidden
+        panel.titlebarAppearsTransparent = true
+        panel.isMovableByWindowBackground = true
+        panel.level = .floating
+        panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        // Under the menu bar, near the right edge, like a menu bar popover.
+        let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main
+        if let visible = screen?.visibleFrame {
+            let size = panel.frame.size
+            panel.setFrameOrigin(CGPoint(x: visible.maxX - size.width - 16, y: visible.maxY - size.height - 8))
+        }
+        optionsPanel = panel
+        NSApp.activate()
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func closeOptions() {
+        optionsPanel?.close()
+        optionsPanel = nil
+    }
+
+    /// ⌥⇧⌘X: stop if recording, otherwise open the options.
+    func toggleFromShortcut() {
+        if controller.isBusy {
+            controller.toggle()
+        } else {
+            showOptions()
+        }
+    }
+
+    func stop() {
+        Task { await controller.stop() }
+    }
+
+    // MARK: Area picking
+
+    private static func pickArea() async -> AreaSelection? {
+        let windows = WindowList.onScreenWindows()
+        guard let snapshots = try? await ScreenshotService.snapshotDisplays() else { return nil }
+        return await withCheckedContinuation { continuation in
+            let presented = OverlayController.present(
+                snapshots: snapshots, windows: windows,
+                mode: .pick(confirmTitle: "Record", confirmSymbol: "record.circle")
+            ) { outcome in
+                if case let .picked(area) = outcome {
+                    continuation.resume(returning: AreaSelection(displayID: area.displayID, rect: area.rect))
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+            if presented == nil { continuation.resume(returning: nil) }
+        }
+    }
+
+    // MARK: Crash recovery (REC-9)
+
+    /// Offers to recover recordings interrupted by a crash or power loss.
+    func recoverInterruptedRecordings(onRecovered: @escaping (URL) -> Void) async {
+        let recovery = RecordingRecovery()
+        recovery.removeOrphanedManifests()
+        let pending = recovery.pending()
+        guard !pending.isEmpty else { return }
+
+        let alert = NSAlert()
+        alert.messageText = pending.count == 1
+            ? "Recover an unfinished recording?"
+            : "Recover \(pending.count) unfinished recordings?"
+        alert.informativeText = "Pankapture quit while recording. Everything up to the last couple of seconds can be saved to your capture folder."
+        alert.addButton(withTitle: "Recover")
+        alert.addButton(withTitle: "Discard")
+        NSApp.activate()
+        let response = alert.runModal()
+
+        for recording in pending {
+            if response == .alertFirstButtonReturn {
+                do {
+                    onRecovered(try await recovery.recover(recording))
+                } catch {
+                    Log.recording.error("Recovery failed: \(error.localizedDescription, privacy: .public)")
+                }
+            } else {
+                recovery.discard(recording)
+            }
+        }
+    }
+}
+
+/// Menu bar icon: the viewfinder, or a red dot with the elapsed time while recording.
+struct MenuBarLabel: View {
+    @Environment(CaptureCoordinator.self) private var coordinator
+
+    var body: some View {
+        let recorder = coordinator.recording.recorder
+        if recorder.state.isActive {
+            Label(recorder.formattedElapsed, systemImage: recorder.state == .paused ? "pause.circle.fill" : "record.circle.fill")
+                .labelStyle(.titleAndIcon)
+                .monospacedDigit()
+        } else {
+            Image(systemName: "viewfinder")
+        }
+    }
+}

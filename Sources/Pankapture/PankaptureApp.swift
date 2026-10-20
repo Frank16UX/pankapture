@@ -5,8 +5,11 @@ struct PankaptureApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra("Pankapture", systemImage: "viewfinder") {
+        MenuBarExtra {
             MenuBarContent()
+                .environment(appDelegate.coordinator)
+        } label: {
+            MenuBarLabel()
                 .environment(appDelegate.coordinator)
         }
 
