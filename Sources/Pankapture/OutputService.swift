@@ -6,9 +6,9 @@ import UniformTypeIdentifiers
 /// App-level output actions for finished captures (OUT-1…OUT-3).
 @MainActor
 enum OutputService {
-    static func copy(_ image: CGImage) {
+    static func copy(_ image: CGImage, scale: CGFloat = 1) {
         do {
-            try ImageOutput.copyToClipboard(image)
+            try ImageOutput.copyToClipboard(prepared(image, scale: scale))
         } catch {
             Log.output.error("Copy failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -16,9 +16,10 @@ enum OutputService {
 
     /// Saves into the configured folder; returns the file URL.
     @discardableResult
-    static func save(_ image: CGImage) -> URL? {
+    static func save(_ image: CGImage, scale: CGFloat = 1) -> URL? {
         do {
-            return try ImageOutput.write(image, to: Preferences.saveDirectory(), format: Preferences.imageFormat())
+            return try ImageOutput.write(prepared(image, scale: scale), to: Preferences.saveDirectory(),
+                                         format: Preferences.imageFormat(), namer: Preferences.fileNamer())
         } catch {
             Log.output.error("Save failed: \(error.localizedDescription, privacy: .public)")
             presentError("Couldn't save the capture", error)
@@ -27,11 +28,11 @@ enum OutputService {
     }
 
     /// Asks where to save (⇧⌘S); returns the chosen URL if saved.
-    static func saveAs(_ image: CGImage) -> URL? {
+    static func saveAs(_ image: CGImage, scale: CGFloat = 1) -> URL? {
         let format = Preferences.imageFormat()
         let panel = NSSavePanel()
         panel.title = "Save Capture"
-        panel.nameFieldStringValue = CaptureFileNamer().baseName(for: .now) + "." + format.fileExtension
+        panel.nameFieldStringValue = Preferences.fileNamer().baseName(for: .now) + "." + format.fileExtension
         panel.directoryURL = Preferences.saveDirectory()
         panel.allowedContentTypes = [.png, .jpeg, .heic]
         panel.canCreateDirectories = true
@@ -45,7 +46,7 @@ enum OutputService {
         default: .png
         }
         do {
-            try ImageOutput.encode(image, as: chosen).write(to: url, options: .atomic)
+            try ImageOutput.encode(prepared(image, scale: scale), as: chosen).write(to: url, options: .atomic)
             return url
         } catch {
             presentError("Couldn't save the capture", error)
@@ -73,6 +74,20 @@ enum OutputService {
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
         operation.run()
+    }
+
+    /// Applies "save at 1×" (GL-8): Retina captures are halved to one pixel per point.
+    static func prepared(_ image: CGImage, scale: CGFloat) -> CGImage {
+        guard scale > 1, UserDefaults.standard.bool(forKey: PreferenceKey.saveAtOneX) else { return image }
+        let width = Int((CGFloat(image.width) / scale).rounded())
+        let height = Int((CGFloat(image.height) / scale).rounded())
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                      space: image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue)
+        else { return image }
+        context.interpolationQuality = .high
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage() ?? image
     }
 
     static func playCaptureSound() {

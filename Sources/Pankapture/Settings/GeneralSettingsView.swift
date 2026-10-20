@@ -7,6 +7,8 @@ struct GeneralSettingsView: View {
     @AppStorage(PreferenceKey.appearance) private var appearance = AppearanceMode.system.rawValue
     @AppStorage(PreferenceKey.playSounds) private var playSounds = true
     @AppStorage(PreferenceKey.showNotifications) private var showNotifications = true
+    @AppStorage(PreferenceKey.fileNamePrefix) private var fileNamePrefix = "Pankapture"
+    @AppStorage(PreferenceKey.saveAtOneX) private var saveAtOneX = false
     @AppStorage(PreferenceKey.saveDirectory) private var saveDirectory = Preferences.defaultSaveDirectory.path
     @AppStorage(PreferenceKey.imageFormat) private var imageFormat = ImageFormat.png.rawValue
     @AppStorage(PreferenceKey.copyToClipboardAfterCapture) private var copyAfterCapture = true
@@ -58,6 +60,14 @@ struct GeneralSettingsView: View {
                 Picker("Image format", selection: $imageFormat) {
                     ForEach(ImageFormat.allCases) { Text($0.title).tag($0.rawValue) }
                 }
+                TextField("File name", text: $fileNamePrefix, prompt: Text("Pankapture"))
+                LabeledContent("Example") {
+                    Text(Preferences.fileNamer().baseName(for: .now) + "." + (ImageFormat(rawValue: imageFormat) ?? .png).fileExtension)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Toggle("Save Retina captures at 1×", isOn: $saveAtOneX)
             }
         }
         .formStyle(.grouped)

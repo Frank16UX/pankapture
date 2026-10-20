@@ -80,6 +80,16 @@ struct MenuBarContent: View {
 
         Divider()
 
+        Button("About Pankapture", systemImage: "info.circle") {
+            NSApp.activate()
+            NSApp.orderFrontStandardAboutPanel(options: [
+                .credits: NSAttributedString(
+                    string: "Screenshots, annotation, and screen recording for macOS.\nEverything stays on your Mac.",
+                    attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]
+                ),
+            ])
+        }
+
         SettingsLink {
             Label("Settings…", systemImage: "gearshape")
         }

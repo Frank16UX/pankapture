@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         coordinator.start()
         CaptureNotifier.shared.configure()
+        OnboardingWindow.showIfNeeded()
 
         if Permissions.status(.screenRecording) != .granted {
             Log.permissions.notice("Screen Recording not granted yet; first capture will prompt.")

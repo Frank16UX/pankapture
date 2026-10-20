@@ -9,6 +9,12 @@ public enum PreferenceKey {
     public static let copyToClipboardAfterCapture = "output.copyAfterCapture"
     public static let saveAfterCapture = "output.saveAfterCapture"
     public static let playSounds = "general.playSounds"
+    /// Set once the first-run welcome has been completed (GL-7).
+    public static let onboardingCompleted = "general.onboardingCompleted"
+    /// File name prefix for captures ("Pankapture 2026-10-19 at 14.13.45.png").
+    public static let fileNamePrefix = "output.fileNamePrefix"
+    /// Downscale Retina captures to 1 pixel per point when saving and copying (GL-8).
+    public static let saveAtOneX = "output.saveAtOneX"
     /// Post a notification after each capture (saved / copied), with Open and Show in Finder.
     public static let showNotifications = "general.showNotifications"
     /// Lets `pankapture://` URLs run captures that finish without user interaction.
@@ -106,6 +112,8 @@ public enum Preferences {
             PreferenceKey.saveAfterCapture: true,
             PreferenceKey.playSounds: true,
             PreferenceKey.showNotifications: true,
+            PreferenceKey.fileNamePrefix: "Pankapture",
+            PreferenceKey.saveAtOneX: false,
             PreferenceKey.allowsURLAutomation: false,
             PreferenceKey.showThumbnail: true,
             PreferenceKey.thumbnailPosition: "right",
@@ -149,6 +157,12 @@ public enum Preferences {
     public static func saveDirectory(in defaults: UserDefaults = .standard) -> URL {
         let path = defaults.string(forKey: PreferenceKey.saveDirectory) ?? defaultSaveDirectory.path
         return URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
+    }
+
+    /// The file namer configured by the user (GL-8).
+    public static func fileNamer(in defaults: UserDefaults = .standard) -> CaptureFileNamer {
+        let prefix = defaults.string(forKey: PreferenceKey.fileNamePrefix)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return CaptureFileNamer(prefix: prefix.isEmpty ? "Pankapture" : prefix)
     }
 
     public static func imageFormat(in defaults: UserDefaults = .standard) -> ImageFormat {

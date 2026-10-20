@@ -259,18 +259,18 @@ final class CaptureCoordinator {
     private func apply(_ action: OutputAction, to capture: Capture) {
         switch action {
         case .copy:
-            OutputService.copy(capture.image)
+            OutputService.copy(capture.image, scale: capture.scale)
             OutputService.playCaptureSound()
             CaptureNotifier.shared.notify(savedURL: nil, copied: true, image: capture.image)
             Task { await record(capture, exportedURL: nil) }
         case .save:
-            let url = OutputService.save(capture.image)
+            let url = OutputService.save(capture.image, scale: capture.scale)
             if let url { lastCaptureURL = url }
             OutputService.playCaptureSound()
             CaptureNotifier.shared.notify(savedURL: url, copied: false, image: capture.image)
             Task { await record(capture, exportedURL: url) }
         case .saveAs:
-            let url = OutputService.saveAs(capture.image)
+            let url = OutputService.saveAs(capture.image, scale: capture.scale)
             if let url {
                 lastCaptureURL = url
                 CaptureNotifier.shared.notify(savedURL: url, copied: false, image: capture.image)
@@ -299,11 +299,11 @@ final class CaptureCoordinator {
         let defaults = UserDefaults.standard
         let copies = defaults.bool(forKey: PreferenceKey.copyToClipboardAfterCapture)
         if copies {
-            OutputService.copy(capture.image)
+            OutputService.copy(capture.image, scale: capture.scale)
         }
         var savedURL: URL?
         if defaults.bool(forKey: PreferenceKey.saveAfterCapture) {
-            savedURL = OutputService.save(capture.image)
+            savedURL = OutputService.save(capture.image, scale: capture.scale)
             if let savedURL { lastCaptureURL = savedURL }
         }
         OutputService.playCaptureSound()
@@ -450,10 +450,10 @@ final class CaptureCoordinator {
         let capture = Capture(image: image, original: image, annotations: AnnotationDocument(), scale: scale, screenRect: nil)
         switch action {
         case .copy:
-            OutputService.copy(image)
+            OutputService.copy(image, scale: scale)
             CaptureNotifier.shared.notify(savedURL: nil, copied: true, image: image)
         case .save:
-            if let url = OutputService.save(image) {
+            if let url = OutputService.save(image, scale: scale) {
                 lastCaptureURL = url
                 CaptureNotifier.shared.notify(savedURL: url, copied: false, image: image)
             }
@@ -465,15 +465,15 @@ final class CaptureCoordinator {
     private func handleThumbnail(_ action: ThumbnailAction, item: QuickAccessItem) {
         let quickAccess = QuickAccessController.shared
         switch (action, item.content) {
-        case let (.copy, .image(image, _)):
-            OutputService.copy(image)
+        case let (.copy, .image(image, scale)):
+            OutputService.copy(image, scale: scale)
             quickAccess.dismiss(item)
         case let (.copy, .video(url, _)):
             NSPasteboard.general.clearContents()
             NSPasteboard.general.writeObjects([url as NSURL])
             quickAccess.dismiss(item)
-        case let (.save, .image(image, _)):
-            guard let url = OutputService.save(image) else { return }
+        case let (.save, .image(image, scale)):
+            guard let url = OutputService.save(image, scale: scale) else { return }
             item.fileURL = url
             lastCaptureURL = url
             if let id = item.libraryID { Task { await library?.setExportURL(url, for: id) } }
