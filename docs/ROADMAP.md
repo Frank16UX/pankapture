@@ -11,7 +11,7 @@ The project skeleton plus proof that the risky platform pieces work.
 - [x] SwiftPM package with modules `AppCore`, `Capture`, `Annotation`, `DesignSystem`, plus the app shell
 - [x] `.app` bundling + signing script, Info.plist, entitlements (hardened runtime)
 - [x] Stable local signing identity script (`make cert`)
-- [x] Menu bar app with no Dock icon (GL-1)
+- [x] Menu bar app, single instance, Dock icon only while a standard window is open (GL-1)
 - [x] Global hotkeys via Carbon; ⇧⌘X registered by default (GL-2)
 - [x] Settings: Appearance System/Light/Dark (GL-4), launch at login (GL-5), output basics, permissions panel (GL-6), read-only shortcuts list
 - [x] ScreenCaptureKit display snapshots, excluding the app's own windows

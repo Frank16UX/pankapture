@@ -63,6 +63,10 @@ Short ADRs. If a decision changes, update it here; don't delete it.
 
 **ADR-19: `pankapture://` runs only interactive commands by default.** Any web page can open a custom URL, so URLs may open the overlay (which needs the user to finish the capture) but can't capture silently unless the user enables URL automation.
 
+**ADR-20: Distribute as a GitHub release DMG, signed with the ADR-8 identity, not notarized.** `make release` builds `Pankapture.dmg` locally and attaches it to a GitHub release; `scripts/install.sh` (curl | bash) installs the latest one into `/Applications`. Every release is signed with the same "Pankapture Development" identity, so the designated requirement stays the same and users keep their privacy grants across updates; the release script refuses to publish an ad-hoc build. Without a Developer ID and notarization, Gatekeeper blocks a browser-downloaded DMG until the user clicks "Open Anyway". curl downloads aren't quarantined, which is why the Terminal installer is the primary path. Releases are built locally rather than in CI because CI would need the signing identity as a secret and an image with the current Xcode. Switching to a Developer ID later changes the signature, so users would re-grant permissions once.
+
+**ADR-21: Dock icon only while a standard window is open; one instance.** The app runs as an accessory (menu bar only) and `DockPresence` switches it to a regular app while any titled, non-panel window is visible or minimized: Settings, the image and video editors, history, and the welcome window. Accessory apps open windows behind other apps, and those windows don't appear in Cmd-Tab or the Dock, so they were easy to lose. Panels (overlay, HUDs, thumbnails, pins, recording options) never show the Dock icon. Settings opens through `SettingsWindow.show()`, which shows the Dock icon and activates the app before calling SwiftUI's `openSettings` action. That action is captured from the menu bar label, which exists for the whole session. A second launch from another location (a dev build next to the installed app) would register the same global hot keys, so it yields activation to the running instance, asks it to show Settings over a distributed notification, and exits before creating any scene.
+
 ## 3. Module map
 
 ```
@@ -175,6 +179,8 @@ make cert   # once per machine: stable self-signed identity (see ADR-8)
 make test   # unit tests
 make run    # release build → build/Pankapture.app → launch
 make logs   # stream os_log for the app
+make dmg    # release .app → build/Pankapture.dmg
+make release  # test + DMG + GitHub release (see ADR-20)
 ```
 
 ### Toolchain notes (important)

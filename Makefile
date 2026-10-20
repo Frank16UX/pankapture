@@ -7,7 +7,7 @@ CLT := /Library/Developer/CommandLineTools
 # plugin; point at it explicitly. Not needed (and skipped) once Xcode is selected.
 TEST_FLAGS := $(shell [ "$$(xcode-select -p)" = "$(CLT)" ] && echo "-Xswiftc -plugin-path -Xswiftc $(CLT)/usr/lib/swift/host/plugins/testing")
 
-.PHONY: help build test app debug-app run cert icon logs clean
+.PHONY: help build test app debug-app run dmg release cert icon logs clean
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  \033[36m%-10s\033[0m %s\n", $$1, $$2}'
@@ -27,6 +27,12 @@ debug-app: ## Build debug .app into build/
 run: app ## Build and (re)launch the app
 	-pkill -x Pankapture
 	open "$(APP)"
+
+dmg: ## Build release .app and package build/Pankapture.dmg
+	bash scripts/package-dmg.sh
+
+release: test ## Publish a GitHub release with the DMG (version from Info.plist)
+	bash scripts/release.sh
 
 cert: ## Create the local signing identity (once per machine)
 	bash scripts/create-dev-cert.sh

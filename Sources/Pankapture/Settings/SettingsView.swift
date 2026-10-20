@@ -30,9 +30,5 @@ struct SettingsView: View {
         .scenePadding()
         .frame(width: 520)
         .frame(minHeight: 380)
-        .onAppear {
-            // Accessory apps don't activate on their own; bring Settings forward.
-            NSApp.activate()
-        }
     }
 }

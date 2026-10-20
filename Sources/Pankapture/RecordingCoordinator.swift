@@ -125,15 +125,21 @@ final class RecordingCoordinator {
 /// Menu bar icon: the viewfinder, or a red dot with the elapsed time while recording.
 struct MenuBarLabel: View {
     @Environment(CaptureCoordinator.self) private var coordinator
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let recorder = coordinator.recording.recorder
-        if recorder.state.isActive {
-            Label(recorder.formattedElapsed, systemImage: recorder.state == .paused ? "pause.circle.fill" : "record.circle.fill")
-                .labelStyle(.titleAndIcon)
-                .monospacedDigit()
-        } else {
-            Image(systemName: "viewfinder")
+        Group {
+            if recorder.state.isActive {
+                Label(recorder.formattedElapsed, systemImage: recorder.state == .paused ? "pause.circle.fill" : "record.circle.fill")
+                    .labelStyle(.titleAndIcon)
+                    .monospacedDigit()
+            } else {
+                Image(systemName: "viewfinder")
+            }
         }
+        // The label lives for the whole session, so it hands the Settings
+        // action to AppKit code (menu, reopen, second-instance hand-off).
+        .onAppear { SettingsWindow.register(openSettings) }
     }
 }

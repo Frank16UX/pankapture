@@ -6,12 +6,24 @@ Apple Silicon · macOS 15+ · Swift 6 · no dependencies · fully offline.
 
 > **Status:** v1 feature-complete: area/window/fullscreen/scrolling/text capture with inline annotation, full editor with backgrounds, pins, quick-access thumbnails, screen recording with system audio + mic (webcam, clicks, keystrokes), video editor, and searchable history. Manual QA and the performance pass are tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## Quick start
+## Install
+
+No Xcode needed. Paste this in Terminal (installs or updates to the latest release):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Frank16UX/pankapture/main/scripts/install.sh | bash
+```
+
+Or download **Pankapture.dmg** from [Releases](https://github.com/Frank16UX/pankapture/releases/latest) and drag the app to Applications. The app isn't notarized by Apple, so the first launch from the DMG is blocked: open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** (or run `xattr -dr com.apple.quarantine /Applications/Pankapture.app`). The Terminal installer doesn't need this step.
+
+## Build from source
 
 ```bash
 make cert   # once per machine: creates a stable local signing identity
 make run    # builds build/Pankapture.app and launches it
 ```
+
+## First run
 
 1. The viewfinder icon appears in the menu bar and a welcome window explains the basics.
 2. Press **⇧⌘X**, drag an area, annotate with the tools bar, then **↩** (copy + save per Settings), **⌘C**, or **⌘S**. macOS asks for **Screen & System Audio Recording** the first time.
@@ -38,6 +50,8 @@ make run    # builds build/Pankapture.app and launches it
 | `make test` | Unit tests (Swift Testing) |
 | `make app` | Release `.app` into `build/` |
 | `make run` | Build + (re)launch |
+| `make dmg` | Release `.app` packaged as `build/Pankapture.dmg` |
+| `make release` | Test, build the DMG, and publish a GitHub release tagged `v<CFBundleShortVersionString>` |
 | `make cert` | Create the "Pankapture Development" signing identity |
 | `make icon` | Regenerate the app icon |
 | `make logs` | Stream the app's logs |
@@ -46,7 +60,7 @@ make run    # builds build/Pankapture.app and launches it
 ## Requirements
 
 - Apple Silicon Mac, macOS 15 or later.
-- **Xcode** selected as the developer toolchain (`sudo xcode-select -s /Applications/Xcode.app`). See [ARCHITECTURE §9](docs/ARCHITECTURE.md#9-build-signing-toolchain).
+- To build from source: **Xcode** selected as the developer toolchain (`sudo xcode-select -s /Applications/Xcode.app`). See [ARCHITECTURE §9](docs/ARCHITECTURE.md#9-build-signing-toolchain).
 
 ## Project layout
 

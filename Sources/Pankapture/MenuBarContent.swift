@@ -90,8 +90,8 @@ struct MenuBarContent: View {
             ])
         }
 
-        SettingsLink {
-            Label("Settings…", systemImage: "gearshape")
+        Button("Settings…", systemImage: "gearshape") {
+            SettingsWindow.show()
         }
         .keyboardShortcut(",")
 

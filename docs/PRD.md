@@ -6,7 +6,7 @@
 | **Owner** | Franklin Perez |
 | **Last updated** | 2026-10-19 |
 | **Platform** | macOS 15 Sequoia or later, Apple Silicon only |
-| **Distribution** | Personal use: locally built and signed, no App Store, no accounts, no network |
+| **Distribution** | Personal use: GitHub release DMG + one-line Terminal installer, self-signed (not notarized), no App Store, no accounts, no network |
 
 ---
 
@@ -70,7 +70,7 @@ Priority: **Must** = v1 blocker · **Should** = v1 target · **Could** = if time
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| GL-1 | Menu bar app with no Dock icon; the menu lists all capture/record actions with their shortcuts. | Must | M0 ✅ |
+| GL-1 | Menu bar app, single instance; no Dock icon except while a standard window (Settings, editors, history) is open; the menu lists all capture/record actions with their shortcuts. | Must | M0 ✅ |
 | GL-2 | Global shortcuts that work in any app. Defaults: **⇧⌘X → Capture Area**, **⌥⇧⌘X → Record Screen**. All other actions are unassigned by default. | Must | M0 ✅ |
 | GL-3 | Shortcut recorder in Settings: assign, clear, reset to defaults, with conflict detection (warn if another app owns the shortcut). | Must | M1 ✅ |
 | GL-4 | Appearance setting: **System / Light / Dark**, applied app-wide and live. | Must | M0 ✅ |
