@@ -8,7 +8,8 @@ import UniformTypeIdentifiers
 enum OutputService {
     static func copy(_ image: CGImage, scale: CGFloat = 1) {
         do {
-            try ImageOutput.copyToClipboard(prepared(image, scale: scale))
+            let (output, outputScale) = preparedWithScale(image, scale: scale)
+            try ImageOutput.copyToClipboard(output, scale: outputScale)
         } catch {
             Log.output.error("Copy failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -18,8 +19,9 @@ enum OutputService {
     @discardableResult
     static func save(_ image: CGImage, scale: CGFloat = 1) -> URL? {
         do {
-            return try ImageOutput.write(prepared(image, scale: scale), to: Preferences.saveDirectory(),
-                                         format: Preferences.imageFormat(), namer: Preferences.fileNamer())
+            let (output, outputScale) = preparedWithScale(image, scale: scale)
+            return try ImageOutput.write(output, to: Preferences.saveDirectory(), format: Preferences.imageFormat(),
+                                         scale: outputScale, namer: Preferences.fileNamer())
         } catch {
             Log.output.error("Save failed: \(error.localizedDescription, privacy: .public)")
             presentError("Couldn't save the capture", error)
@@ -46,7 +48,8 @@ enum OutputService {
         default: .png
         }
         do {
-            try ImageOutput.encode(prepared(image, scale: scale), as: chosen).write(to: url, options: .atomic)
+            let (output, outputScale) = preparedWithScale(image, scale: scale)
+            try ImageOutput.encode(output, as: chosen, scale: outputScale).write(to: url, options: .atomic)
             return url
         } catch {
             presentError("Couldn't save the capture", error)
@@ -74,6 +77,12 @@ enum OutputService {
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
         operation.run()
+    }
+
+    /// The image to write and its resulting pixels-per-point.
+    static func preparedWithScale(_ image: CGImage, scale: CGFloat) -> (CGImage, CGFloat) {
+        let output = prepared(image, scale: scale)
+        return (output, output.width == image.width ? scale : 1)
     }
 
     /// Applies "save at 1×" (GL-8): Retina captures are halved to one pixel per point.

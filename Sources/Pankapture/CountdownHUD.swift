@@ -1,3 +1,4 @@
+import AppCore
 import AppKit
 import DesignSystem
 import SwiftUI
@@ -7,7 +8,7 @@ import SwiftUI
 enum CountdownHUD {
     private static var panel: NSPanel?
     private static var task: Task<Void, Never>?
-    private static var monitor: Any?
+    private static var escapeToken: HotKeyCenter.Token?
 
     static func run(seconds: Int, then action: @escaping @MainActor () -> Void) {
         cancel()
@@ -28,9 +29,7 @@ enum CountdownHUD {
         hud.orderFrontRegardless()
         panel = hud
 
-        monitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { event in
-            if event.keyCode == 53 { MainActor.assumeIsolated { cancel() } }
-        }
+        escapeToken = HotKeyCenter.shared.registerEscape { cancel() }
 
         task = Task { @MainActor in
             for remaining in stride(from: seconds, to: 0, by: -1) {
@@ -52,8 +51,8 @@ enum CountdownHUD {
     private static func close() {
         panel?.orderOut(nil)
         panel = nil
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
+        if let escapeToken { HotKeyCenter.shared.unregister(escapeToken) }
+        escapeToken = nil
     }
 }
 

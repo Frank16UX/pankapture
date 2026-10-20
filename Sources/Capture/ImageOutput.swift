@@ -9,7 +9,9 @@ public enum ImageOutputError: Error, Sendable {
 
 /// Encoding, saving, and clipboard handling for still captures.
 public enum ImageOutput {
-    public static func encode(_ image: CGImage, as format: ImageFormat, quality: Double = 0.9) throws -> Data {
+    /// - Parameter scale: pixels per point; recorded as DPI (72 × scale) so Retina
+    ///   captures open and paste at their on-screen size, like system screenshots.
+    public static func encode(_ image: CGImage, as format: ImageFormat, quality: Double = 0.9, scale: CGFloat = 1) throws -> Data {
         let type: UTType = switch format {
         case .png: .png
         case .jpeg: .jpeg
@@ -20,7 +22,10 @@ public enum ImageOutput {
         guard let destination = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil) else {
             throw ImageOutputError.encodingFailed
         }
-        var options: [CFString: Any] = [:]
+        var options: [CFString: Any] = [
+            kCGImagePropertyDPIWidth: 72 * scale,
+            kCGImagePropertyDPIHeight: 72 * scale,
+        ]
         if format != .png { options[kCGImageDestinationLossyCompressionQuality] = quality }
         CGImageDestinationAddImage(destination, image, options as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { throw ImageOutputError.encodingFailed }
@@ -33,12 +38,13 @@ public enum ImageOutput {
         _ image: CGImage,
         to directory: URL,
         format: ImageFormat,
+        scale: CGFloat = 1,
         namer: CaptureFileNamer = CaptureFileNamer(),
         date: Date = .now
     ) throws -> URL {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = namer.uniqueURL(in: directory, for: date, fileExtension: format.fileExtension)
-        try encode(image, as: format).write(to: url, options: .atomic)
+        try encode(image, as: format, scale: scale).write(to: url, options: .atomic)
         Log.output.info("Saved \(url.lastPathComponent, privacy: .public)")
         return url
     }
@@ -46,13 +52,15 @@ public enum ImageOutput {
     /// Puts the image on the pasteboard as PNG (lossless, widely accepted) with a
     /// TIFF fallback for older apps.
     @MainActor
-    public static func copyToClipboard(_ image: CGImage) throws {
-        let png = try encode(image, as: .png)
+    public static func copyToClipboard(_ image: CGImage, scale: CGFloat = 1) throws {
+        let png = try encode(image, as: .png, scale: scale)
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         let item = NSPasteboardItem()
         item.setData(png, forType: .png)
-        if let tiff = NSBitmapImageRep(cgImage: image).tiffRepresentation {
+        let rep = NSBitmapImageRep(cgImage: image)
+        rep.size = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
+        if let tiff = rep.tiffRepresentation {
             item.setData(tiff, forType: .tiff)
         }
         pasteboard.writeObjects([item])
@@ -62,11 +70,11 @@ public enum ImageOutput {
 public extension ImageOutput {
     /// Writes a PNG into a private temporary folder (for sharing and dragging),
     /// named like a regular capture so receivers see a meaningful file name.
-    static func writeTemporary(_ image: CGImage, date: Date = .now) throws -> URL {
+    static func writeTemporary(_ image: CGImage, scale: CGFloat = 1, date: Date = .now) throws -> URL {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Pankapture", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let url = CaptureFileNamer().uniqueURL(in: directory, for: date, fileExtension: ImageFormat.png.fileExtension)
-        try encode(image, as: .png).write(to: url, options: .atomic)
+        try encode(image, as: .png, scale: scale).write(to: url, options: .atomic)
         return url
     }
 }

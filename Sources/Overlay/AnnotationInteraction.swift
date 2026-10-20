@@ -39,7 +39,7 @@ final class AnnotationInteraction {
     /// treat the drag as something else (e.g. moving the selection).
     func mouseDown(at point: CGPoint, modifiers: NSEvent.ModifierFlags) -> Bool {
         lastPoint = point
-        if let hit = state.document.hitTest(point) {
+        if let hit = state.document.hitTest(point), canGrab(hit) {
             if state.tool == .text, case .text = hit.shape {
                 beginTextEditing(at: point, existing: hit)
                 return true
@@ -114,6 +114,25 @@ final class AnnotationInteraction {
         mouseDragged(to: lastPoint, modifiers: modifiers)
     }
 
+    /// With a drawing tool active, area-like annotations (blur, pixelate, text,
+    /// steps) are only grabbed when already selected, so you can draw over them.
+    private func canGrab(_ annotation: Annotation) -> Bool {
+        guard let tool = state.tool, annotation.id != state.selectedAnnotationID else { return true }
+        switch annotation.shape {
+        case .freehand, .highlighter, .line, .arrow, .rectangle, .ellipse:
+            return true
+        case .text:
+            return tool == .text
+        case .blur, .pixelate, .counter:
+            return false
+        }
+    }
+
+    /// Whether a click at `point` would grab an annotation (for cursors and double-click).
+    func wouldGrab(at point: CGPoint) -> Bool {
+        state.document.hitTest(point).map(canGrab) ?? false
+    }
+
     // MARK: Keyboard
 
     /// Handles delete, nudge, and single-key tool shortcuts. Returns true if consumed.
@@ -149,7 +168,7 @@ final class AnnotationInteraction {
     // MARK: Cursor
 
     func cursor(at point: CGPoint) -> NSCursor {
-        if state.tool == nil || state.document.hitTest(point) != nil { return .openHand }
+        if state.tool == nil || wouldGrab(at: point) { return .openHand }
         if state.tool == .text { return .iBeam }
         return .crosshair
     }

@@ -35,15 +35,22 @@ public final class ScrollStitcher {
     private var previousSignatures: Signatures?
     private var headerRows = 0
     private var footerRows = 0
+    /// Sticky edges are measured on the first scroll and then kept fixed, so
+    /// every strip is cut against the same boundaries.
+    private var edgesLocked = false
     /// Rows appended so far (pixels), excluding the footer.
     public private(set) var height = 0
-    public let maxHeight: Int
+    /// Upper bound on the stitched image's pixel count (memory safety).
+    public let maxPixels: Int
+    private var width = 0
 
-    public init(maxHeight: Int = 40_000) {
-        self.maxHeight = maxHeight
+    public init(maxPixels: Int = 120_000_000) {
+        self.maxPixels = maxPixels
     }
 
     public var frameCount: Int { strips.count }
+    /// Height limit for the current width.
+    public var maxHeight: Int { width > 0 ? maxPixels / width : .max }
     public var isFull: Bool { height >= maxHeight }
 
     /// Adds a frame captured after scrolling.
@@ -53,31 +60,35 @@ public final class ScrollStitcher {
         guard let previous, let previousSignatures, previous.width == frame.width, previous.height == frame.height else {
             self.previous = frame
             self.previousSignatures = signatures
-            strips = [frame]
+            strips = [Self.copy(frame) ?? frame]
+            width = frame.width
             height = frame.height
             return .first
         }
 
-        let (header, footer) = Self.stickyEdges(previousSignatures, signatures)
+        let (header, footer) = edgesLocked ? (headerRows, footerRows) : Self.stickyEdges(previousSignatures, signatures)
         guard let offset = Self.offset(previous: previousSignatures, next: signatures, header: header, footer: footer) else {
             return .unmatched
         }
         guard offset > 0 else { return .unchanged }
 
-        // First real scroll: drop the footer from what we already have; it's
-        // re-added once at the end.
-        if footerRows == 0, footer > 0, strips.count == 1, let first = strips.first,
-           let trimmed = first.cropping(to: CGRect(x: 0, y: 0, width: first.width, height: first.height - footer)) {
-            strips = [trimmed]
-            height = trimmed.height
+        if !edgesLocked {
+            // First real scroll: fix the sticky edges and drop the footer from the
+            // first frame; it's added back once at the end.
+            edgesLocked = true
+            headerRows = header
+            footerRows = footer
+            if footer > 0, let first = strips.first,
+               let trimmed = Self.copy(first, rect: CGRect(x: 0, y: 0, width: first.width, height: first.height - footer)) {
+                strips = [trimmed]
+                height = trimmed.height
+            }
         }
-        headerRows = max(headerRows, header)
-        footerRows = max(footerRows, footer)
 
-        let newRows = min(offset, frame.height - footerRows - headerRows)
+        let newRows = min(offset, frame.height - footerRows - headerRows, max(0, maxHeight - height))
         guard newRows > 0,
-              let strip = frame.cropping(to: CGRect(x: 0, y: frame.height - footerRows - newRows,
-                                                    width: frame.width, height: newRows)) else { return .unmatched }
+              let strip = Self.copy(frame, rect: CGRect(x: 0, y: frame.height - footerRows - newRows,
+                                                        width: frame.width, height: newRows)) else { return .unmatched }
         strips.append(strip)
         height += newRows
         self.previous = frame
@@ -91,7 +102,7 @@ public final class ScrollStitcher {
         let footer: CGImage? = footerRows > 0
             ? previous?.cropping(to: CGRect(x: 0, y: (previous?.height ?? 0) - footerRows, width: previous?.width ?? 0, height: footerRows))
             : nil
-        let total = min(height + (footer?.height ?? 0), maxHeight + footerRows)
+        let total = height + (footer?.height ?? 0)
         let width = first.width
         guard let context = CGContext(
             data: nil, width: width, height: total, bitsPerComponent: 8, bytesPerRow: 0,
@@ -126,6 +137,19 @@ public final class ScrollStitcher {
             context.draw(strip, in: CGRect(x: 0, y: CGFloat(total) - y - h, width: CGFloat(width), height: h))
             y += h
         }
+        return context.makeImage()
+    }
+
+    /// Copies (part of) a frame into its own bitmap. A plain `cropping(to:)`
+    /// would keep the whole capture-sized frame alive for every strip.
+    static func copy(_ image: CGImage, rect: CGRect? = nil) -> CGImage? {
+        let source = rect.flatMap { image.cropping(to: $0) } ?? image
+        guard let context = CGContext(
+            data: nil, width: source.width, height: source.height, bitsPerComponent: 8, bytesPerRow: 0,
+            space: source.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        ) else { return nil }
+        context.draw(source, in: CGRect(x: 0, y: 0, width: source.width, height: source.height))
         return context.makeImage()
     }
 

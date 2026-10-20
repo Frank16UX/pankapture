@@ -65,7 +65,6 @@ public final class OverlayController: NSObject {
     private weak var activeView: OverlayView?
     private var previousApp: NSRunningApplication?
     private var sharingResult: CaptureResult?
-    private var savedColorPanelLevel: NSWindow.Level?
 
     /// The currently presented overlay, if any (only one at a time).
     public private(set) static var current: OverlayController?
@@ -115,10 +114,6 @@ public final class OverlayController: NSObject {
             views.append(view)
         }
 
-        // Keep the custom color panel above the overlay while it's open.
-        savedColorPanelLevel = NSColorPanel.sharedColorPanelExists ? NSColorPanel.shared.level : nil
-        NSColorPanel.shared.level = NSWindow.Level(rawValue: Self.windowLevel.rawValue + 1)
-
         NSApp.activate()
         let mouse = NSEvent.mouseLocation
         let keyIndex = panels.firstIndex { NSMouseInRect(mouse, $0.frame, false) } ?? 0
@@ -131,6 +126,13 @@ public final class OverlayController: NSObject {
             activeView = views[keyIndex]
         }
         NSCursor.crosshair.set()
+
+        // Displays changed between the snapshot and now: nothing to show.
+        guard !panels.isEmpty else {
+            Log.overlay.error("No screen matches the captured displays")
+            finish(.cancelled(nil), reactivatePrevious: false)
+            return
+        }
 
         if let preselect, let view = views.first(where: { $0.snapshot.displayID == preselect.displayID }) {
             activate(view)
@@ -158,6 +160,7 @@ public final class OverlayController: NSObject {
         activeView = view
         state.resetDocument()
         view.window?.makeKey()
+        view.window?.makeFirstResponder(view)
     }
 
     func pickWindow(_ window: WindowInfo) {
@@ -236,7 +239,7 @@ public final class OverlayController: NSObject {
 
     private func share(_ result: CaptureResult, from view: OverlayView) {
         do {
-            let url = try ImageOutput.writeTemporary(result.image)
+            let url = try ImageOutput.writeTemporary(result.image, scale: result.scale)
             sharingResult = result
             let picker = NSSharingServicePicker(items: [url])
             picker.delegate = self
@@ -255,9 +258,7 @@ public final class OverlayController: NSObject {
         for panel in panels { panel.orderOut(nil) }
         panels.removeAll()
         views.removeAll()
-        if let savedColorPanelLevel {
-            NSColorPanel.shared.level = savedColorPanelLevel
-        } else if NSColorPanel.sharedColorPanelExists {
+        if NSColorPanel.sharedColorPanelExists, NSColorPanel.shared.level.rawValue > Self.windowLevel.rawValue {
             NSColorPanel.shared.orderOut(nil)
             NSColorPanel.shared.level = .floating
         }
@@ -265,7 +266,9 @@ public final class OverlayController: NSObject {
             previousApp.activate(from: .current, options: [])
         }
         Self.current = nil
-        completion(outcome)
+        // Let the event or button action that triggered this unwind first: the
+        // completion may run modal UI (Save As, Print) after the panels are gone.
+        DispatchQueue.main.async { completion(outcome) }
     }
 }
 

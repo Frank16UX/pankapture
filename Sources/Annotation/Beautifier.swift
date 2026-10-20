@@ -124,7 +124,8 @@ public enum Beautifier {
 
         if options.shadow {
             context.saveGState()
-            context.setShadow(offset: CGSize(width: 0, height: 12), blur: 40,
+            // Shadow offset/blur are in device pixels with y up, regardless of the CTM.
+            context.setShadow(offset: CGSize(width: 0, height: -12 * scale), blur: 40 * scale,
                               color: CGColor(gray: 0, alpha: 0.35))
             context.addPath(clip)
             context.setFillColor(CGColor(gray: 1, alpha: 1))

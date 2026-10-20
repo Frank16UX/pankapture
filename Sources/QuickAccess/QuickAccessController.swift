@@ -44,7 +44,7 @@ public final class QuickAccessItem: Identifiable {
         if let fileURL { return fileURL }
         switch content {
         case let .video(url, _): return url
-        case let .image(image, _): return try? ImageOutput.writeTemporary(image)
+        case let .image(image, scale): return try? ImageOutput.writeTemporary(image, scale: scale)
         }
     }
 }

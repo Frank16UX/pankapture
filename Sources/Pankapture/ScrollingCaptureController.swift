@@ -19,7 +19,9 @@ final class ScrollingCaptureController {
     private var frameWindow: NSPanel?
     private var hudWindow: NSPanel?
     private var loop: Task<Void, Never>?
-    private var escMonitor: Any?
+    private var escapeToken: HotKeyCenter.Token?
+    private var isFinishing = false
+    private var isTornDown = false
 
     /// Starts the flow; `onFinish` receives the stitched image and its scale.
     static func start(onFinish: @escaping (CGImage, CGFloat) -> Void) async {
@@ -69,30 +71,35 @@ final class ScrollingCaptureController {
         model.onDone = { [weak self] in self?.finish() }
         model.onCancel = { [weak self] in self?.tearDown() }
         model.onToggleAutoScroll = { [weak self] in self?.toggleAutoScroll() }
-        escMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 { MainActor.assumeIsolated { self?.tearDown() } }
-        }
+        escapeToken = HotKeyCenter.shared.registerEscape { [weak self] in self?.tearDown() }
         loop = Task { [weak self] in await self?.captureLoop() }
     }
 
     private func captureLoop() async {
         var unchangedStreak = 0
-        while !Task.isCancelled {
+        var unmatchedStreak = 0
+        while !Task.isCancelled, !isFinishing {
             if let frame = try? await grabber.capture() {
                 let result = await session.add(frame)
                 switch result {
                 case .first, .appended:
                     unchangedStreak = 0
+                    unmatchedStreak = 0
                     model.preview = await session.preview(maxWidth: 360)
                     model.height = await session.height
                     if await session.isFull { finish(); return }
                 case .unchanged:
                     unchangedStreak += 1
                 case .unmatched:
-                    break
+                    unmatchedStreak += 1
                 }
             }
 
+            if model.isAutoScrolling, unmatchedStreak >= 8 {
+                // Animated or changing content: stop scrolling and let the user decide.
+                model.isAutoScrolling = false
+                model.message = "The content keeps changing, so automatic scrolling stopped. Scroll by hand or press Done."
+            }
             if model.isAutoScrolling {
                 if unchangedStreak >= 4 {
                     // Reached the end of the content.
@@ -127,21 +134,33 @@ final class ScrollingCaptureController {
     }
 
     private func finish() {
+        guard !isFinishing, !isTornDown else { return }
+        isFinishing = true
+        model.isFinishing = true
         loop?.cancel()
         Task {
             let image = await session.makeImage()
             let scale = grabber.scale
+            // Cancelled (Esc / Cancel) while the final image was being assembled.
+            guard !isTornDown else { return }
             tearDown()
-            if let image { onFinish(image, scale) }
+            if let image {
+                onFinish(image, scale)
+            } else {
+                OutputService.presentError("Couldn't assemble the scrolling capture",
+                                           CocoaError(.fileWriteOutOfSpace))
+            }
         }
     }
 
     private func tearDown() {
+        guard !isTornDown else { return }
+        isTornDown = true
         loop?.cancel()
         frameWindow?.orderOut(nil)
         hudWindow?.orderOut(nil)
-        if let escMonitor { NSEvent.removeMonitor(escMonitor) }
-        escMonitor = nil
+        if let escapeToken { HotKeyCenter.shared.unregister(escapeToken) }
+        escapeToken = nil
         Self.current = nil
     }
 
@@ -210,6 +229,7 @@ private final class ScrollingCaptureModel {
     var preview: CGImage?
     var height = 0
     var isAutoScrolling = false
+    var isFinishing = false
     var message: String?
     @ObservationIgnored var onDone: (() -> Void)?
     @ObservationIgnored var onCancel: (() -> Void)?
@@ -252,11 +272,10 @@ private struct ScrollingCaptureHUD: View {
 
             HStack {
                 Button("Cancel") { model.onCancel?() }
-                    .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Done") { model.onDone?() }
+                Button(model.isFinishing ? "Saving…" : "Done") { model.onDone?() }
                     .buttonStyle(.borderedProminent)
-                    .disabled(model.preview == nil)
+                    .disabled(model.preview == nil || model.isFinishing)
             }
         }
         .padding(PK.Spacing.m)

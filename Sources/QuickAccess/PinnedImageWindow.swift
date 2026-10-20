@@ -14,8 +14,9 @@ public final class PinController {
     public static let shared = PinController()
 
     private var windows: [PinnedImageWindow] = []
-    /// Set by the app to handle copy/save/edit requests.
-    public var onAction: ((PinAction, CGImage, CGFloat) -> Void)?
+    /// Set by the app to handle copy/save/edit requests. The UUID is the
+    /// history item passed to `pin`, if any.
+    public var onAction: ((PinAction, CGImage, CGFloat, UUID?) -> Void)?
 
     public var hasPins: Bool { !windows.isEmpty }
     public var hasLockedPins: Bool { windows.contains { $0.isLocked } }
@@ -24,7 +25,7 @@ public final class PinController {
 
     /// Pins `image` (pixels at `scale`). `screenFrame` is where it was captured,
     /// in AppKit global coordinates, so the pin appears exactly over the original.
-    public func pin(_ image: CGImage, scale: CGFloat, at screenFrame: CGRect? = nil) {
+    public func pin(_ image: CGImage, scale: CGFloat, at screenFrame: CGRect? = nil, libraryID: UUID? = nil) {
         let size = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
         let frame: CGRect
         if let screenFrame {
@@ -39,6 +40,7 @@ public final class PinController {
                            width: fitted.width, height: fitted.height)
         }
         let window = PinnedImageWindow(image: image, scale: scale, frame: frame, controller: self)
+        window.libraryID = libraryID
         windows.append(window)
         window.orderFrontRegardless()
     }
@@ -62,6 +64,7 @@ public final class PinController {
 final class PinnedImageWindow: NSPanel {
     let image: CGImage
     let scale: CGFloat
+    var libraryID: UUID?
     private unowned let controller: PinController
     private let imageView: PinnedImageView
 
@@ -108,9 +111,9 @@ final class PinnedImageWindow: NSPanel {
         setFrame(newFrame, display: true)
     }
 
-    func copyImage() { controller.onAction?(.copy, image, scale) }
-    func saveImage() { controller.onAction?(.save, image, scale) }
-    func editImage() { controller.onAction?(.edit, image, scale) }
+    func copyImage() { controller.onAction?(.copy, image, scale, libraryID) }
+    func saveImage() { controller.onAction?(.save, image, scale, libraryID) }
+    func editImage() { controller.onAction?(.edit, image, scale, libraryID) }
 
     override func close() {
         super.close()

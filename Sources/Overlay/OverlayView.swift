@@ -180,7 +180,8 @@ final class OverlayView: NSView {
             return
         }
 
-        if event.clickCount == 2, selection.contains(point), state.tool == nil || mode != .annotate {
+        if event.clickCount == 2, selection.contains(point), state.tool == nil || mode != .annotate,
+           state.document.hitTest(point) == nil {
             perform(mode == .annotate ? .done : .confirmPick)
             return
         }

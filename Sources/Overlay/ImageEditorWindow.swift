@@ -32,6 +32,8 @@ public final class ImageEditorWindowController: NSWindowController, NSWindowDele
 
     private let model: ImageEditorModel
     private let onOutput: (EditorOutputAction, EditedImage) -> Void
+    private var sharePicker: NSSharingServicePicker?
+    private var sharingResult: EditedImage?
 
     /// Opens a new editor window.
     /// - Parameter annotations: in image-local points (top-left of `image`).
@@ -107,10 +109,23 @@ public final class ImageEditorWindowController: NSWindowController, NSWindowDele
     /// Share sheet anchored to the toolbar button (called from SwiftUI).
     fileprivate func share(from view: NSView) {
         model.commitEditing()
-        guard let result = model.render(), let url = try? ImageOutput.writeTemporary(result.image) else { return }
+        guard let result = model.render(), let url = try? ImageOutput.writeTemporary(result.image, scale: result.scale) else { return }
         let picker = NSSharingServicePicker(items: [url])
+        picker.delegate = self
+        sharePicker = picker
+        sharingResult = result
         picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
-        onOutput(.shared, result)
+    }
+}
+
+extension ImageEditorWindowController: NSSharingServicePickerDelegate {
+    public nonisolated func sharingServicePicker(_ picker: NSSharingServicePicker, didChoose service: NSSharingService?) {
+        let didChoose = service != nil
+        MainActor.assumeIsolated {
+            if didChoose, let result = sharingResult { onOutput(.shared, result) }
+            sharingResult = nil
+            sharePicker = nil
+        }
     }
 }
 

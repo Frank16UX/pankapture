@@ -42,8 +42,8 @@ final class CaptureCoordinator {
         library?.start()
         registerShortcuts()
 
-        PinController.shared.onAction = { [weak self] action, image, scale in
-            self?.handlePin(action, image: image, scale: scale)
+        PinController.shared.onAction = { [weak self] action, image, scale, libraryID in
+            self?.handlePin(action, image: image, scale: scale, libraryID: libraryID)
         }
         QuickAccessController.shared.onAction = { [weak self] action, item in
             self?.handleThumbnail(action, item: item)
@@ -87,6 +87,7 @@ final class CaptureCoordinator {
         case .captureText:
             Task { await captureText() }
         case .scrollingCapture:
+            rememberSourceApp()
             Task { [weak self] in
                 await ScrollingCaptureController.start { image, scale in
                     Task {
@@ -215,6 +216,7 @@ final class CaptureCoordinator {
         isCapturing = true
         defer { isCapturing = false }
 
+        rememberSourceApp()
         let windows = WindowList.onScreenWindows()
         guard let snapshots = await takeSnapshots() else { return }
         OverlayController.present(snapshots: snapshots, windows: windows, mode: .pick(confirmTitle: nil)) { outcome in
@@ -280,8 +282,10 @@ final class CaptureCoordinator {
             OutputService.print(capture.image, scale: capture.scale)
             Task { await record(capture, exportedURL: nil) }
         case .pin:
-            PinController.shared.pin(capture.image, scale: capture.scale, at: capture.screenRect)
-            Task { await record(capture, exportedURL: nil) }
+            Task {
+                let id = await record(capture, exportedURL: nil)
+                PinController.shared.pin(capture.image, scale: capture.scale, at: capture.screenRect, libraryID: id)
+            }
         case .done:
             Task { await deliverStill(capture, showsThumbnail: false) }
         case .openEditor:
@@ -387,9 +391,12 @@ final class CaptureCoordinator {
             case .shared: .shared
             }
             if session.libraryID == nil {
-                // Record once, then treat later outputs as re-edits of that item.
+                // Record once (even if several outputs fire quickly), then treat
+                // every output as a re-edit of that item.
+                let recording = session.recordTask ?? Task { await self.record(capture, exportedURL: nil) }
+                session.recordTask = recording
                 Task {
-                    session.libraryID = await self.record(capture, exportedURL: nil)
+                    session.libraryID = await recording.value
                     var updated = capture
                     updated.libraryID = session.libraryID
                     self.apply(mapped, to: updated)
@@ -402,6 +409,7 @@ final class CaptureCoordinator {
 
     private final class EditSession {
         var libraryID: UUID?
+        var recordTask: Task<UUID?, Never>?
         init(libraryID: UUID?) { self.libraryID = libraryID }
     }
 
@@ -446,7 +454,7 @@ final class CaptureCoordinator {
 
     // MARK: Pins and thumbnails
 
-    private func handlePin(_ action: PinAction, image: CGImage, scale: CGFloat) {
+    private func handlePin(_ action: PinAction, image: CGImage, scale: CGFloat, libraryID: UUID?) {
         let capture = Capture(image: image, original: image, annotations: AnnotationDocument(), scale: scale, screenRect: nil)
         switch action {
         case .copy:
@@ -458,7 +466,18 @@ final class CaptureCoordinator {
                 CaptureNotifier.shared.notify(savedURL: url, copied: false, image: image)
             }
         case .edit:
-            openEditor(original: capture.original, scale: scale, annotations: capture.annotations, libraryID: nil)
+            // Re-edit the history item (original + live annotations) when we have one.
+            if let libraryID, let library {
+                Task {
+                    if let shot = await library.screenshotForEditing(id: libraryID) {
+                        openEditor(original: shot.original, scale: shot.scale, annotations: shot.annotations, libraryID: libraryID)
+                    } else {
+                        openEditor(original: image, scale: scale, annotations: capture.annotations, libraryID: nil)
+                    }
+                }
+            } else {
+                openEditor(original: capture.original, scale: scale, annotations: capture.annotations, libraryID: nil)
+            }
         }
     }
 

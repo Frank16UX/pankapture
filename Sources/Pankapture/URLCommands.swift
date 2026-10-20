@@ -40,7 +40,7 @@ enum URLCommands {
 
     private static func parseRect(_ value: String) -> CGRect? {
         let numbers = value.split(separator: ",").compactMap { Double($0) }
-        guard numbers.count == 4 else { return nil }
+        guard numbers.count == 4, numbers.allSatisfy(\.isFinite), numbers[2] > 0, numbers[3] > 0 else { return nil }
         return CGRect(x: numbers[0], y: numbers[1], width: numbers[2], height: numbers[3])
     }
 }

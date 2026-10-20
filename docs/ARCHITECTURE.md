@@ -45,6 +45,24 @@ Short ADRs. If a decision changes, update it here; don't delete it.
 
 **ADR-10: No third-party dependencies (for now).** Everything needed is in the SDK. Add a dependency only when it saves weeks, not hours; document it here.
 
+**ADR-11: Overlay = one borderless panel per display, chrome in Core Animation.** Each panel shows its display's frozen frame as GPU layer contents; dimming, selection border, handles, badge, crosshair, and loupe are `CAShapeLayer`/`CATextLayer`s, so mouse moves only update paths. Panels sit just above the status bar level (below pop-up menus, so the share menu and tooltips still show). The annotation canvas is a subview framed to the selection whose bounds origin equals the selection origin: it draws in display-local points and clips for free, and resizing the selection never moves annotations relative to the content (AN-7). Tool interactions (`AnnotationInteraction`) are shared by the overlay and the editor window.
+
+**ADR-12: Capture history is a SwiftData index plus per-capture folders.** The index (`CaptureItem`, versioned schema `LibrarySchemaV1`) lives at `Application Support/Pankapture/Library/Library.store`; each capture has `Library/Captures/<uuid>/` with `original.png`, `annotations.json`, `thumbnail.heic` (512 px). Only the `LibraryStore` model actor touches models; the main-actor `CaptureLibrary` facade and UI work with `CaptureSnapshot` values. Recordings and GIFs aren't copied: they're referenced at their exported location by a plain bookmark and flagged missing when moved to the Trash or deleted.
+
+**ADR-13: Non-destructive re-edit.** A screenshot is stored as the un-annotated original, its `AnnotationDocument` (capture-local points), its scale, and an optional crop. The exported file is a by-product; re-editing loads these, and saving rewrites annotations and thumbnail. Captures closed without saving are kept too (OUT-8, configurable).
+
+**ADR-14: Retention never touches user files.** Retention (forever/30/90 days) and the optional storage cap remove library items oldest first; the cap counts only library-owned bytes. Exported files are moved to the Trash only when the user explicitly asks.
+
+**ADR-15: The recording writer is an actor on the capture queue.** `RecordingWriter`'s executor is the serial queue ScreenCaptureKit delivers samples on, so samples are appended synchronously; the main actor awaits pause/resume/finish. Pause is modelled as host-clock intervals (`PauseTimeline`) and each sample is retimed by its own timestamp, so late frames land on the right side of a pause and output time stays monotonic.
+
+**ADR-16: Audio tracks are identified by order and title.** System audio is the first audio track ("System"), the microphone the second ("Microphone"), each with a title in metadata. A muted mic is written as silence, so tracks never have gaps.
+
+**ADR-17: Own source picker, not the system content picker.** Window and display picking use our hover-to-pick overlay: plain window/display IDs, no system sharing indicator, same look as screenshots. Area selection for recording reuses the screenshot overlay in pick mode.
+
+**ADR-18: Scrolling capture stitches by row signatures.** Each frame becomes a 64-column grayscale row signature; a detailed block near the top of the new frame is located in the previous frame to find the scroll offset, which is then verified over the whole overlap. Rows that stay fixed at the top/bottom are treated as sticky header/footer and kept once. Only downward scrolling is stitched. Auto-scroll posts scroll-wheel events and needs Accessibility; manual scrolling needs nothing.
+
+**ADR-19: `pankapture://` runs only interactive commands by default.** Any web page can open a custom URL, so URLs may open the overlay (which needs the user to finish the capture) but can't capture silently unless the user enables URL automation.
+
 ## 3. Module map
 
 ```
@@ -131,8 +149,11 @@ Three spaces exist and bugs live at their borders. Convert in one place per boun
 | Preferences | `UserDefaults` (keys in `AppCore/Preferences.swift`) | plist |
 | Shortcuts | `UserDefaults["shortcuts.v1"]` | JSON `{action: KeyCombo?}` |
 | Exported captures | user's save folder (default `~/Pictures/Pankapture`) | PNG/JPEG/HEIC/MP4/GIF |
-| Re-editable originals (M6) | `~/Library/Application Support/Pankapture/Captures/<uuid>/` | `original.png` / `recording.mp4`, `annotations.json` (`AnnotationDocument`), `edits.json`, `thumbnail.heic` |
-| History index (M6) | `~/Library/Application Support/Pankapture/Library.store` | SwiftData (`CaptureItem`: id, kind, createdAt, size/duration, exportURL, ocrText, …) |
+| Re-editable originals | `~/Library/Application Support/Pankapture/Library/Captures/<uuid>/` | `original.png`, `annotations.json` (`AnnotationDocument`), `thumbnail.heic` |
+| History index | `~/Library/Application Support/Pankapture/Library/Library.store` | SwiftData (`CaptureItem`: id, kind, createdAt, size/duration, exportURL, ocrText, …) |
+| Recordings in progress | `~/Library/Application Support/Pankapture/Recordings/InProgress/` | fragmented MP4 + manifest JSON (crash recovery) |
+| Recording metadata | `~/Library/Application Support/Pankapture/Sidecars/<video>.json` | `RecordingSidecar` (clicks for auto-zoom) |
+| Video edits | `~/Library/Application Support/Pankapture/Edits/<video>.json` | `VideoEditProject` |
 
 File names use `CaptureFileNamer`: `Pankapture 2026-10-19 at 14.27.05.png`, with ` (2)`, ` (3)` on collision.
 

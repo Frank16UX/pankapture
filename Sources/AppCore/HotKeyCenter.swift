@@ -73,6 +73,14 @@ public final class HotKeyCenter {
         handlers.removeAll()
     }
 
+    /// Temporarily claims Esc system-wide (countdown, scrolling capture), which
+    /// works without Accessibility permission. Unregister the token when done.
+    public func registerEscape(_ handler: @escaping @MainActor () -> Void) -> Token? {
+        let combo = KeyCombo(keyCode: UInt32(kVK_Escape), modifiers: [])
+        if case let .success(token) = register(combo, handler: handler) { return token }
+        return nil
+    }
+
     private func fire(_ id: UInt32) {
         handlers[id]?()
     }

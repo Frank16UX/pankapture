@@ -97,6 +97,12 @@ private struct StylePicker: View {
             }
 
             ColorPicker("Custom color", selection: customColor, supportsOpacity: false)
+                .onAppear {
+                    // Over the capture overlay, the color panel must float above it.
+                    if OverlayController.current != nil {
+                        NSColorPanel.shared.level = NSWindow.Level(rawValue: OverlayController.windowLevel.rawValue + 1)
+                    }
+                }
 
             Picker("Size", selection: sizeBinding) {
                 ForEach(StrokeSize.allCases) { size in
