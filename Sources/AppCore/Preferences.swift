@@ -41,6 +41,41 @@ public enum PreferenceKey {
 
     /// Last area selection, for "Capture Previous Area" (SC-8). JSON `{displayID, rect}`.
     public static let lastSelection = "capture.lastSelection"
+
+    // MARK: Recording
+
+    public static let recordingSystemAudio = "recording.systemAudio"
+    public static let recordingMicrophone = "recording.microphone"
+    /// `AVCaptureDevice.uniqueID`; empty means the system default input.
+    public static let recordingMicrophoneDeviceID = "recording.microphoneDeviceID"
+    public static let recordingCamera = "recording.camera"
+    /// `AVCaptureDevice.uniqueID`; empty means the system default camera.
+    public static let recordingCameraDeviceID = "recording.cameraDeviceID"
+    /// `circle` or `roundedRectangle`.
+    public static let recordingCameraShape = "recording.cameraShape"
+    public static let recordingCameraMirrored = "recording.cameraMirrored"
+    /// Webcam bubble width in points.
+    public static let recordingCameraSize = "recording.cameraSize"
+    /// 30 or 60.
+    public static let recordingFrameRate = "recording.frameRate"
+    /// `h264` or `hevc`.
+    public static let recordingCodec = "recording.codec"
+    /// `low`, `medium`, or `high`.
+    public static let recordingQuality = "recording.quality"
+    /// Seconds: 0, 3, or 5.
+    public static let recordingCountdown = "recording.countdown"
+    public static let recordingShowsCursor = "recording.showsCursor"
+    public static let recordingHighlightClicks = "recording.highlightClicks"
+    /// Named click-ring color (`yellow`, `red`, `blue`, `green`, `white`).
+    public static let recordingClickColor = "recording.clickColor"
+    /// Click-ring diameter in points.
+    public static let recordingClickSize = "recording.clickSize"
+    public static let recordingShowKeystrokes = "recording.showKeystrokes"
+    /// Show every key, not only ⌘/⌃/⌥ combinations.
+    public static let recordingKeystrokesAllKeys = "recording.keystrokesAllKeys"
+    public static let recordingHideDesktopIcons = "recording.hideDesktopIcons"
+    /// `video` (MP4) or `gif` (the app converts the MP4 after recording).
+    public static let recordingOutputKind = "recording.outputKind"
 }
 
 public enum ImageFormat: String, CaseIterable, Sendable, Identifiable {
@@ -80,6 +115,34 @@ public enum Preferences {
             PreferenceKey.fullscreenAllDisplays: false,
             PreferenceKey.captureShowsCursor: false,
             PreferenceKey.captureHidesDesktopIcons: false,
+        ])
+        registerRecordingDefaults(in: defaults)
+    }
+
+    // MARK: Recording
+
+    static func registerRecordingDefaults(in defaults: UserDefaults) {
+        defaults.register(defaults: [
+            PreferenceKey.recordingSystemAudio: true,
+            PreferenceKey.recordingMicrophone: false,
+            PreferenceKey.recordingMicrophoneDeviceID: "",
+            PreferenceKey.recordingCamera: false,
+            PreferenceKey.recordingCameraDeviceID: "",
+            PreferenceKey.recordingCameraShape: "circle",
+            PreferenceKey.recordingCameraMirrored: true,
+            PreferenceKey.recordingCameraSize: 200.0,
+            PreferenceKey.recordingFrameRate: 60,
+            PreferenceKey.recordingCodec: "h264",
+            PreferenceKey.recordingQuality: "medium",
+            PreferenceKey.recordingCountdown: 3,
+            PreferenceKey.recordingShowsCursor: true,
+            PreferenceKey.recordingHighlightClicks: false,
+            PreferenceKey.recordingClickColor: "yellow",
+            PreferenceKey.recordingClickSize: 44.0,
+            PreferenceKey.recordingShowKeystrokes: false,
+            PreferenceKey.recordingKeystrokesAllKeys: false,
+            PreferenceKey.recordingHideDesktopIcons: false,
+            PreferenceKey.recordingOutputKind: "video",
         ])
     }
 

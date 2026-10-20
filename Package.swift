@@ -14,7 +14,7 @@ let package = Package(
         // App shell: lifecycle, menu bar, settings, coordinators. Thin by design.
         .executableTarget(
             name: "Pankapture",
-            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem", "Overlay", "Library", "QuickAccess"]
+            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem", "Overlay", "Library", "QuickAccess", "Recording"]
         ),
 
         // Settings, hot keys, permissions, file naming, logging. No UI.
@@ -35,12 +35,17 @@ let package = Package(
         // Floating windows: quick-access thumbnails and pinned images (M2).
         .target(name: "QuickAccess", dependencies: ["AppCore", "Capture", "DesignSystem"]),
 
+        // Screen recording: SCStream → AVAssetWriter, HUD, countdown, webcam/click/key overlays (M3–M4).
+        .target(name: "Recording", dependencies: ["AppCore", "DesignSystem"]),
+
         // Capture history (M6): SwiftData index, re-editable originals, OCR, library window.
         .target(name: "Library", dependencies: ["AppCore", "Annotation", "DesignSystem"]),
 
         .testTarget(name: "AppCoreTests", dependencies: ["AppCore"]),
         .testTarget(name: "AnnotationTests", dependencies: ["Annotation"]),
         .testTarget(name: "OverlayTests", dependencies: ["Overlay"]),
+        .testTarget(name: "CaptureTests", dependencies: ["Capture"]),
         .testTarget(name: "LibraryTests", dependencies: ["Library", "Annotation", "AppCore"]),
+        .testTarget(name: "RecordingTests", dependencies: ["Recording", "AppCore"]),
     ]
 )
