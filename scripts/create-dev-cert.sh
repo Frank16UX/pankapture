@@ -13,6 +13,9 @@ set -euo pipefail
 
 NAME="Pankapture Development"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+# System LibreSSL, not a Homebrew OpenSSL 3 on PATH: OpenSSL 3 writes .p12 files
+# with AES/PBKDF2, which `security import` rejects ("MAC verification failed").
+OPENSSL=/usr/bin/openssl
 
 if security find-identity -p codesigning 2>/dev/null | grep -q "\"$NAME\""; then
   echo "✓ \"$NAME\" already exists."
@@ -35,11 +38,11 @@ keyUsage         = critical, digitalSignature
 extendedKeyUsage = critical, codeSigning
 EOF
 
-openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+"$OPENSSL" req -x509 -newkey rsa:2048 -nodes -days 3650 \
   -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/cert.cnf" 2>/dev/null
 
 # Throwaway transport password; the identity lives in your login keychain.
-openssl pkcs12 -export -name "$NAME" \
+"$OPENSSL" pkcs12 -export -name "$NAME" \
   -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
   -out "$TMP/identity.p12" -passout pass:pankapture 2>/dev/null
 
