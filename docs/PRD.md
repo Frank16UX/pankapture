@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Draft v1 — foundations in place (M0), awaiting review |
+| **Status** | v1 feature-complete (M0–M6, M7 partly); manual QA and performance pass pending |
 | **Owner** | Franklin Perez |
 | **Last updated** | 2026-10-19 |
 | **Platform** | macOS 15 Sequoia or later, Apple Silicon only |
@@ -72,31 +72,31 @@ Priority: **Must** = v1 blocker · **Should** = v1 target · **Could** = if time
 |---|---|---|---|
 | GL-1 | Menu bar app with no Dock icon; the menu lists all capture/record actions with their shortcuts. | Must | M0 ✅ |
 | GL-2 | Global shortcuts that work in any app. Defaults: **⇧⌘X → Capture Area**, **⌥⇧⌘X → Record Screen**. All other actions are unassigned by default. | Must | M0 ✅ |
-| GL-3 | Shortcut recorder in Settings: assign, clear, reset to defaults, with conflict detection (warn if another app owns the shortcut). | Must | M1 |
+| GL-3 | Shortcut recorder in Settings: assign, clear, reset to defaults, with conflict detection (warn if another app owns the shortcut). | Must | M1 ✅ |
 | GL-4 | Appearance setting: **System / Light / Dark**, applied app-wide and live. | Must | M0 ✅ |
 | GL-5 | Launch at login. | Must | M0 ✅ |
 | GL-6 | Permissions panel showing status and a fix action for Screen Recording (required), Microphone, Camera, and Accessibility. | Must | M0 ✅ |
-| GL-7 | First-run onboarding: explain and request Screen Recording; optional permissions are requested only when a feature first needs them. | Should | M7 |
-| GL-8 | Output settings: save folder (default `~/Pictures/Pankapture`), file name pattern, image format (PNG/JPEG/HEIC), Retina-scale toggle (save at 1×), sounds on/off. | Must | M0 (partial) / M2 |
-| GL-9 | After-capture behavior is configurable: any combination of *copy to clipboard*, *save to folder*, *show quick-access thumbnail*, *open full editor*. | Must | M1–M2 |
+| GL-7 | First-run onboarding: explain and request Screen Recording; optional permissions are requested only when a feature first needs them. | Should | M7 ✅ |
+| GL-8 | Output settings: save folder (default `~/Pictures/Pankapture`), file name pattern, image format (PNG/JPEG/HEIC), Retina-scale toggle (save at 1×), sounds on/off. | Must | M0 / M2 ✅ |
+| GL-9 | After-capture behavior is configurable: any combination of *copy to clipboard*, *save to folder*, *show quick-access thumbnail*, *open full editor*. | Must | M1–M2 ✅ |
 
 ### 5.2 Screenshot capture
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| SC-1 | **Area capture.** The screen freezes on trigger (the capture is a crop of the frozen frame, so what you see is what you get); a crosshair cursor; drag to select; outside the selection is dimmed. | Must | M1 |
-| SC-2 | Live **dimension badge** (W×H in points) and a **magnifier loupe** with pixel grid and color value near the cursor. | Must | M1 |
-| SC-3 | Selection refinement: 8 resize handles, drag to move, arrow keys nudge 1pt (⇧ = 10pt), **⇧ locks aspect ratio**, **⌥ resizes from center**, Space+drag moves while drawing. | Must | M1 |
-| SC-4 | **Window snapping:** hovering highlights the window or UI element under the cursor; click captures it. | Should | M2 |
-| SC-5 | **Multi-display:** the overlay spans every display; the selection works per display; mixed Retina/non-Retina scales handled correctly. | Must | M1 |
-| SC-6 | **Window capture:** pick a window; optional shadow; transparent or solid background; excludes other windows. | Must | M2 |
-| SC-7 | **Fullscreen capture:** the display under the cursor, or all displays. | Must | M2 |
-| SC-8 | **Capture previous area** repeats the last selection rectangle. | Should | M2 |
-| SC-9 | **Self-timer** (3/5/10 s) for capturing menus and hover states. | Should | M2 |
-| SC-10 | Option to include or hide the cursor; option to hide desktop icons during capture. | Could | M2 |
-| SC-11 | **Scrolling capture:** select an area, scroll (auto or manual), and frames are stitched into one tall image with overlap detection; live preview while scrolling. | Must | M2 |
-| SC-12 | **Capture text (OCR):** select an area → recognized text goes to the clipboard; on-device, multi-language, a toast confirms. | Must | M2 |
-| SC-13 | Esc cancels at any point; Pankapture's own UI never appears in captures. | Must | M1 |
+| SC-1 | **Area capture.** The screen freezes on trigger (the capture is a crop of the frozen frame, so what you see is what you get); a crosshair cursor; drag to select; outside the selection is dimmed. | Must | M1 ✅ |
+| SC-2 | Live **dimension badge** (W×H in points) and a **magnifier loupe** with pixel grid and color value near the cursor. | Must | M1 ✅ |
+| SC-3 | Selection refinement: 8 resize handles, drag to move, arrow keys nudge 1pt (⇧ = 10pt), **⇧ locks aspect ratio**, **⌥ resizes from center**, Space+drag moves while drawing. | Must | M1 ✅ |
+| SC-4 | **Window snapping:** hovering highlights the window or UI element under the cursor; click captures it. | Should | M2 ✅ |
+| SC-5 | **Multi-display:** the overlay spans every display; the selection works per display; mixed Retina/non-Retina scales handled correctly. | Must | M1 ✅ |
+| SC-6 | **Window capture:** pick a window; optional shadow; transparent or solid background; excludes other windows. | Must | M2 ✅ |
+| SC-7 | **Fullscreen capture:** the display under the cursor, or all displays. | Must | M2 ✅ |
+| SC-8 | **Capture previous area** repeats the last selection rectangle. | Should | M2 ✅ |
+| SC-9 | **Self-timer** (3/5/10 s) for capturing menus and hover states. | Should | M2 ✅ |
+| SC-10 | Option to include or hide the cursor; option to hide desktop icons during capture. | Could | M2 ✅ |
+| SC-11 | **Scrolling capture:** select an area, scroll (auto or manual), and frames are stitched into one tall image with overlap detection; live preview while scrolling. | Must | M2 ✅ |
+| SC-12 | **Capture text (OCR):** select an area → recognized text goes to the clipboard; on-device, multi-language, a toast confirms. | Must | M2 ✅ |
+| SC-13 | Esc cancels at any point; Pankapture's own UI never appears in captures. | Must | M1 ✅ |
 
 ### 5.3 Inline annotation editor (on the selection)
 
@@ -104,101 +104,101 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| AN-1 | Tools: **pen, line, arrow, rectangle, highlighter (marker), text**. | Must | M1 |
-| AN-2 | Tools: **ellipse, blur, pixelate, numbered steps (auto-increment), crop**. | Must | M2 |
-| AN-3 | Color picker: 8 swatches + custom color; stroke width (S/M/L); text size. | Must | M1 |
-| AN-4 | ⇧ constrains lines/arrows to 45° and rectangles/ellipses to squares/circles. | Must | M1 |
-| AN-5 | Select / move / restyle / delete an existing annotation; **undo / redo** (⌘Z / ⇧⌘Z). | Must | M1 |
-| AN-6 | Single-key tool shortcuts while editing (P pen, L line, A arrow, R rectangle, O ellipse, H highlighter, T text, B blur, X pixelate, N steps). | Must | M1 |
-| AN-7 | The selection can still be resized/moved after annotating (annotations keep their position relative to screen content). | Should | M1 |
-| AN-8 | Tool, color, and width persist between captures. | Must | M1 |
+| AN-1 | Tools: **pen, line, arrow, rectangle, highlighter (marker), text**. | Must | M1 ✅ |
+| AN-2 | Tools: **ellipse, blur, pixelate, numbered steps (auto-increment), crop**. | Must | M2 ✅ |
+| AN-3 | Color picker: 8 swatches + custom color; stroke width (S/M/L); text size. | Must | M1 ✅ |
+| AN-4 | ⇧ constrains lines/arrows to 45° and rectangles/ellipses to squares/circles. | Must | M1 ✅ |
+| AN-5 | Select / move / restyle / delete an existing annotation; **undo / redo** (⌘Z / ⇧⌘Z). | Must | M1 ✅ |
+| AN-6 | Single-key tool shortcuts while editing (P pen, L line, A arrow, R rectangle, O ellipse, H highlighter, T text, B blur, X pixelate, N steps). | Must | M1 ✅ |
+| AN-7 | The selection can still be resized/moved after annotating (annotations keep their position relative to screen content). | Should | M1 ✅ |
+| AN-8 | Tool, color, and width persist between captures. | Must | M1 ✅ |
 
 ### 5.4 Output actions
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| OUT-1 | **Copy** (⌘C) the flattened image to the clipboard (PNG). | Must | M1 |
-| OUT-2 | **Save** (⌘S) to the default folder; **Save As…** (⇧⌘S) picks a location. | Must | M1 |
-| OUT-3 | **Print** (⌘P) through the standard macOS print dialog. | Must | M1 |
-| OUT-4 | **Share** through the macOS share sheet (Messages, Mail, AirDrop, Notes, etc.). | Must | M1 |
-| OUT-5 | **Pin to screen** (see 5.6). | Must | M2 |
-| OUT-6 | **Open in full editor** / **send to quick-access thumbnail** to finish later. | Must | M2 |
-| OUT-7 | **Drag and drop** the capture directly from the thumbnail or editor into any app. | Must | M2 |
-| OUT-8 | Close (Esc) discards the capture; it is still recoverable from history if history keeps unsaved captures (setting). | Should | M6 |
+| OUT-1 | **Copy** (⌘C) the flattened image to the clipboard (PNG). | Must | M1 ✅ |
+| OUT-2 | **Save** (⌘S) to the default folder; **Save As…** (⇧⌘S) picks a location. | Must | M1 ✅ |
+| OUT-3 | **Print** (⌘P) through the standard macOS print dialog. | Must | M1 ✅ |
+| OUT-4 | **Share** through the macOS share sheet (Messages, Mail, AirDrop, Notes, etc.). | Must | M1 ✅ |
+| OUT-5 | **Pin to screen** (see 5.6). | Must | M2 ✅ |
+| OUT-6 | **Open in full editor** / **send to quick-access thumbnail** to finish later. | Must | M2 ✅ |
+| OUT-7 | **Drag and drop** the capture directly from the thumbnail or editor into any app. | Must | M2 ✅ |
+| OUT-8 | Close (Esc) discards the capture; it is still recoverable from history if history keeps unsaved captures (setting). | Should | M6 ✅ |
 
 ### 5.5 Quick-access thumbnail
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| QA-1 | After capture (if enabled), a floating thumbnail slides in at a screen corner (left or right, configurable). | Must | M2 |
-| QA-2 | Hover reveals actions: copy, save, annotate (full editor), pin, delete, close. | Must | M2 |
-| QA-3 | Drag the thumbnail into any app to drop the file. | Must | M2 |
-| QA-4 | Multiple captures stack; auto-dismiss after N seconds (configurable, or never); swipe to dismiss. | Should | M2 |
-| QA-5 | Recordings also land as thumbnails with play-preview on hover and trim/edit actions. | Must | M3 |
+| QA-1 | After capture (if enabled), a floating thumbnail slides in at a screen corner (left or right, configurable). | Must | M2 ✅ |
+| QA-2 | Hover reveals actions: copy, save, annotate (full editor), pin, delete, close. | Must | M2 ✅ |
+| QA-3 | Drag the thumbnail into any app to drop the file. | Must | M2 ✅ |
+| QA-4 | Multiple captures stack; auto-dismiss after N seconds (configurable, or never); swipe to dismiss. | Should | M2 ✅ |
+| QA-5 | Recordings also land as thumbnails with play-preview on hover and trim/edit actions. | Must | M3 ✅ |
 
 ### 5.6 Pinned screenshots
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| PIN-1 | Pin any capture as an always-on-top borderless window. | Must | M2 |
-| PIN-2 | Resize (pinch / scroll / drag corner), adjust opacity, move with drag. | Must | M2 |
-| PIN-3 | Lock mode: click-through, so you can work underneath it. | Should | M2 |
-| PIN-4 | Close with Esc or a hover close button; copy or save from its context menu. | Must | M2 |
+| PIN-1 | Pin any capture as an always-on-top borderless window. | Must | M2 ✅ |
+| PIN-2 | Resize (pinch / scroll / drag corner), adjust opacity, move with drag. | Must | M2 ✅ |
+| PIN-3 | Lock mode: click-through, so you can work underneath it. | Should | M2 ✅ |
+| PIN-4 | Close with Esc or a hover close button; copy or save from its context menu. | Must | M2 ✅ |
 
 ### 5.7 Full annotation editor (window)
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| ED-1 | Window with all inline tools, zoom/pan canvas, and the same shortcuts. | Must | M2 |
-| ED-2 | **Background / beautify:** padding, background (solid, gradient, wallpaper, image), corner radius, shadow, aspect-ratio presets (16:9, 4:3, 1:1, social formats). | Should | M2 |
-| ED-3 | Non-destructive: annotations remain editable when re-opened from history. | Must | M6 |
+| ED-1 | Window with all inline tools, zoom/pan canvas, and the same shortcuts. | Must | M2 ✅ |
+| ED-2 | **Background / beautify:** padding, background (solid, gradient, wallpaper, image), corner radius, shadow, aspect-ratio presets (16:9, 4:3, 1:1, social formats). | Should | M2 ✅ |
+| ED-3 | Non-destructive: annotations remain editable when re-opened from history. | Must | M6 ✅ |
 
 ### 5.8 Screen recording
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| REC-1 | Record an **area**, **window**, or **fullscreen** (any display). | Must | M3 |
-| REC-2 | **System audio** capture (toggle), with Pankapture's own sounds excluded. | Must | M3 |
-| REC-3 | **Microphone** capture with device picker and an input level meter before starting. | Must | M3 |
-| REC-4 | System audio and mic are recorded as **separate audio tracks** (independent volume in the editor) and mixed down on export. | Must | M3 |
-| REC-5 | Output: **MP4 (H.264 or HEVC)**, 30 or 60 fps, quality presets; hardware encoding. | Must | M3 |
-| REC-6 | Recording controls: menu bar timer + stop; floating control bar (stop, pause/resume, restart, cancel, mute mic) that is never captured. | Must | M3 |
-| REC-7 | **Countdown** (0/3/5 s) before recording starts. | Should | M3 |
-| REC-8 | **Pause / resume** produces one continuous file. | Must | M3 |
-| REC-9 | Crash-safe: a recording interrupted by a crash or power loss is recoverable up to the last few seconds. | Must | M3 |
-| REC-10 | **Webcam overlay:** a floating camera bubble (circle / rounded rectangle), resizable, draggable, mirror toggle, camera picker; it appears in the recording. | Must | M4 |
-| REC-11 | **Click highlighting:** a visual ring on mouse clicks (color/size configurable). | Must | M4 |
-| REC-12 | **Keystroke display:** shows pressed shortcuts/keys on screen (modifier combos only or all keys). Requires Accessibility. | Must | M4 |
-| REC-13 | Option to hide desktop icons and to hide the cursor. | Should | M4 |
-| REC-14 | **GIF recording** mode (direct to GIF, size/fps limits). | Should | M4 |
-| REC-15 | Do-not-disturb hint: remind the user to enable Focus before recording (macOS doesn't allow toggling it programmatically). | Could | M4 |
+| REC-1 | Record an **area**, **window**, or **fullscreen** (any display). | Must | M3 ✅ |
+| REC-2 | **System audio** capture (toggle), with Pankapture's own sounds excluded. | Must | M3 ✅ |
+| REC-3 | **Microphone** capture with device picker and an input level meter before starting. | Must | M3 ✅ |
+| REC-4 | System audio and mic are recorded as **separate audio tracks** (independent volume in the editor) and mixed down on export. | Must | M3 ✅ |
+| REC-5 | Output: **MP4 (H.264 or HEVC)**, 30 or 60 fps, quality presets; hardware encoding. | Must | M3 ✅ |
+| REC-6 | Recording controls: menu bar timer + stop; floating control bar (stop, pause/resume, restart, cancel, mute mic) that is never captured. | Must | M3 ✅ |
+| REC-7 | **Countdown** (0/3/5 s) before recording starts. | Should | M3 ✅ |
+| REC-8 | **Pause / resume** produces one continuous file. | Must | M3 ✅ |
+| REC-9 | Crash-safe: a recording interrupted by a crash or power loss is recoverable up to the last few seconds. | Must | M3 ✅ |
+| REC-10 | **Webcam overlay:** a floating camera bubble (circle / rounded rectangle), resizable, draggable, mirror toggle, camera picker; it appears in the recording. | Must | M4 ✅ |
+| REC-11 | **Click highlighting:** a visual ring on mouse clicks (color/size configurable). | Must | M4 ✅ |
+| REC-12 | **Keystroke display:** shows pressed shortcuts/keys on screen (modifier combos only or all keys). Requires Accessibility. | Must | M4 ✅ |
+| REC-13 | Option to hide desktop icons and to hide the cursor. | Should | M4 ✅ |
+| REC-14 | **GIF recording** mode (direct to GIF, size/fps limits). | Should | M4 ✅ |
+| REC-15 | Do-not-disturb hint: remind the user to enable Focus before recording (macOS doesn't allow toggling it programmatically). | Could | M4 ✅ |
 
 ### 5.9 Video editor
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| VE-1 | Opens after recording (configurable) or from history; scrubbable preview with filmstrip timeline and waveform per audio track. | Must | M5 |
-| VE-2 | **Trim** start/end. | Must | M5 |
-| VE-3 | **Cut** one or more middle segments. | Must | M5 |
-| VE-4 | **Zoom & pan segments:** select a time range and a target rectangle; smooth eased zoom in/out. | Must | M5 |
-| VE-5 | Automatic zoom suggestions that follow clicks (from recorded click metadata). | Could | M5 |
-| VE-6 | **Background:** padding, background, rounded corners, shadow (same options as ED-2). | Should | M5 |
-| VE-7 | Per-track **volume and mute** (system / mic). | Must | M5 |
-| VE-8 | **Export MP4** (resolution, fps, quality presets, estimated size) and **GIF** (width, fps, loop). | Must | M5 |
-| VE-9 | Export runs in the background with progress; the editor stays responsive. | Must | M5 |
-| VE-10 | Copy the exported file to the clipboard; drag the exported file out. | Should | M5 |
-| VE-11 | Speed change for segments (e.g. 2× during boring parts). | Could | M5 |
+| VE-1 | Opens after recording (configurable) or from history; scrubbable preview with filmstrip timeline and waveform per audio track. | Must | M5 ✅ |
+| VE-2 | **Trim** start/end. | Must | M5 ✅ |
+| VE-3 | **Cut** one or more middle segments. | Must | M5 ✅ |
+| VE-4 | **Zoom & pan segments:** select a time range and a target rectangle; smooth eased zoom in/out. | Must | M5 ✅ |
+| VE-5 | Automatic zoom suggestions that follow clicks (from recorded click metadata). | Could | M5 ✅ |
+| VE-6 | **Background:** padding, background, rounded corners, shadow (same options as ED-2). | Should | M5 ✅ |
+| VE-7 | Per-track **volume and mute** (system / mic). | Must | M5 ✅ |
+| VE-8 | **Export MP4** (resolution, fps, quality presets, estimated size) and **GIF** (width, fps, loop). | Must | M5 ✅ |
+| VE-9 | Export runs in the background with progress; the editor stays responsive. | Must | M5 ✅ |
+| VE-10 | Copy the exported file to the clipboard; drag the exported file out. | Should | M5 ✅ |
+| VE-11 | Speed change for segments (e.g. 2× during boring parts). | Could | M5 ✅ |
 
 ### 5.10 Capture history (library)
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| HI-1 | Every screenshot and recording is recorded in a local library, with thumbnail, type, date, dimensions/duration, and file location. | Must | M6 |
-| HI-2 | Library window: grid view; filter by type (screenshot / recording / GIF) and date; sort. | Must | M6 |
-| HI-3 | **Search** by OCR text inside screenshots, and by file name. | Must | M6 |
-| HI-4 | Actions: open, re-edit (annotations still editable), copy, reveal in Finder, share, delete. | Must | M6 |
-| HI-5 | Retention: keep forever / 30 / 90 days; optional storage cap. | Should | M6 |
-| HI-6 | Recent captures submenu in the menu bar (last 5–10). | Should | M6 |
+| HI-1 | Every screenshot and recording is recorded in a local library, with thumbnail, type, date, dimensions/duration, and file location. | Must | M6 ✅ |
+| HI-2 | Library window: grid view; filter by type (screenshot / recording / GIF) and date; sort. | Must | M6 ✅ |
+| HI-3 | **Search** by OCR text inside screenshots, and by file name. | Must | M6 ✅ |
+| HI-4 | Actions: open, re-edit (annotations still editable), copy, reveal in Finder, share, delete. | Must | M6 ✅ |
+| HI-5 | Retention: keep forever / 30 / 90 days; optional storage cap. | Should | M6 ✅ |
+| HI-6 | Recent captures submenu in the menu bar (last 5–10). | Should | M6 ✅ |
 
 ## 6. Non-functional requirements
 
