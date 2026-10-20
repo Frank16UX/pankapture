@@ -489,6 +489,18 @@ final class OverlayView: NSView {
     // MARK: - Cursor
 
     private func updateCursor(at point: CGPoint) {
+        // Toolbars and the text field manage their own cursor.
+        let overToolbar = [toolsHost as NSView?, actionsHost].contains { view in
+            guard let view, !view.isHidden else { return false }
+            return view.frame.contains(point)
+        }
+        if overToolbar {
+            NSCursor.arrow.set()
+            return
+        }
+        if annotations.isEditingText, let hit = hitTest(convert(point, to: superview)), hit is NSTextView {
+            return
+        }
         guard let selection else {
             NSCursor.crosshair.set()
             return
