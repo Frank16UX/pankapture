@@ -6,7 +6,11 @@ import Foundation
 ///     pankapture://capture/area[?rect=x,y,w,h]   area capture, optional preselection (display-local points)
 ///     pankapture://capture/previous              previous area
 ///     pankapture://capture/fullscreen
-///     pankapture://settings
+///
+/// Any web page can open a URL like these, so only commands that need the user
+/// to finish them (the interactive overlay) run by default. Commands that would
+/// capture without further interaction require the opt-in
+/// `PreferenceKey.allowsURLAutomation` setting (off by default).
 @MainActor
 enum URLCommands {
     static func handle(_ url: URL, coordinator: CaptureCoordinator) {
@@ -22,11 +26,13 @@ enum URLCommands {
         case "capture/previous":
             coordinator.perform(.capturePreviousArea)
         case "capture/fullscreen":
+            guard UserDefaults.standard.bool(forKey: PreferenceKey.allowsURLAutomation) else {
+                Log.app.notice("Ignored \(path, privacy: .public): URL automation is off")
+                return
+            }
             coordinator.perform(.captureFullscreen)
         default:
-            if let action = ShortcutAction(rawValue: url.host ?? "") {
-                coordinator.perform(action)
-            }
+            Log.app.notice("Unknown URL command \(path, privacy: .public)")
         }
     }
 

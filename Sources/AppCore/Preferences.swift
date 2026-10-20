@@ -11,6 +11,9 @@ public enum PreferenceKey {
     public static let playSounds = "general.playSounds"
     /// Post a notification after each capture (saved / copied), with Open and Show in Finder.
     public static let showNotifications = "general.showNotifications"
+    /// Lets `pankapture://` URLs run captures that finish without user interaction.
+    /// Off by default: any web page can open these URLs.
+    public static let allowsURLAutomation = "general.allowsURLAutomation"
 
     // MARK: Inline editor (AN-8: tool, color, and size persist between captures)
     public static let editorTool = "editor.tool"
@@ -48,6 +51,7 @@ public enum Preferences {
             PreferenceKey.saveAfterCapture: true,
             PreferenceKey.playSounds: true,
             PreferenceKey.showNotifications: true,
+            PreferenceKey.allowsURLAutomation: false,
         ])
     }
 
