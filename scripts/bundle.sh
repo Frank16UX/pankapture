@@ -4,6 +4,11 @@
 #   scripts/bundle.sh                 # release build → build/Pankapture.app
 #   CONFIG=debug scripts/bundle.sh    # debug build
 #   PK_SIGN_IDENTITY="…" scripts/bundle.sh
+#   PK_VERSION=0.2.4 PK_BUILD=57 scripts/bundle.sh   # a release build
+#
+# PK_VERSION stamps CFBundleShortVersionString and marks the bundle as a
+# release build (PKReleaseBuild), which lets it install updates of itself.
+# Local builds keep Info.plist's version and only check for updates.
 #
 # Signing: uses the stable local identity created by scripts/create-dev-cert.sh
 # when present. A stable identity matters — macOS ties Screen Recording and
@@ -25,6 +30,13 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Pankapture" "$APP/Contents/MacOS/Pankapture"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+if [[ -n "${PK_VERSION:-}" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $PK_VERSION" "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :PKReleaseBuild bool true" "$APP/Contents/Info.plist"
+fi
+if [[ -n "${PK_BUILD:-}" ]]; then
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $PK_BUILD" "$APP/Contents/Info.plist"
+fi
 if [[ -f "$ROOT/Resources/AppIcon.icns" ]]; then
   cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
