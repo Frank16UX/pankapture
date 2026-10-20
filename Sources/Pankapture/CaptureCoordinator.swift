@@ -7,6 +7,7 @@ import Observation
 import Overlay
 import QuickAccess
 import Recording
+import VideoEditor
 
 /// Routes user intents (shortcuts, menu items, URLs) to capture flows and owns
 /// post-capture behaviour: output actions, history, thumbnails, pins, editor.
@@ -20,6 +21,8 @@ final class CaptureCoordinator {
 
     /// Screen recording (options panel, controller, recovery).
     let recording = RecordingCoordinator()
+    /// Video editor windows (M5).
+    @ObservationIgnored let videoEditor = VideoEditorWindowController()
 
     /// Capture history (nil only if the store couldn't be opened).
     @ObservationIgnored let library: CaptureLibrary?
@@ -50,6 +53,9 @@ final class CaptureCoordinator {
         }
         recording.controller.onFinish = { [weak self] outcome in
             self?.handleRecording(outcome)
+        }
+        videoEditor.onExportFinished = { [weak self] result in
+            self?.videoExported(result)
         }
         Task { [weak self] in
             await self?.recording.recoverInterruptedRecordings { url in
@@ -413,8 +419,20 @@ final class CaptureCoordinator {
         init(libraryID: UUID?) { self.libraryID = libraryID }
     }
 
+    /// Opens a recording in the video editor (GIFs open in the default app).
     func openRecording(_ url: URL) {
-        NSWorkspace.shared.open(url)
+        if url.pathExtension.lowercased() == "gif" {
+            NSWorkspace.shared.open(url)
+        } else {
+            videoEditor.open(url: url)
+        }
+    }
+
+    private func videoExported(_ result: VideoExportResult) {
+        let kind: CaptureKind = result.format == .gif ? .gif : .recording
+        lastCaptureURL = result.url
+        CaptureNotifier.shared.notifyRecording(savedURL: result.url)
+        Task { await library?.recordRecording(fileURL: result.url, kind: kind, sourceAppName: nil) }
     }
 
     // MARK: Recording results (M3, QA-5)
@@ -426,6 +444,9 @@ final class CaptureCoordinator {
                 convertToGIF(result)
             } else {
                 recordingSaved(at: result.url, videoSize: result.videoSize)
+                if UserDefaults.standard.bool(forKey: PreferenceKey.videoEditorOpenAfterRecording) {
+                    videoEditor.open(url: result.url)
+                }
             }
         case let .interrupted(error, result):
             if let result { recordingSaved(at: result.url, videoSize: result.videoSize) }
@@ -446,10 +467,19 @@ final class CaptureCoordinator {
         Task { await library?.recordRecording(fileURL: url, kind: kind, sourceAppName: nil) }
     }
 
-    /// GIF mode (REC-14) records an MP4 and converts it here.
+    /// GIF mode (REC-14) records an MP4 and converts it here; the MP4 goes to the Trash.
     private func convertToGIF(_ result: RecordingResult) {
-        // Replaced by the video editor's GIF exporter once that module lands.
-        recordingSaved(at: result.url, videoSize: result.videoSize)
+        Task {
+            do {
+                let gif = try await GIFExporter.convert(videoAt: result.url, options: GIFOptions(width: 800, fps: 15))
+                _ = try? await NSWorkspace.shared.recycle([result.url])
+                recordingSaved(at: gif.url, videoSize: gif.pixelSize, kind: .gif)
+            } catch {
+                Log.recording.error("GIF conversion failed: \(error.localizedDescription, privacy: .public)")
+                recordingSaved(at: result.url, videoSize: result.videoSize)
+                OutputService.presentError("Couldn't make a GIF; the MP4 was kept", error)
+            }
+        }
     }
 
     // MARK: Pins and thumbnails

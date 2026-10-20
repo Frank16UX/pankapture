@@ -182,3 +182,16 @@ public extension PreferenceKey {
     /// Library storage cap in GB; 0 means no cap (HI-5). Default: 0.
     static let historyStorageCapGB = "history.storageCapGB"
 }
+
+// MARK: Video editor
+
+public extension PreferenceKey {
+    /// Last-used export options, JSON-encoded `VideoEditor.ExportSettings`.
+    /// Missing = MP4, 1080p, High quality, original frame rate.
+    static let videoEditorExportSettings = "videoEditor.exportSettings"
+    /// Open the video editor when a recording stops (VE-1). Missing = false.
+    static let videoEditorOpenAfterRecording = "videoEditor.openAfterRecording"
+    /// `NSWindow` frame autosave name for the editor window (AppKit stores the
+    /// frame under "NSWindow Frame <name>").
+    static let videoEditorWindowFrame = "videoEditor.window"
+}

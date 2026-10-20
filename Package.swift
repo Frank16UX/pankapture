@@ -14,7 +14,7 @@ let package = Package(
         // App shell: lifecycle, menu bar, settings, coordinators. Thin by design.
         .executableTarget(
             name: "Pankapture",
-            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem", "Overlay", "Library", "QuickAccess", "Recording"]
+            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem", "Overlay", "Library", "QuickAccess", "Recording", "VideoEditor"]
         ),
 
         // Settings, hot keys, permissions, file naming, logging. No UI.
@@ -38,6 +38,10 @@ let package = Package(
         // Screen recording: SCStream → AVAssetWriter, HUD, countdown, webcam/click/key overlays (M3–M4).
         .target(name: "Recording", dependencies: ["AppCore", "DesignSystem"]),
 
+        // Video editor: edit model, timeline math, composition, zoom/background
+        // compositor, MP4/GIF export, editor window (M5).
+        .target(name: "VideoEditor", dependencies: ["AppCore", "DesignSystem"]),
+
         // Capture history (M6): SwiftData index, re-editable originals, OCR, library window.
         .target(name: "Library", dependencies: ["AppCore", "Annotation", "DesignSystem"]),
 
@@ -47,5 +51,6 @@ let package = Package(
         .testTarget(name: "CaptureTests", dependencies: ["Capture"]),
         .testTarget(name: "LibraryTests", dependencies: ["Library", "Annotation", "AppCore"]),
         .testTarget(name: "RecordingTests", dependencies: ["Recording", "AppCore"]),
+        .testTarget(name: "VideoEditorTests", dependencies: ["VideoEditor", "AppCore"]),
     ]
 )

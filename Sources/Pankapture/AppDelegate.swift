@@ -26,6 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.app.info("Pankapture launched")
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        // Flush unsaved video edits.
+        coordinator.videoEditor.closeAll()
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls { URLCommands.handle(url, coordinator: coordinator) }
     }

@@ -12,6 +12,9 @@ struct SettingsView: View {
             Tab("Screenshots", systemImage: "camera.viewfinder") {
                 ScreenshotSettingsView()
             }
+            Tab("Recording", systemImage: "record.circle") {
+                RecordingSettingsView()
+            }
             Tab("Shortcuts", systemImage: "command") {
                 ShortcutsSettingsView()
             }
