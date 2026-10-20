@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator.start()
         handleOpenDocuments()
         CaptureNotifier.shared.configure()
+        UpdateController.shared.isSafeToQuit = { [coordinator] in !coordinator.recording.isRecording }
+        UpdateController.shared.start()
         OnboardingWindow.showIfNeeded()
 
         if Permissions.status(.screenRecording) != .granted {

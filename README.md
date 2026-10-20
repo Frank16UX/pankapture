@@ -60,7 +60,8 @@ Video editor (after a recording: the thumbnail, the notification, or **Edit Last
 | `make app` | Release `.app` into `build/` |
 | `make run` | Build + (re)launch |
 | `make dmg` | Release `.app` packaged as `build/Pankapture.dmg` |
-| `make release` | Test, build the DMG, and publish a GitHub release tagged `v<CFBundleShortVersionString>` |
+| `make release` | Test, build the DMG, and publish a release now (merges to `main` do this automatically) |
+| `make ci-secrets` | Once: give the release workflow the signing identity, as encrypted repo secrets |
 | `make cert` | Create the "Pankapture Development" signing identity |
 | `make icon` | Regenerate the app icon |
 | `make logs` | Stream the app's logs |

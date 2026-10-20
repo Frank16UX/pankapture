@@ -104,6 +104,7 @@ The day this lands, the old screenshot tool can be uninstalled.
 ## M7 · Polish & v1.0
 
 - [x] Onboarding (GL-7), app icon, About
+- [x] Release on every merge to `main`; in-app update check and install (UP-1, ADR-28) (needs QA: first update from one release to the next)
 - [ ] Performance pass against every PRD §6.1 target on an M1 8 GB machine
 - [ ] Accessibility audit (DESIGN §8) on every surface
 - [ ] Two-week "daily driver" success-criteria run (PRD §7)

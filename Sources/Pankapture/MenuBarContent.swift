@@ -107,6 +107,11 @@ struct MenuBarContent: View {
         }
         .keyboardShortcut(",")
 
+        if let update = UpdateController.shared.availableUpdate {
+            Button("Install Pankapture \(update.version.description) and Relaunch", systemImage: "arrow.down.circle") {
+                UpdateController.shared.install(update)
+            }
+        }
         Button("Quit Pankapture", systemImage: "power") {
             NSApp.terminate(nil)
         }

@@ -1,0 +1,83 @@
+# Every merge to main publishes a release (ADR-28): tests, then a DMG signed
+# with the "Pankapture Development" identity, tagged with the next version
+# (scripts/next-version.sh). Pull requests run the tests and build the DMG
+# without publishing. Docs-only changes don't release.
+#
+# Secrets (set once with `make ci-secrets` on the Mac that has the identity):
+#   PK_SIGNING_P12_BASE64    the identity as a base64 .p12
+#   PK_SIGNING_P12_PASSWORD  its password
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["docs/**", "**/*.md"]
+  pull_request:
+    paths-ignore: ["docs/**", "**/*.md"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  # Releases run one at a time, in merge order; PR runs replace older runs.
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.number) || 'release' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  release:
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # tags, for the version
+
+      - name: Select the newest Xcode
+        run: |
+          XCODE="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Test
+        run: swift test
+
+      - name: Import the signing identity
+        if: env.PUBLISH == 'true'
+        env:
+          P12_BASE64: ${{ secrets.PK_SIGNING_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.PK_SIGNING_P12_PASSWORD }}
+        run: |
+          if [[ -z "$P12_BASE64" ]]; then
+            echo "::error::The PK_SIGNING_P12_BASE64 secret is missing. Run 'make ci-secrets' on the Mac with the signing identity."
+            exit 1
+          fi
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$P12_BASE64" | base64 --decode > "$RUNNER_TEMP/identity.p12"
+          security import "$RUNNER_TEMP/identity.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/identity.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          security find-identity -p codesigning "$KEYCHAIN"
+
+      - name: Publish the release
+        if: env.PUBLISH == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/release.sh
+
+      - name: Build the disk image (dry run)
+        if: env.PUBLISH != 'true'
+        run: |
+          PK_VERSION="$(bash scripts/next-version.sh)" bash scripts/package-dmg.sh
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Pankapture.app/Contents/Info.plist
+
+      - name: Remove the signing keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" 2>/dev/null || true

@@ -79,6 +79,7 @@ Priority: **Must** = v1 blocker · **Should** = v1 target · **Could** = if time
 | GL-7 | First-run onboarding: explain and request Screen Recording; optional permissions are requested only when a feature first needs them. | Should | M7 ✅ |
 | GL-8 | Output settings: save folder (default `~/Pictures/Pankapture`), file name pattern, image format (PNG/JPEG/HEIC), Retina-scale toggle (save at 1×), sounds on/off. | Must | M0 / M2 ✅ |
 | GL-9 | After-capture behavior is configurable: any combination of *copy to clipboard*, *save to folder*, *show quick-access thumbnail*, *open full editor*. | Must | M1–M2 ✅ |
+| UP-1 | **Software updates:** Settings ▸ Updates shows the version, checks GitHub Releases (automatically once a day, can be turned off, or Check Now), and installs a newer release in place (download, signature check, relaunch). Every merge to `main` publishes a release. | Must | M7 ✅ |
 
 ### 5.2 Screenshot capture
 
@@ -225,7 +226,7 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 - Graceful handling of display connect/disconnect, sleep, and permission revocation mid-session.
 
 ### 6.3 Privacy and security
-- No network access. No telemetry, crash uploads, or update checks in v1.
+- No telemetry or crash uploads. The only network request is the update check (UP-1): an anonymous request for the latest GitHub release (once a day, can be turned off), plus the download when you install it.
 - Pankapture's own windows are excluded from every capture.
 - OCR and all processing run on device.
 

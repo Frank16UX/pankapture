@@ -14,6 +14,7 @@ public enum Log {
     public static let recording = Logger(subsystem: subsystem, category: "recording")
     public static let editor = Logger(subsystem: subsystem, category: "editor")
     public static let library = Logger(subsystem: subsystem, category: "library")
+    public static let updates = Logger(subsystem: subsystem, category: "updates")
 
     /// Signposts for performance budgets (PRD §6.1). View in Instruments → os_signpost.
     public static let signposter = OSSignposter(subsystem: subsystem, category: .pointsOfInterest)

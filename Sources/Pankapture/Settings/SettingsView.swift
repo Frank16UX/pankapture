@@ -26,6 +26,9 @@ struct SettingsView: View {
             Tab("Permissions", systemImage: "lock.shield") {
                 PermissionsSettingsView()
             }
+            Tab("Updates", systemImage: "arrow.down.circle") {
+                UpdatesSettingsView()
+            }
         }
         .scenePadding()
         .frame(width: 520)

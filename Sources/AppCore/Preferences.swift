@@ -130,6 +130,7 @@ public enum Preferences {
             PreferenceKey.fullscreenAllDisplays: false,
             PreferenceKey.captureShowsCursor: false,
             PreferenceKey.captureHidesDesktopIcons: false,
+            PreferenceKey.updatesCheckAutomatically: true,
         ])
         registerRecordingDefaults(in: defaults)
     }
@@ -177,6 +178,17 @@ public enum Preferences {
     public static func imageFormat(in defaults: UserDefaults = .standard) -> ImageFormat {
         defaults.string(forKey: PreferenceKey.imageFormat).flatMap(ImageFormat.init(rawValue:)) ?? .png
     }
+}
+
+// MARK: Updates
+
+public extension PreferenceKey {
+    /// Look for a newer release at launch and once a day (UP-1). Default: true.
+    static let updatesCheckAutomatically = "updates.checkAutomatically"
+    /// When the last check finished (`Date`).
+    static let updatesLastCheck = "updates.lastCheck"
+    /// A version the user chose to skip ("1.2.3"); not offered again.
+    static let updatesSkippedVersion = "updates.skippedVersion"
 }
 
 // MARK: Library
