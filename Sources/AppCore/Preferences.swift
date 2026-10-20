@@ -9,6 +9,15 @@ public enum PreferenceKey {
     public static let copyToClipboardAfterCapture = "output.copyAfterCapture"
     public static let saveAfterCapture = "output.saveAfterCapture"
     public static let playSounds = "general.playSounds"
+    /// Post a notification after each capture (saved / copied), with Open and Show in Finder.
+    public static let showNotifications = "general.showNotifications"
+
+    // MARK: Inline editor (AN-8: tool, color, and size persist between captures)
+    public static let editorTool = "editor.tool"
+    public static let editorColor = "editor.color"
+    public static let editorSize = "editor.size"
+    /// Last area selection, for "Capture Previous Area" (SC-8). JSON `{displayID, rect}`.
+    public static let lastSelection = "capture.lastSelection"
 }
 
 public enum ImageFormat: String, CaseIterable, Sendable, Identifiable {
@@ -38,6 +47,7 @@ public enum Preferences {
             PreferenceKey.copyToClipboardAfterCapture: true,
             PreferenceKey.saveAfterCapture: true,
             PreferenceKey.playSounds: true,
+            PreferenceKey.showNotifications: true,
         ])
     }
 

@@ -136,3 +136,52 @@ public struct Annotation: Identifiable, Hashable, Codable, Sendable {
         self.style = style
     }
 }
+
+/// Size presets shown in the editor (AN-3). One control drives stroke width,
+/// text size, and numbered-step size so the toolbar stays compact.
+public enum StrokeSize: String, CaseIterable, Codable, Sendable, Identifiable {
+    case small
+    case medium
+    case large
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .small: "Small"
+        case .medium: "Medium"
+        case .large: "Large"
+        }
+    }
+
+    public var lineWidth: Double {
+        switch self {
+        case .small: 2
+        case .medium: 4
+        case .large: 8
+        }
+    }
+
+    public var fontSize: Double {
+        switch self {
+        case .small: 16
+        case .medium: 24
+        case .large: 36
+        }
+    }
+
+    /// Closest preset for a stored line width (used when restyling).
+    public init(lineWidth: Double) {
+        self = Self.allCases.min { abs($0.lineWidth - lineWidth) < abs($1.lineWidth - lineWidth) } ?? .medium
+    }
+}
+
+public extension AnnotationTool {
+    /// Tools that draw by dragging a rectangle or line (as opposed to clicking).
+    var isDragTool: Bool {
+        switch self {
+        case .text, .counter: false
+        default: true
+        }
+    }
+}

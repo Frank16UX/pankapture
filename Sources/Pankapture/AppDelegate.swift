@@ -17,10 +17,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         (stored.flatMap(AppearanceMode.init(rawValue:)) ?? .system).apply()
 
         coordinator.registerShortcuts()
+        CaptureNotifier.shared.configure()
 
         if Permissions.status(.screenRecording) != .granted {
             Log.permissions.notice("Screen Recording not granted yet; first capture will prompt.")
         }
         Log.app.info("Pankapture launched")
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls { URLCommands.handle(url, coordinator: coordinator) }
     }
 }

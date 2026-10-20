@@ -44,6 +44,7 @@ public struct PKToolButtonStyle: ButtonStyle {
         let configuration: Configuration
         let isSelected: Bool
         @State private var isHovering = false
+        @Environment(\.isEnabled) private var isEnabled
 
         var body: some View {
             configuration.label
@@ -56,6 +57,7 @@ public struct PKToolButtonStyle: ButtonStyle {
                         .fill(backgroundStyle)
                 )
                 .contentShape(Rectangle())
+                .opacity(isEnabled ? 1 : 0.35)
                 .scaleEffect(configuration.isPressed ? 0.94 : 1)
                 .animation(PK.Motion.quick, value: configuration.isPressed)
                 .animation(PK.Motion.quick, value: isHovering)
@@ -64,7 +66,7 @@ public struct PKToolButtonStyle: ButtonStyle {
 
         private var backgroundStyle: AnyShapeStyle {
             if isSelected { return AnyShapeStyle(Color.accentColor.opacity(0.18)) }
-            if isHovering || configuration.isPressed { return AnyShapeStyle(.quaternary) }
+            if isEnabled, isHovering || configuration.isPressed { return AnyShapeStyle(.quaternary) }
             return AnyShapeStyle(.clear)
         }
     }

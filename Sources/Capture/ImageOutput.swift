@@ -58,3 +58,15 @@ public enum ImageOutput {
         pasteboard.writeObjects([item])
     }
 }
+
+public extension ImageOutput {
+    /// Writes a PNG into a private temporary folder (for sharing and dragging),
+    /// named like a regular capture so receivers see a meaningful file name.
+    static func writeTemporary(_ image: CGImage, date: Date = .now) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Pankapture", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = CaptureFileNamer().uniqueURL(in: directory, for: date, fileExtension: ImageFormat.png.fileExtension)
+        try encode(image, as: .png).write(to: url, options: .atomic)
+        return url
+    }
+}

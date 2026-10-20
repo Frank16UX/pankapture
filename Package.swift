@@ -3,7 +3,6 @@ import PackageDescription
 
 // Pankapture is built as a SwiftPM executable and wrapped into a signed .app
 // bundle by `scripts/bundle.sh` (see docs/ARCHITECTURE.md → Build & signing).
-// Xcode is optional: everything here builds with the Command Line Tools.
 
 let package = Package(
     name: "Pankapture",
@@ -15,7 +14,7 @@ let package = Package(
         // App shell: lifecycle, menu bar, settings, coordinators. Thin by design.
         .executableTarget(
             name: "Pankapture",
-            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem"]
+            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem", "Overlay"]
         ),
 
         // Settings, hot keys, permissions, file naming, logging. No UI.
@@ -30,7 +29,11 @@ let package = Package(
         // Theme, tokens, and shared native UI building blocks.
         .target(name: "DesignSystem"),
 
+        // Frozen-frame selection overlay, loupe, inline annotation editor (M1).
+        .target(name: "Overlay", dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem"]),
+
         .testTarget(name: "AppCoreTests", dependencies: ["AppCore"]),
         .testTarget(name: "AnnotationTests", dependencies: ["Annotation"]),
+        .testTarget(name: "OverlayTests", dependencies: ["Overlay"]),
     ]
 )

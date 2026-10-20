@@ -6,6 +6,7 @@ import SwiftUI
 struct GeneralSettingsView: View {
     @AppStorage(PreferenceKey.appearance) private var appearance = AppearanceMode.system.rawValue
     @AppStorage(PreferenceKey.playSounds) private var playSounds = true
+    @AppStorage(PreferenceKey.showNotifications) private var showNotifications = true
     @AppStorage(PreferenceKey.saveDirectory) private var saveDirectory = Preferences.defaultSaveDirectory.path
     @AppStorage(PreferenceKey.imageFormat) private var imageFormat = ImageFormat.png.rawValue
     @AppStorage(PreferenceKey.copyToClipboardAfterCapture) private var copyAfterCapture = true
@@ -41,6 +42,7 @@ struct GeneralSettingsView: View {
             Section("After capture") {
                 Toggle("Copy to clipboard", isOn: $copyAfterCapture)
                 Toggle("Save to folder", isOn: $saveAfterCapture)
+                Toggle("Show a notification", isOn: $showNotifications)
             }
 
             Section("Output") {
