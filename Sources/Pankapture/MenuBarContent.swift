@@ -42,6 +42,11 @@ struct MenuBarContent: View {
                     coordinator.recording.showOptions()
                 }
                 .keyboardShortcut(store.combo(for: .recordScreen).flatMap(\.menuShortcut))
+                if coordinator.lastRecordingURL != nil {
+                    Button("Edit Last Recording…", systemImage: "film") {
+                        coordinator.editLastRecording()
+                    }
+                }
             }
         }
 

@@ -66,6 +66,7 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             window.center()
         }
 
+        model.onUnsavedChangesChanged = { [weak window] edited in window?.isDocumentEdited = edited }
         entries[key] = Entry(window: window, model: model, keyMonitor: installKeyMonitor(window: window, model: model))
         show(window)
         Log.editor.info("Editor opened for \(key.lastPathComponent, privacy: .public)")
@@ -76,9 +77,38 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
         entries[url.standardizedFileURL].map { ($0.window, $0.model) }
     }
 
-    /// Closes every editor window (saving edits).
+    /// Closes every editor window. Unsaved edits stay in their drafts; call
+    /// `reviewUnsavedChanges()` first to ask about them.
     public func closeAll() {
         for entry in entries.values { entry.window.close() }
+    }
+
+    /// Asks about each editor with unsaved edits (Save / Don't Save / Cancel),
+    /// e.g. before quitting. Returns `false` if the user cancelled.
+    public func reviewUnsavedChanges() -> Bool {
+        for entry in entries.values where entry.model.hasUnsavedChanges {
+            show(entry.window)
+            switch Self.unsavedChangesAlert(for: entry.model).runModal() {
+            case .alertFirstButtonReturn:
+                guard entry.model.save() else { return false }
+            case .alertSecondButtonReturn:
+                entry.model.discardChanges()
+            default:
+                return false
+            }
+        }
+        return true
+    }
+
+    private static func unsavedChangesAlert(for model: VideoEditorModel) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Save your edits to “\(model.sourceURL.deletingPathExtension().lastPathComponent)”?"
+        alert.informativeText = "Saved edits come back the next time you open this recording. If you don't save, they're lost."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Don't Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.buttons[1].hasDestructiveAction = true
+        return alert
     }
 
     private func show(_ window: NSWindow) {
@@ -87,6 +117,25 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
     }
 
     // MARK: NSWindowDelegate
+
+    /// Closing with unsaved edits asks first (VE-12).
+    public func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let entry = entries.values.first(where: { $0.window === sender }),
+              entry.model.hasUnsavedChanges else { return true }
+        let model = entry.model
+        Self.unsavedChangesAlert(for: model).beginSheetModal(for: sender) { response in
+            switch response {
+            case .alertFirstButtonReturn:
+                if model.save() { sender.close() }
+            case .alertSecondButtonReturn:
+                model.discardChanges()
+                sender.close()
+            default:
+                break
+            }
+        }
+        return false
+    }
 
     public func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow,
@@ -120,6 +169,7 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
         if flags == .command {
             switch key {
             case "z": model.undo()
+            case "s": model.save()
             case "x": model.cutSelection()
             case "e": if model.media != nil { model.isShowingExportSheet = true }
             case "w": window.performClose(nil)
@@ -147,6 +197,7 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             case "k": model.pause()
             case "l": model.playFaster()
             case "z": model.addZoomAtPlayhead()
+            case "s": model.splitAtPlayhead()
             default: return false
             }
         }

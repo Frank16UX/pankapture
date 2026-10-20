@@ -15,6 +15,8 @@ import VideoEditor
 @Observable
 final class CaptureCoordinator {
     private(set) var lastCaptureURL: URL?
+    /// The newest recording (MP4) still on disk, for "Edit Last Recording".
+    private(set) var lastRecordingURL: URL?
     private(set) var lastErrorMessage: String?
     /// Actions whose shortcut couldn't be registered (taken by another app).
     private(set) var shortcutConflicts: Set<ShortcutAction> = []
@@ -56,6 +58,9 @@ final class CaptureCoordinator {
         }
         videoEditor.onExportFinished = { [weak self] result in
             self?.videoExported(result)
+        }
+        CaptureNotifier.shared.onEditRecording = { [weak self] url in
+            self?.openRecording(url)
         }
         Task { [weak self] in
             await self?.recording.recoverInterruptedRecordings { url in
@@ -419,6 +424,16 @@ final class CaptureCoordinator {
         init(libraryID: UUID?) { self.libraryID = libraryID }
     }
 
+    /// Opens the newest recording in the video editor.
+    func editLastRecording() {
+        guard let url = lastRecordingURL else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            lastRecordingURL = nil
+            return
+        }
+        openRecording(url)
+    }
+
     /// Opens a recording in the video editor (GIFs open in the default app).
     func openRecording(_ url: URL) {
         if url.pathExtension.lowercased() == "gif" {
@@ -460,6 +475,7 @@ final class CaptureCoordinator {
 
     private func recordingSaved(at url: URL, videoSize: CGSize, kind: CaptureKind = .recording) {
         lastCaptureURL = url
+        if kind == .recording { lastRecordingURL = url }
         if UserDefaults.standard.bool(forKey: PreferenceKey.showThumbnail) {
             QuickAccessController.shared.show(.video(url, size: videoSize), fileURL: url)
         }

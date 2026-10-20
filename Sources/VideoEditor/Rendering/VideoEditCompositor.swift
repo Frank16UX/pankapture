@@ -11,13 +11,18 @@ final class VideoEditInstruction: NSObject, AVVideoCompositionInstructionProtoco
     let containsTweening = true
     let passthroughTrackID: CMPersistentTrackID = kCMPersistentTrackID_Invalid
     let sourceTrackID: CMPersistentTrackID
+    /// The looped background movie's track, when the fill is a video.
+    let backgroundTrackID: CMPersistentTrackID?
     let renderer: FrameRenderer
 
-    var requiredSourceTrackIDs: [NSValue]? { [NSNumber(value: sourceTrackID)] }
+    var requiredSourceTrackIDs: [NSValue]? {
+        [sourceTrackID, backgroundTrackID].compactMap { $0 }.map { NSNumber(value: $0) }
+    }
 
-    init(timeRange: CMTimeRange, sourceTrackID: CMPersistentTrackID, renderer: FrameRenderer) {
+    init(timeRange: CMTimeRange, sourceTrackID: CMPersistentTrackID, backgroundTrackID: CMPersistentTrackID?, renderer: FrameRenderer) {
         self.timeRange = timeRange
         self.sourceTrackID = sourceTrackID
+        self.backgroundTrackID = backgroundTrackID
         self.renderer = renderer
     }
 }
@@ -69,13 +74,19 @@ final class VideoEditCompositor: NSObject, AVVideoCompositing, Sendable {
 
         let renderer = instruction.renderer
         let backdrop = cachedBackdrop(for: renderer)
+        let background = instruction.backgroundTrackID
+            .flatMap { request.sourceFrame(byTrackID: $0) }
+            .map { CIImage(cvPixelBuffer: $0) }
         var image: CIImage
         if let sourceBuffer = request.sourceFrame(byTrackID: instruction.sourceTrackID) {
             image = renderer.render(
                 source: CIImage(cvPixelBuffer: sourceBuffer),
                 outputTime: request.compositionTime.seconds,
-                backdrop: backdrop
+                backdrop: backdrop,
+                background: background
             )
+        } else if let background {
+            image = backdrop.composited(over: renderer.aspectFill(background, in: renderer.canvasRect))
         } else {
             image = backdrop
         }

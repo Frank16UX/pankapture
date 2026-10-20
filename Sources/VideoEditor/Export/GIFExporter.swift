@@ -24,11 +24,13 @@ public enum GIFExporter {
 
         let fps = options.fps.clamped(to: 1...50)
         let tracks = try await source.loadTracks()
+        let background = await BackgroundVideo.load(for: project)
         let edit = try CompositionBuilder.build(
             source: source,
             tracks: tracks,
             project: project,
-            options: .init(width: options.width, frameRate: fps, includeMutedAudio: false)
+            options: .init(width: options.width, frameRate: fps, includeMutedAudio: false),
+            background: background
         )
         try? FileManager.default.removeItem(at: url)
         let job = try GIFWriterJob(edit: edit, url: url, fps: fps, loopCount: options.loopCount, progress: progress)

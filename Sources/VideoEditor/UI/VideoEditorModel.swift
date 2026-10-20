@@ -24,6 +24,8 @@ final class VideoEditorModel {
     private(set) var media: SourceMedia?
     private(set) var loadError: String?
     private(set) var project: VideoEditProject
+    /// The project as last saved (VE-12); edits beyond it are unsaved.
+    private(set) var savedProject: VideoEditProject
     private(set) var canUndo = false
     private(set) var canRedo = false
 
@@ -53,6 +55,11 @@ final class VideoEditorModel {
     var isShowingExportSheet = false
 
     @ObservationIgnored var onExportFinished: ((VideoExportResult) -> Void)?
+    /// Called when `hasUnsavedChanges` flips (the window's edited dot).
+    @ObservationIgnored var onUnsavedChangesChanged: ((Bool) -> Void)?
+    /// The loaded background movie when the fill is one (rebuilds need its track).
+    @ObservationIgnored private var backgroundVideo: BackgroundVideo?
+    @ObservationIgnored private var backgroundTask: Task<Void, Never>?
     @ObservationIgnored private var history = UndoHistory<VideoEditProject>()
     @ObservationIgnored private var tracks: LoadedTracks?
     @ObservationIgnored private var currentEdit: EditComposition?
@@ -67,7 +74,9 @@ final class VideoEditorModel {
     init(url: URL, store: ProjectStore = ProjectStore()) {
         sourceURL = url
         self.store = store
-        project = VideoEditProject(sourceURL: url, sourceDuration: 0)
+        let empty = VideoEditProject(sourceURL: url, sourceDuration: 0)
+        project = empty
+        savedProject = empty
         exportSettings = Self.loadExportSettings()
         player.actionAtItemEnd = .pause
         timeObserver = player.addPeriodicTimeObserver(
@@ -86,6 +95,7 @@ final class VideoEditorModel {
     var audioTracks: [AudioTrackInfo] { media?.audioTracks ?? [] }
     var clickCount: Int { sidecar?.clicks.count ?? 0 }
     var selectedZoom: ZoomSegment? { project.zooms.first { $0.id == selectedZoomID } }
+    var hasUnsavedChanges: Bool { media != nil && project != savedProject }
 
     /// Preview render plan (for overlay geometry: canvas and video rect).
     var previewPlan: RenderPlan? {
@@ -97,14 +107,23 @@ final class VideoEditorModel {
         do {
             let media = try await SourceMedia.load(url: sourceURL)
             tracks = try await media.loadTracks()
-            self.media = media
-            if var saved = store.load(for: sourceURL, sourceDuration: media.duration) {
-                saved.adapt(toSourceDuration: media.duration)
-                project = saved
+            var saved = store.load(for: sourceURL, sourceDuration: media.duration)
+                ?? VideoEditProject(sourceURL: sourceURL, sourceDuration: media.duration)
+            saved.adapt(toSourceDuration: media.duration)
+            savedProject = saved
+            // Edits left unsaved by a crash come back as unsaved changes.
+            if var draft = store.loadDraft(for: sourceURL, sourceDuration: media.duration) {
+                draft.adapt(toSourceDuration: media.duration)
+                project = draft
             } else {
-                project = VideoEditProject(sourceURL: sourceURL, sourceDuration: media.duration)
+                project = saved
             }
+            self.media = media
+            notifyUnsavedChanges()
             sidecar = RecordingSidecar.load(for: sourceURL)
+            if let url = project.background.fill.videoURL {
+                backgroundVideo = try? await BackgroundVideo.load(url: url)
+            }
             rebuildPlayerItem(seekToSource: project.trim.start)
             startAnalysis(media)
             Log.editor.info("Opened \(self.sourceURL.lastPathComponent, privacy: .public): \(media.duration)s, \(media.audioTracks.count) audio track(s)")
@@ -211,18 +230,66 @@ final class VideoEditorModel {
         if let cut = selectedCut, !updated.cuts.contains(cut) { selectedCut = nil }
 
         let timelineChanged = old.trim != updated.trim || old.cuts != updated.cuts || old.speedSegments != updated.speedSegments
-        if timelineChanged {
+        if old.background.fill.videoURL != updated.background.fill.videoURL {
+            // A background movie is a track of the composition.
+            loadBackgroundVideo(updated.background.fill.videoURL)
+        } else if timelineChanged {
             // Rebuilding the player item on every drag tick is wasteful; the
             // timeline redraws immediately and the preview follows shortly.
             scheduleRebuild(delay: isContinuousEdit ? .milliseconds(200) : .zero)
-        } else if old.background != updated.background || (old.zooms != updated.zooms && selectedZoomID == nil) {
+        } else if old.background != updated.background || old.zoomFillsFrame != updated.zoomFillsFrame
+                    || (old.zooms != updated.zooms && selectedZoomID == nil) {
             // While a zoom is being edited the preview ignores zooms, so
             // dragging its rectangle doesn't need a new video composition.
             updatePreviewVideoComposition()
         }
         if old.trackVolumes != updated.trackVolumes { updatePreviewAudioMix() }
         scheduleSave()
+        notifyUnsavedChanges()
     }
+
+    @ObservationIgnored private var reportedUnsavedChanges = false
+
+    private func notifyUnsavedChanges() {
+        let value = hasUnsavedChanges
+        guard value != reportedUnsavedChanges else { return }
+        reportedUnsavedChanges = value
+        onUnsavedChangesChanged?(value)
+    }
+
+    private func loadBackgroundVideo(_ url: URL?) {
+        backgroundTask?.cancel()
+        guard let url else {
+            backgroundVideo = nil
+            scheduleRebuild(delay: .zero)
+            return
+        }
+        backgroundTask = Task { [weak self] in
+            let video: BackgroundVideo?
+            do {
+                video = try await BackgroundVideo.load(url: url)
+            } catch {
+                Log.editor.error("Background video unavailable: \(error.localizedDescription, privacy: .public)")
+                video = nil
+            }
+            guard !Task.isCancelled, let self else { return }
+            self.backgroundVideo = video
+            self.rebuildPlayerItem(seekToSource: self.playhead)
+        }
+    }
+
+    /// Uses a picture or movie file as the background (copied into the app's library).
+    func setBackgroundMedia(_ url: URL) {
+        do {
+            let fill = try BackgroundLibrary.importFile(url)
+            edit { $0.background.fill = fill }
+        } catch {
+            mediaImportError = error.localizedDescription
+            Log.editor.error("Background import failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    var mediaImportError: String?
 
     private func refreshUndoState() {
         canUndo = history.canUndo
@@ -239,6 +306,25 @@ final class VideoEditorModel {
 
     func removeCut(_ cut: TimeRange) {
         edit { $0.removeCut(cut) }
+    }
+
+    /// Splits the footage at the playhead (VE-3); the parts can then be
+    /// selected and deleted.
+    func splitAtPlayhead() {
+        edit { $0.addSplit(at: playhead) }
+    }
+
+    /// Clicking the filmstrip selects the segment under the pointer once the
+    /// footage is split (so Delete removes it); returns whether it did.
+    @discardableResult
+    func selectSegment(at time: Double) -> Bool {
+        let segments = project.segments
+        guard segments.count > 1, let segment = segments.first(where: { $0.contains(time) }) else {
+            selection = nil
+            return false
+        }
+        selection = segment
+        return true
     }
 
     func setTrimInAtPlayhead() { edit { $0.setTrimStart(playhead) } }
@@ -375,7 +461,9 @@ final class VideoEditorModel {
     private func rebuildPlayerItem(seekToSource source: Double) {
         guard let media, let tracks else { return }
         do {
-            let edit = try CompositionBuilder.build(source: media, tracks: tracks, project: project, options: previewOptions())
+            let edit = try CompositionBuilder.build(
+                source: media, tracks: tracks, project: project, options: previewOptions(), background: backgroundVideo
+            )
             let item = AVPlayerItem(asset: edit.composition)
             item.videoComposition = edit.videoComposition
             item.audioMix = edit.audioMix
@@ -401,12 +489,14 @@ final class VideoEditorModel {
             sourceSize: media.size,
             orientation: media.orientation,
             shortSideCap: options.shortSideCap,
-            zoomEnabled: options.zoomEnabled
+            zoomEnabled: options.zoomEnabled,
+            backgroundOrientation: backgroundVideo?.orientation ?? .up
         )
         item.videoComposition = CompositionBuilder.makeVideoComposition(
             plan: plan,
             source: media,
             videoTrackID: videoTrack.trackID,
+            backgroundTrackID: edit.backgroundTrackID,
             duration: edit.composition.duration,
             frameRate: options.frameRate,
             force: false
@@ -424,26 +514,62 @@ final class VideoEditorModel {
 
     // MARK: Persistence
 
+    /// Autosaves unsaved edits to the draft file, for crash recovery.
     private func scheduleSave() {
         saveTask?.cancel()
         saveTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            self?.saveNow()
+            self?.saveDraftNow()
         }
     }
 
-    func saveNow() {
+    private func saveDraftNow() {
         guard media != nil else { return }
+        guard hasUnsavedChanges else {
+            store.deleteDraft(for: sourceURL)
+            return
+        }
         do {
-            if project.isUnedited {
+            try store.saveDraft(project)
+        } catch {
+            Log.editor.error("Couldn't autosave edits: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Saves the edits as the recording's project (⌘S). Returns `false` if
+    /// writing failed (the error is logged and shown).
+    @discardableResult
+    func save() -> Bool {
+        guard media != nil else { return true }
+        saveTask?.cancel()
+        do {
+            if project == VideoEditProject(sourceURL: project.sourceURL, sourceDuration: project.sourceDuration) {
                 store.delete(for: sourceURL)
             } else {
                 try store.save(project)
             }
+            store.deleteDraft(for: sourceURL)
+            savedProject = project
+            notifyUnsavedChanges()
+            return true
         } catch {
+            saveError = error.localizedDescription
             Log.editor.error("Couldn't save edits: \(error.localizedDescription, privacy: .public)")
+            return false
         }
+    }
+
+    var saveError: String?
+
+    /// Drops unsaved edits (closing with "Don't Save").
+    func discardChanges() {
+        saveTask?.cancel()
+        store.deleteDraft(for: sourceURL)
+        cancelContinuousEdit()
+        if project != savedProject { apply(savedProject) }
+        history = UndoHistory<VideoEditProject>()
+        refreshUndoState()
     }
 
     private static func loadExportSettings() -> ExportSettings {
@@ -582,8 +708,10 @@ final class VideoEditorModel {
     func close() {
         pause()
         saveTask?.cancel()
-        saveNow()
+        // Whatever is still unsaved stays in the draft (offered next time).
+        saveDraftNow()
         rebuildTask?.cancel()
+        backgroundTask?.cancel()
         exportTask?.cancel()
         analysisTasks.forEach { $0.cancel() }
         if let timeObserver { player.removeTimeObserver(timeObserver) }

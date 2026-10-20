@@ -67,13 +67,52 @@ public enum ZoomMath {
     /// The zoom at source `time`. Where zooms overlap, the most zoomed-in
     /// (highest progress) wins; ties go to the later segment.
     public static func transform(at time: Double, zooms: [ZoomSegment]) -> ZoomTransform {
-        var best: (progress: Double, zoom: ZoomSegment)?
+        guard let (zoom, progress) = active(at: time, zooms: zooms) else { return .identity }
+        let target = clampInsideFrame(zoom.rect)
+        return ZoomTransform(visibleRect: interpolate(to: target, progress: progress))
+    }
+
+    /// The zoom in effect at `time` and how far in it is (> 0), or `nil`.
+    public static func active(at time: Double, zooms: [ZoomSegment]) -> (zoom: ZoomSegment, progress: Double)? {
+        var best: (zoom: ZoomSegment, progress: Double)?
         for zoom in zooms {
             let p = progress(of: zoom, at: time)
-            if p > 0, p >= (best?.progress ?? 0) { best = (p, zoom) }
+            if p > 0, p >= (best?.progress ?? 0) { best = (zoom, p) }
         }
-        guard let best else { return .identity }
-        let target = clampInsideFrame(best.zoom.rect)
-        return ZoomTransform(visibleRect: interpolate(to: target, progress: best.progress))
+        return best
+    }
+
+    /// Full-frame zoom: the part of the **canvas** (pixels, bottom-left
+    /// origin) to show at `time`, for a camera that moves over the whole
+    /// frame, background included. At full zoom the zoomed area of the video
+    /// fills the canvas (widened to the canvas' aspect ratio when the shapes
+    /// differ). `nil` when no zoom is active.
+    public static func canvasVisibleRect(at time: Double, zooms: [ZoomSegment], canvas: CGSize, videoRect: CGRect) -> CGRect? {
+        guard canvas.width > 0, canvas.height > 0,
+              let (zoom, progress) = active(at: time, zooms: zooms) else { return nil }
+        let target = clampInsideFrame(zoom.rect) // normalized, top-left origin
+        let zoomed = CGRect(
+            x: videoRect.minX + target.minX * videoRect.width,
+            y: videoRect.minY + (1 - target.maxY) * videoRect.height,
+            width: target.width * videoRect.width,
+            height: target.height * videoRect.height
+        )
+        let aspect = canvas.width / canvas.height
+        let width = min(canvas.width, max(zoomed.width, zoomed.height * aspect))
+        let height = width / aspect
+        let fitted = CGRect(
+            x: (zoomed.midX - width / 2).clamped(to: 0...(canvas.width - width)),
+            y: (zoomed.midY - height / 2).clamped(to: 0...(canvas.height - height)),
+            width: width,
+            height: height
+        )
+        let full = CGRect(origin: .zero, size: canvas)
+        let p = CGFloat(progress.clamped(to: 0...1))
+        return CGRect(
+            x: full.minX + (fitted.minX - full.minX) * p,
+            y: full.minY + (fitted.minY - full.minY) * p,
+            width: full.width + (fitted.width - full.width) * p,
+            height: full.height + (fitted.height - full.height) * p
+        )
     }
 }

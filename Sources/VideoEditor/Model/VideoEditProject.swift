@@ -127,6 +127,12 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
     public var speedSegments: [SpeedSegment]
     public var background: VideoBackground
     public var trackVolumes: TrackVolumes
+    /// Zooms move a camera over the whole frame (background included) until
+    /// the zoomed area fills it, instead of zooming inside the padded video.
+    public var zoomFillsFrame: Bool
+    /// Split points (source seconds), sorted (VE-3). They divide the kept
+    /// footage into segments that can be selected and deleted (cut).
+    public var splits: [Double]
 
     public init(
         sourceURL: URL,
@@ -136,7 +142,9 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         zooms: [ZoomSegment] = [],
         speedSegments: [SpeedSegment] = [],
         background: VideoBackground = VideoBackground(),
-        trackVolumes: TrackVolumes = TrackVolumes()
+        trackVolumes: TrackVolumes = TrackVolumes(),
+        zoomFillsFrame: Bool = false,
+        splits: [Double] = []
     ) {
         self.version = Self.currentVersion
         self.sourceURL = sourceURL
@@ -147,6 +155,29 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         self.speedSegments = speedSegments
         self.background = background
         self.trackVolumes = trackVolumes
+        self.zoomFillsFrame = zoomFillsFrame
+        self.splits = splits
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, sourceURL, sourceDuration, trim, cuts, zooms, speedSegments, background, trackVolumes
+        case zoomFillsFrame, splits
+    }
+
+    /// Keys added after version 1 are optional, so older saved projects open.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        sourceURL = try container.decode(URL.self, forKey: .sourceURL)
+        sourceDuration = try container.decode(Double.self, forKey: .sourceDuration)
+        trim = try container.decode(TimeRange.self, forKey: .trim)
+        cuts = try container.decode([TimeRange].self, forKey: .cuts)
+        zooms = try container.decode([ZoomSegment].self, forKey: .zooms)
+        speedSegments = try container.decode([SpeedSegment].self, forKey: .speedSegments)
+        background = try container.decode(VideoBackground.self, forKey: .background)
+        trackVolumes = try container.decode(TrackVolumes.self, forKey: .trackVolumes)
+        zoomFillsFrame = try container.decodeIfPresent(Bool.self, forKey: .zoomFillsFrame) ?? false
+        splits = try container.decodeIfPresent([Double].self, forKey: .splits) ?? []
     }
 
     public var fullRange: TimeRange { TimeRange(start: 0, end: sourceDuration) }
@@ -202,6 +233,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
             segment.range = range
             return segment
         }
+        splits = splits.filter { $0 > 0 && $0 < duration }
         if Timeline(project: self).outputDuration < Self.minimumKeptDuration { cuts = [] }
     }
 
@@ -221,6 +253,49 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
 
     public mutating func removeCut(_ range: TimeRange) {
         cuts.removeAll { $0 == range }
+    }
+
+    // MARK: Splits
+
+    /// Shortest segment a split may create (seconds).
+    public static let minimumSegmentDuration: Double = 0.05
+
+    /// Splits the kept footage at `time`. Ignored outside the kept footage or
+    /// too close to an existing boundary. Returns whether a split was added.
+    @discardableResult
+    public mutating func addSplit(at time: Double) -> Bool {
+        guard let segment = segments.first(where: { $0.contains(time) }),
+              time - segment.start >= Self.minimumSegmentDuration,
+              segment.end - time >= Self.minimumSegmentDuration else { return false }
+        splits.append(time)
+        splits.sort()
+        return true
+    }
+
+    public mutating func removeSplit(at time: Double) {
+        splits.removeAll { abs($0 - time) < 1e-9 }
+    }
+
+    /// The kept footage (trim minus cuts) divided at the split points, in
+    /// source seconds. Deleting a segment cuts it.
+    public var segments: [TimeRange] {
+        let kept = Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: cuts)
+        return kept.flatMap { range in
+            var pieces: [TimeRange] = []
+            var start = range.start
+            for split in splits where split > range.start && split < range.end {
+                pieces.append(TimeRange(start: start, end: split))
+                start = split
+            }
+            pieces.append(TimeRange(start: start, end: range.end))
+            return pieces
+        }
+    }
+
+    /// Split points that currently divide kept footage (others sit in removed parts).
+    public var visibleSplits: [Double] {
+        let kept = Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: cuts)
+        return splits.filter { split in kept.contains { split > $0.start && split < $0.end } }
     }
 
     // MARK: Zooms

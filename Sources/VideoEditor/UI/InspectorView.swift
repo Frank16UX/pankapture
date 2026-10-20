@@ -1,4 +1,6 @@
+import AVFoundation
 import DesignSystem
+import ImageIO
 import SwiftUI
 
 /// Trailing inspector: background (VE-6), zoom (VE-4/5), speed (VE-11),
@@ -58,16 +60,19 @@ private struct BackgroundSection: View {
     @Bindable var model: VideoEditorModel
 
     private enum Style: String, CaseIterable, Identifiable {
-        case none, color, gradient
+        case none, color, gradient, media
         var id: String { rawValue }
         var title: String {
             switch self {
             case .none: "None"
             case .color: "Color"
             case .gradient: "Gradient"
+            case .media: "Media"
             }
         }
     }
+
+    @State private var isDropTargeted = false
 
     private var background: VideoBackground { model.project.background }
 
@@ -76,15 +81,15 @@ private struct BackgroundSection: View {
             switch background.fill {
             case .none: .none
             case .solid: .color
-            case .gradient: .gradient
+            case .gradient, .customGradient: .gradient
+            case .image, .video: .media
             }
         } set: { style in
-            model.edit { project in
-                switch style {
-                case .none: project.background.fill = .none
-                case .color: project.background.fill = .solid(.white)
-                case .gradient: project.background.fill = .gradient(.ocean)
-                }
+            switch style {
+            case .none: model.edit { $0.background.fill = .none }
+            case .color: model.edit { $0.background.fill = .solid(.white) }
+            case .gradient: model.edit { $0.background.fill = .gradient(.ocean) }
+            case .media: chooseMedia()
             }
         }
     }
@@ -111,16 +116,12 @@ private struct BackgroundSection: View {
                     ), supportsOpacity: false)
                     .labelsHidden()
                 }
-            case let .gradient(current):
-                HStack(spacing: PK.Spacing.s) {
-                    ForEach(GradientPreset.allCases) { preset in
-                        Swatch(fill: AnyShapeStyle(preset.linearGradient), isSelected: preset == current) {
-                            model.edit { $0.background.fill = .gradient(preset) }
-                        }
-                        .help(preset.title)
-                        .accessibilityLabel(preset.title)
-                    }
-                }
+            case .gradient, .customGradient:
+                gradientControls
+            case let .image(url):
+                mediaRow(url: url, isVideo: false)
+            case let .video(url):
+                mediaRow(url: url, isVideo: true)
             case .none:
                 EmptyView()
             }
@@ -144,6 +145,140 @@ private struct BackgroundSection: View {
                 ForEach(OutputAspect.allCases) { Text($0.title).tag($0) }
             }
         }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first(where: { BackgroundLibrary.kind(of: $0) != nil }) else { return false }
+            model.setBackgroundMedia(url)
+            return true
+        } isTargeted: { isDropTargeted = $0 }
+        .alert("Can't Use This File", isPresented: Binding(
+            get: { model.mediaImportError != nil },
+            set: { if !$0 { model.mediaImportError = nil } }
+        )) {
+            Button("OK") { model.mediaImportError = nil }
+        } message: {
+            Text(model.mediaImportError ?? "")
+        }
+    }
+
+    // MARK: Gradient
+
+    @ViewBuilder private var gradientControls: some View {
+        let current = background.fill
+        HStack(spacing: PK.Spacing.s) {
+            ForEach(GradientPreset.allCases) { preset in
+                Swatch(fill: AnyShapeStyle(preset.linearGradient), isSelected: current == .gradient(preset)) {
+                    model.edit { $0.background.fill = .gradient(preset) }
+                }
+                .help(preset.title)
+                .accessibilityLabel(preset.title)
+            }
+        }
+        if let gradient = current.gradient {
+            LabeledContent("Colors") {
+                HStack(spacing: PK.Spacing.s) {
+                    ColorPicker("Start Color", selection: gradientColor(\.start, gradient), supportsOpacity: false)
+                    Image(systemName: "arrow.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    ColorPicker("End Color", selection: gradientColor(\.end, gradient), supportsOpacity: false)
+                }
+                .labelsHidden()
+            }
+            EditSlider(model: model, title: "Angle", value: gradient.angle, range: CustomGradient.angleRange,
+                       format: { "\(Int($0.rounded()))°" }) { project, angle in
+                var updated = gradient
+                updated.angle = angle
+                project.background.fill = .customGradient(updated)
+            }
+        }
+    }
+
+    /// Editing a preset's colors turns it into a custom gradient.
+    private func gradientColor(_ keyPath: WritableKeyPath<CustomGradient, RGBAColor>, _ gradient: CustomGradient) -> Binding<Color> {
+        Binding {
+            gradient[keyPath: keyPath].swiftUIColor
+        } set: { color in
+            var updated = gradient
+            updated[keyPath: keyPath] = RGBAColor(color)
+            model.edit(coalescingKey: "gradientColor") { $0.background.fill = .customGradient(updated) }
+        }
+    }
+
+    // MARK: Media
+
+    private func mediaRow(url: URL, isVideo: Bool) -> some View {
+        HStack(spacing: PK.Spacing.s) {
+            MediaThumbnail(url: url, isVideo: isVideo)
+                .frame(width: 64, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: PK.Radius.control, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: PK.Radius.control, style: .continuous)
+                        .strokeBorder(isDropTargeted ? Color.accentColor : Color(nsColor: .separatorColor), lineWidth: isDropTargeted ? 2 : PK.Metrics.hairline)
+                )
+            VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
+                Text(isVideo ? "Video" : "Image")
+                    .font(.callout)
+                Text(isVideo ? "Muted and looped" : "Scaled to fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Choose…", action: chooseMedia)
+                .controlSize(.small)
+        }
+        .help("Drop a picture or movie here to replace it")
+    }
+
+    /// Picks a picture or movie for the background; cancelling keeps the current fill.
+    private func chooseMedia() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image, .movie]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "Choose a picture or a movie for the background"
+        panel.prompt = "Use as Background"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        model.setBackgroundMedia(url)
+    }
+}
+
+/// A small preview of a background picture or the first frame of a movie.
+private struct MediaThumbnail: View {
+    let url: URL
+    let isVideo: Bool
+    @State private var image: CGImage?
+
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.quaternary)
+            if let image {
+                Image(decorative: image, scale: 1)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            }
+            if isVideo {
+                Image(systemName: "play.fill")
+                    .font(.caption)
+                    .foregroundStyle(.white)
+                    .shadow(radius: 2)
+            }
+        }
+        .task(id: url) { image = await Self.thumbnail(url: url, isVideo: isVideo) }
+        .accessibilityHidden(true)
+    }
+
+    private static func thumbnail(url: URL, isVideo: Bool) async -> CGImage? {
+        if isVideo {
+            let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 256, height: 256)
+            return try? await generator.image(at: .zero).image
+        }
+        let options = [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: 256,
+                       kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options)
     }
 }
 
@@ -173,11 +308,26 @@ private struct ZoomSection: View {
 
     var body: some View {
         Section("Zoom") {
+            Toggle(isOn: Binding(
+                get: { model.project.zoomFillsFrame },
+                set: { value in model.edit { $0.zoomFillsFrame = value } }
+            )) {
+                Text("Zoom Fills the Frame")
+                Text("Zoom past the padding and background until the zoomed area fills the whole video.")
+            }
             if let zoom = model.selectedZoom {
                 EditSlider(model: model, title: "Scale", value: zoom.scale, range: ZoomSegment.scaleRange,
                            format: { String(format: "%.1f×", $0) }) { project, scale in
                     var updated = zoom
                     updated.rect = ZoomSegment.rect(center: zoom.center, scale: scale)
+                    updated.isAutomatic = false
+                    project.updateZoom(updated)
+                }
+                EditSlider(model: model, title: "Duration", value: zoom.range.duration,
+                           range: ZoomSegment.minimumDuration...max(ZoomSegment.minimumDuration + 0.1, model.duration - zoom.range.start),
+                           format: { String(format: "%.1fs", $0) }) { project, duration in
+                    var updated = zoom
+                    updated.range.end = zoom.range.start + duration
                     updated.isAutomatic = false
                     project.updateZoom(updated)
                 }
@@ -187,10 +337,11 @@ private struct ZoomSection: View {
                     updated.easeDuration = ease
                     project.updateZoom(updated)
                 }
-                Text("Drag the rectangle in the preview to choose the zoomed area. Drag the segment's edges in the timeline to change when it happens.")
+                Text("Drag the rectangle in the preview to choose the zoomed area. Drag the zoom's ends in the timeline to change when it starts and stops.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Button("Remove Zoom", systemImage: "trash", role: .destructive, action: model.removeSelectedZoom)
+                    .help("Remove Zoom — ⌫")
             }
             Button("Add Zoom at Playhead", systemImage: "plus.magnifyingglass", action: model.addZoomAtPlayhead)
                 .help("Add Zoom — Z")

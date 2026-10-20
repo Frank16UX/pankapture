@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         (stored.flatMap(AppearanceMode.init(rawValue:)) ?? .system).apply()
 
         coordinator.start()
+        handleOpenDocuments()
         CaptureNotifier.shared.configure()
         OnboardingWindow.showIfNeeded()
 
@@ -38,13 +39,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Log.app.info("Pankapture launched")
     }
 
+    /// Asks about unsaved video edits before quitting.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        coordinator.videoEditor.reviewUnsavedChanges() ? .terminateNow : .terminateCancel
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        // Flush unsaved video edits.
+        // Stops playback and work; anything still unsaved stays in its draft.
         coordinator.videoEditor.closeAll()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls { URLCommands.handle(url, coordinator: coordinator) }
+    }
+
+    /// Movies opened with the app (Finder's Open With, `open -a`) go to the
+    /// video editor. SwiftUI's scene handling swallows the open-documents
+    /// event before `application(_:open:)`, so take it directly.
+    private func handleOpenDocuments() {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(openDocuments(_:withReply:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEOpenDocuments)
+        )
+    }
+
+    @objc private func openDocuments(_ event: NSAppleEventDescriptor, withReply reply: NSAppleEventDescriptor) {
+        guard let list = event.paramDescriptor(forKeyword: keyDirectObject) else { return }
+        let items = list.numberOfItems == 0 ? [list] : (1...list.numberOfItems).compactMap { list.atIndex($0) }
+        for item in items {
+            guard let url = item.coerce(toDescriptorType: typeFileURL)?.fileURLValue else { continue }
+            coordinator.openRecording(url)
+        }
     }
 
     /// Opening the app again (Finder, Spotlight, Dock) with no window shows Settings.

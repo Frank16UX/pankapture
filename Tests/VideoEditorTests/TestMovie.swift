@@ -27,7 +27,9 @@ enum TestMovie {
         return url
     }
 
-    static func make(_ spec: Spec = Spec(), in directory: URL) throws -> URL {
+    /// Async so it never blocks a Swift concurrency thread: tests run in
+    /// parallel, and blocked pool threads can starve `finishWriting`.
+    static func make(_ spec: Spec = Spec(), in directory: URL) async throws -> URL {
         let url = directory.appendingPathComponent("movie-\(UUID().uuidString).mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
 
@@ -95,13 +97,11 @@ enum TestMovie {
             }
             if !progressed {
                 if Date() > deadline || writer.status == .failed { throw writer.error ?? CocoaError(.fileWriteUnknown) }
-                Thread.sleep(forTimeInterval: 0.001)
+                try await Task.sleep(for: .milliseconds(1))
             }
         }
 
-        let done = DispatchSemaphore(value: 0)
-        writer.finishWriting { done.signal() }
-        done.wait()
+        await writer.finishWriting()
         guard writer.status == .completed else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
         return url
     }

@@ -67,6 +67,12 @@ Short ADRs. If a decision changes, update it here; don't delete it.
 
 **ADR-21: Dock icon only while a standard window is open; one instance.** The app runs as an accessory (menu bar only) and `DockPresence` switches it to a regular app while any titled, non-panel window is visible or minimized: Settings, the image and video editors, history, and the welcome window. Accessory apps open windows behind other apps, and those windows don't appear in Cmd-Tab or the Dock, so they were easy to lose. Panels (overlay, HUDs, thumbnails, pins, recording options) never show the Dock icon. Settings opens through `SettingsWindow.show()`, which shows the Dock icon and activates the app before calling SwiftUI's `openSettings` action. That action is captured from the menu bar label, which exists for the whole session. A second launch from another location (a dev build next to the installed app) would register the same global hot keys, so it yields activation to the running instance, asks it to show Settings over a distributed notification, and exits before creating any scene.
 
+**ADR-22: Recordings carry a mixed default audio track.** System audio and mic stay on separate tracks for the editor (ADR-16), but most players (browsers, chat apps, Quick Look) play only the first audio track, so the mic was missing wherever the file was shared. When a recording with both sources finishes (or is recovered), `AudioMixdown` rewrites it once: video passthrough, a **"Mix"** track (system + mic, AAC stereo) first and enabled as the alternate group's default, then the original "System" and "Microphone" tracks, disabled. This costs an audio encode and a file copy at stop (about a second for a few minutes), plus about 128 kbps. If it fails, the separate-track file is kept. The editor ignores the "Mix" track.
+
+**ADR-23: Window recordings with overlays capture the window's area of the display.** A single-window filter (`desktopIndependentWindow`) renders only that window, so the webcam bubble, click rings, and keystroke pill were missing. When any overlay is on, the stream instead uses a display filter that *includes* only the target window and the overlay windows, cropped (`sourceRect`) to the window's frame when recording starts. Other apps' windows stay out, as before; the trade-off is that the area doesn't follow the window if it moves. Without overlays, window recordings keep the single-window filter, which does follow it. The webcam bubble is moved inside the recorded frame if it's outside.
+
+**ADR-24: Editor edits are saved explicitly, with a draft for crashes.** The project file (`Edits/<video>.json`) changes only on Save (⌘S, the toolbar button, or Save in the close/quit prompt). Every edit is autosaved to `<video>.draft.json`, which is deleted on Save or Don't Save. Reopening a recording with a leftover draft shows it as unsaved changes, so neither closing nor a crash loses work silently. Background pictures and movies are copied into `Backgrounds/` and the project points at the copy. A background movie is a second, looped video track in the composition (inserted after speed changes so it isn't retimed), and `VideoEditCompositor` receives its frame alongside the recording's.
+
 ## 3. Module map
 
 ```
@@ -157,7 +163,8 @@ Three spaces exist and bugs live at their borders. Convert in one place per boun
 | History index | `~/Library/Application Support/Pankapture/Library/Library.store` | SwiftData (`CaptureItem`: id, kind, createdAt, size/duration, exportURL, ocrText, …) |
 | Recordings in progress | `~/Library/Application Support/Pankapture/Recordings/InProgress/` | fragmented MP4 + manifest JSON (crash recovery) |
 | Recording metadata | `~/Library/Application Support/Pankapture/Sidecars/<video>.json` | `RecordingSidecar` (clicks for auto-zoom) |
-| Video edits | `~/Library/Application Support/Pankapture/Edits/<video>.json` | `VideoEditProject` |
+| Video edits | `~/Library/Application Support/Pankapture/Edits/<video>.json`, unsaved edits in `<video>.draft.json` | `VideoEditProject` (ADR-24) |
+| Video backgrounds | `~/Library/Application Support/Pankapture/Backgrounds/<uuid>.<ext>` | copies of pictures/movies used as editor backgrounds |
 
 File names use `CaptureFileNamer`: `Pankapture 2026-10-19 at 14.27.05.png`, with ` (2)`, ` (3)` on collision.
 

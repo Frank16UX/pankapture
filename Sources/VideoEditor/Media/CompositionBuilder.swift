@@ -11,6 +11,8 @@ public struct EditComposition {
     public let audioMix: AVAudioMix?
     public let plan: RenderPlan
     public let timeline: Timeline
+    /// The looped background movie's track in `composition`, if any.
+    public let backgroundTrackID: CMPersistentTrackID?
     /// Whether at least one unmuted, non-silent audio track is included.
     public let hasAudibleAudio: Bool
 
@@ -78,10 +80,19 @@ public enum CompositionBuilder {
 
     public static func build(source: SourceMedia, project: VideoEditProject, options: Options) async throws -> sending EditComposition {
         let tracks = try await source.loadTracks()
-        return try build(source: source, tracks: tracks, project: project, options: options)
+        let background = await BackgroundVideo.load(for: project)
+        return try build(source: source, tracks: tracks, project: project, options: options, background: background)
     }
 
-    public static func build(source: SourceMedia, tracks: LoadedTracks, project: VideoEditProject, options: Options) throws -> EditComposition {
+    /// - Parameter background: the project's background movie (load it with
+    ///   `BackgroundVideo.load(for:)`); ignored unless the fill is that movie.
+    public static func build(
+        source: SourceMedia,
+        tracks: LoadedTracks,
+        project: VideoEditProject,
+        options: Options,
+        background: BackgroundVideo? = nil
+    ) throws -> EditComposition {
         let signpostID = Log.signposter.makeSignpostID()
         let interval = Log.signposter.beginInterval("buildComposition", id: signpostID)
         defer { Log.signposter.endInterval("buildComposition", interval) }
@@ -133,18 +144,36 @@ public enum CompositionBuilder {
             }
         }
 
+        // The background movie, looped over the whole output. Inserted after
+        // the speed changes: `scaleTimeRange` would otherwise retime it too.
+        var backgroundTrackID: CMPersistentTrackID?
+        if let background, background.url == project.background.fill.videoURL,
+           let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let total = composition.duration
+            let loop = cmTime(background.duration)
+            var at = CMTime.zero
+            while at < total {
+                let piece = CMTimeMinimum(loop, total - at)
+                try track.insertTimeRange(CMTimeRange(start: .zero, duration: piece), of: background.track, at: at)
+                at = at + piece
+            }
+            backgroundTrackID = track.trackID
+        }
+
         let plan = RenderPlan(
             project: project,
             sourceSize: source.size,
             orientation: source.orientation,
             shortSideCap: options.shortSideCap,
             width: options.width,
-            zoomEnabled: options.zoomEnabled
+            zoomEnabled: options.zoomEnabled,
+            backgroundOrientation: background?.orientation ?? .up
         )
         let videoComposition = makeVideoComposition(
             plan: plan,
             source: source,
             videoTrackID: videoTrack.trackID,
+            backgroundTrackID: backgroundTrackID,
             duration: composition.duration,
             frameRate: options.frameRate,
             force: options.forceVideoComposition
@@ -168,6 +197,7 @@ public enum CompositionBuilder {
             audioMix: audioMix,
             plan: plan,
             timeline: timeline,
+            backgroundTrackID: backgroundTrackID,
             hasAudibleAudio: audioTracks.contains { $0.volume > 0 }
         )
     }
@@ -182,6 +212,7 @@ public enum CompositionBuilder {
         plan: RenderPlan,
         source: SourceMedia,
         videoTrackID: CMPersistentTrackID,
+        backgroundTrackID: CMPersistentTrackID? = nil,
         duration: CMTime,
         frameRate: Int,
         force: Bool
@@ -194,7 +225,12 @@ public enum CompositionBuilder {
             videoComposition = AVMutableVideoComposition()
             videoComposition.customVideoCompositorClass = VideoEditCompositor.self
             videoComposition.instructions = [
-                VideoEditInstruction(timeRange: outputRange, sourceTrackID: videoTrackID, renderer: FrameRenderer(plan: plan)),
+                VideoEditInstruction(
+                    timeRange: outputRange,
+                    sourceTrackID: videoTrackID,
+                    backgroundTrackID: backgroundTrackID,
+                    renderer: FrameRenderer(plan: plan)
+                ),
             ]
         } else if force {
             // Built-in compositor: orient + scale only. Much cheaper per frame.

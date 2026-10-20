@@ -214,12 +214,17 @@ struct TransportBar: View {
                 Text("Selected \(Format.time(selection.duration))")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
-                Button("Cut", systemImage: "scissors", action: model.cutSelection)
-                    .help("Cut Selection — ⌘X")
+                Button("Delete", systemImage: "trash", action: model.cutSelection)
+                    .help("Remove the selected part — ⌫")
             } else if let cut = model.selectedCut {
                 Button("Restore Cut", systemImage: "arrow.uturn.backward") { model.removeCut(cut) }
                     .help("Restore the removed part — ⌫")
             }
+
+            Button("Split", systemImage: "scissors", action: model.splitAtPlayhead)
+                .help("Split at Playhead — S. Click a part to select it, then press ⌫ to remove it.")
+
+            Divider().frame(height: 16)
 
             Button("Set In", systemImage: "arrow.right.to.line", action: model.setTrimInAtPlayhead)
                 .labelStyle(.iconOnly)

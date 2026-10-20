@@ -69,6 +69,41 @@ public enum GradientPreset: String, Codable, CaseIterable, Sendable, Identifiabl
     }
 }
 
+/// A user-made two-stop linear gradient (VE-6).
+public struct CustomGradient: Codable, Hashable, Sendable {
+    public var start: RGBAColor
+    public var end: RGBAColor
+    /// Direction in degrees as seen on screen: 0 runs left → right, 90 top →
+    /// bottom. 45 matches the presets (top-leading → bottom-trailing).
+    public var angle: Double
+
+    public init(start: RGBAColor, end: RGBAColor, angle: Double = 45) {
+        self.start = start
+        self.end = end
+        self.angle = angle
+    }
+
+    public init(_ preset: GradientPreset) {
+        self.init(start: preset.colors.start, end: preset.colors.end)
+    }
+
+    public static let angleRange: ClosedRange<Double> = 0...360
+
+    /// Start and end points of the gradient line in a `rect` with a
+    /// **bottom-left** origin (Core Image), spanning the rect's corners.
+    func endpoints(in rect: CGRect) -> (start: CGPoint, end: CGPoint) {
+        let radians = angle * .pi / 180
+        // Screen direction (y down) → bottom-left space (y up).
+        let direction = CGVector(dx: cos(radians), dy: -sin(radians))
+        let halfLength = (abs(direction.dx) * rect.width + abs(direction.dy) * rect.height) / 2
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        return (
+            CGPoint(x: center.x - direction.dx * halfLength, y: center.y - direction.dy * halfLength),
+            CGPoint(x: center.x + direction.dx * halfLength, y: center.y + direction.dy * halfLength)
+        )
+    }
+}
+
 /// Output frame shape. `original` keeps the source video's aspect ratio.
 public enum OutputAspect: String, Codable, CaseIterable, Sendable, Identifiable {
     case original
@@ -109,6 +144,27 @@ public struct VideoBackground: Codable, Hashable, Sendable {
         case none
         case solid(RGBAColor)
         case gradient(GradientPreset)
+        case customGradient(CustomGradient)
+        /// A picture, scaled to fill the canvas. The file is a private copy
+        /// (`BackgroundLibrary`), so the project survives the original moving.
+        case image(URL)
+        /// A muted movie, scaled to fill the canvas and looped.
+        case video(URL)
+
+        /// The background movie, if the fill is one.
+        public var videoURL: URL? {
+            if case let .video(url) = self { return url }
+            return nil
+        }
+
+        /// The two gradient colors and direction, for preset or custom gradients.
+        public var gradient: CustomGradient? {
+            switch self {
+            case let .gradient(preset): CustomGradient(preset)
+            case let .customGradient(gradient): gradient
+            default: nil
+            }
+        }
     }
 
     public var fill: Fill

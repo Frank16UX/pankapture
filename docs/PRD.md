@@ -157,16 +157,16 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| REC-1 | Record an **area**, **window**, or **fullscreen** (any display). | Must | M3 ✅ |
+| REC-1 | Record an **area**, **window** (click it on screen, or choose it from a list that also reaches windows behind a full-screen app or in another Space), or **fullscreen** (any display). | Must | M3 ✅ |
 | REC-2 | **System audio** capture (toggle), with Pankapture's own sounds excluded. | Must | M3 ✅ |
 | REC-3 | **Microphone** capture with device picker and an input level meter before starting. | Must | M3 ✅ |
-| REC-4 | System audio and mic are recorded as **separate audio tracks** (independent volume in the editor) and mixed down on export. | Must | M3 ✅ |
+| REC-4 | System audio and mic are recorded as **separate audio tracks** (independent volume in the editor) and mixed down on export. The saved recording also carries a mixed default track, so players that play a single audio track (browsers, chat apps) include the mic. | Must | M3 ✅ |
 | REC-5 | Output: **MP4 (H.264 or HEVC)**, 30 or 60 fps, quality presets; hardware encoding. | Must | M3 ✅ |
 | REC-6 | Recording controls: menu bar timer + stop; floating control bar (stop, pause/resume, restart, cancel, mute mic) that is never captured. | Must | M3 ✅ |
 | REC-7 | **Countdown** (0/3/5 s) before recording starts. | Should | M3 ✅ |
 | REC-8 | **Pause / resume** produces one continuous file. | Must | M3 ✅ |
 | REC-9 | Crash-safe: a recording interrupted by a crash or power loss is recoverable up to the last few seconds. | Must | M3 ✅ |
-| REC-10 | **Webcam overlay:** a floating camera bubble (circle / rounded rectangle), resizable, draggable, mirror toggle, camera picker; it appears in the recording. | Must | M4 ✅ |
+| REC-10 | **Webcam overlay:** a floating camera bubble (circle / rounded rectangle), resizable, draggable, mirror toggle, camera picker; it appears in the recording, including window recordings (moved inside the recorded window if it's outside). | Must | M4 ✅ |
 | REC-11 | **Click highlighting:** a visual ring on mouse clicks (color/size configurable). | Must | M4 ✅ |
 | REC-12 | **Keystroke display:** shows pressed shortcuts/keys on screen (modifier combos only or all keys). Requires Accessibility. | Must | M4 ✅ |
 | REC-13 | Option to hide desktop icons and to hide the cursor. | Should | M4 ✅ |
@@ -177,17 +177,18 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| VE-1 | Opens after recording (configurable) or from history; scrubbable preview with filmstrip timeline and waveform per audio track. | Must | M5 ✅ |
+| VE-1 | Opens after recording (configurable), from the quick-access thumbnail, the "Recording saved" notification, **Edit Last Recording** in the menu bar, history, or Open With on a movie file; scrubbable preview with filmstrip timeline and waveform per audio track. | Must | M5 ✅ |
 | VE-2 | **Trim** start/end. | Must | M5 ✅ |
-| VE-3 | **Cut** one or more middle segments. | Must | M5 ✅ |
-| VE-4 | **Zoom & pan segments:** select a time range and a target rectangle; smooth eased zoom in/out. | Must | M5 ✅ |
+| VE-3 | **Cut** one or more middle segments: drag-select a range, or **split** at the playhead (S) and delete a segment (⌫). Video and audio are cut together. | Must | M5 ✅ |
+| VE-4 | **Zoom & pan segments:** select a time range and a target rectangle; smooth eased zoom in/out. Drag the segment's end handles to change its duration; delete with ⌫. Optional **full-frame zoom** zooms past the padding and background until the zoomed area fills the video. | Must | M5 ✅ |
 | VE-5 | Automatic zoom suggestions that follow clicks (from recorded click metadata). | Could | M5 ✅ |
-| VE-6 | **Background:** padding, background, rounded corners, shadow (same options as ED-2). | Should | M5 ✅ |
+| VE-6 | **Background:** padding, rounded corners, shadow, and a fill: color, preset or **custom gradient** (two colors + angle), **image**, or **video** (muted, looped). | Should | M5 ✅ |
 | VE-7 | Per-track **volume and mute** (system / mic). | Must | M5 ✅ |
 | VE-8 | **Export MP4** (resolution, fps, quality presets, estimated size) and **GIF** (width, fps, loop). | Must | M5 ✅ |
 | VE-9 | Export runs in the background with progress; the editor stays responsive. | Must | M5 ✅ |
 | VE-10 | Copy the exported file to the clipboard; drag the exported file out. | Should | M5 ✅ |
 | VE-11 | Speed change for segments (e.g. 2× during boring parts). | Could | M5 ✅ |
+| VE-12 | **Edit projects:** edits are saved explicitly (⌘S); closing or quitting with unsaved edits asks to Save / Don't Save / Cancel; unsaved edits survive a crash as a draft. Reopening the recording restores the saved project. | Must | M5 ✅ |
 
 ### 5.10 Capture history (library)
 

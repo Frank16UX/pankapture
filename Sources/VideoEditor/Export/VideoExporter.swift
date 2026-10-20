@@ -33,11 +33,13 @@ public enum VideoExporter {
 
         let fps = settings.frameRate.resolve(sourceFrameRate: source.frameRate)
         let tracks = try await source.loadTracks()
+        let background = await BackgroundVideo.load(for: project)
         let edit = try CompositionBuilder.build(
             source: source,
             tracks: tracks,
             project: project,
-            options: .init(shortSideCap: settings.resolution.shortSideCap, frameRate: fps)
+            options: .init(shortSideCap: settings.resolution.shortSideCap, frameRate: fps),
+            background: background
         )
         let bitrate = ExportEstimator.videoBitrate(renderSize: edit.plan.renderSize, fps: fps, quality: settings.quality)
 
