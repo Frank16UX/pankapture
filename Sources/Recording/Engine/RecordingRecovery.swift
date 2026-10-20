@@ -114,6 +114,12 @@ public struct RecordingRecovery: Sendable {
             try FileManager.default.moveItem(at: recording.movieURL, to: destination)
         }
 
+        do {
+            try await AudioMixdown.addMixedTrack(to: destination)
+        } catch {
+            Log.recording.error("Audio mixdown failed; keeping separate tracks: \(error.localizedDescription, privacy: .public)")
+        }
+
         // Verify before deleting anything else.
         let restored = AVURLAsset(url: destination)
         let restoredDuration = try await restored.load(.duration)

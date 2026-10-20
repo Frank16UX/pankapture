@@ -93,7 +93,10 @@ public final class RecordingController {
 
     /// Starts the flow for a source kind: pick the window/display/area, then record.
     public func record(_ kind: RecordingOptions.SourceKind) {
-        guard !isBusy else { return }
+        guard !isBusy else {
+            Log.recording.notice("Record ignored: busy (preparing: \(self.isPreparing), state: \(String(describing: self.recorder.state), privacy: .public))")
+            return
+        }
         isPreparing = true
         Task { await pickAndRecord(kind) }
     }
@@ -211,6 +214,7 @@ public final class RecordingController {
             }
         }
         guard let source else {
+            Log.recording.notice("No \(String(describing: kind), privacy: .public) picked; recording cancelled")
             isPreparing = false
             if !optionsVisible { webcam.hide() }
             onFinish?(.cancelled)
@@ -228,18 +232,20 @@ public final class RecordingController {
         let screen = targetScreen(for: source)
         hudScreen = screen
         let recordedFrame = recordedAppKitFrame(for: source, screen: screen)
-        let capturesOverlays = source.displayID != nil // a single-window capture only sees that window
+        // Window recordings include overlays by capturing the window's area of
+        // its display (`StreamSetup.windowWithOverlays`).
         var overlayIDs: [CGWindowID] = []
 
         if options.showsCamera, await webcam.show(on: screen), let id = webcam.windowID {
+            if let recordedFrame { webcam.keepInside(recordedFrame) }
             overlayIDs.append(id)
         }
-        if options.highlightsClicks, capturesOverlays {
+        if options.highlightsClicks {
             clickHighlighter.style = .init(color: options.clickColor, diameter: options.clickSize)
-            clickHighlighter.start(on: source.displayID.map { [$0] })
+            clickHighlighter.start(on: (source.displayID ?? screen?.displayID).map { [$0] })
             overlayIDs += clickHighlighter.windowIDs
         }
-        if options.showsKeystrokes, capturesOverlays, let recordedFrame {
+        if options.showsKeystrokes, let recordedFrame {
             keystrokes.showsAllKeys = options.keystrokesShowAllKeys
             if keystrokes.start(in: recordedFrame), let id = keystrokes.windowID { overlayIDs.append(id) }
         }
@@ -252,6 +258,7 @@ public final class RecordingController {
             try await recorder.start(config)
             controlBar?.show(on: screen)
         } catch {
+            Log.recording.error("Recording didn't start: \(String(describing: error), privacy: .public)")
             tearDownOverlays()
             let failure = error as? RecordingError ?? .streamStopped(error.localizedDescription)
             onFinish?(failure == .cancelled ? .cancelled : .failed(failure))

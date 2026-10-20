@@ -65,11 +65,16 @@ public struct SourceMedia: Sendable {
         }
         frameRate = min(frameRate, 60)
 
-        let audio = try await asset.loadTracks(withMediaType: .audio)
+        var audio: [AVAssetTrack] = []
         var names: [String?] = []
         var ranges: [TimeRange] = []
-        for track in audio {
-            names.append(await Self.name(of: track))
+        for track in try await asset.loadTracks(withMediaType: .audio) {
+            let name = await Self.name(of: track)
+            // The recorder's "Mix" track (system + mic for players that play
+            // one track) duplicates the separate tracks the editor mixes itself.
+            if name?.lowercased() == Self.mixTrackName { continue }
+            audio.append(track)
+            names.append(name)
             let range = try await track.load(.timeRange)
             ranges.append(TimeRange(start: range.start.seconds, end: range.end.seconds))
         }
@@ -103,6 +108,9 @@ public struct SourceMedia: Sendable {
             audioTracks: audioTracks
         )
     }
+
+    /// Title of the recorder's mixed track (`RecordingWriter.TrackName.mix`), lowercased.
+    static let mixTrackName = "mix"
 
     /// Resolves the AVFoundation tracks (cheap: the asset has them loaded).
     public func loadTracks() async throws -> sending LoadedTracks {

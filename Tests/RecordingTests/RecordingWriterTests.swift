@@ -98,6 +98,37 @@ struct RecordingWriterTests {
         #expect(names == [RecordingWriter.TrackName.systemAudio, RecordingWriter.TrackName.microphone])
     }
 
+    /// Players that play one audio track must get system + mic: the mixdown
+    /// puts an enabled "Mix" track first and keeps the separate tracks, disabled.
+    @Test func mixdownAddsDefaultMixedTrack() async throws {
+        let directory = try tempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("out.mp4")
+        let writer = RecordingWriter(settings: .init(
+            url: url, codec: .h264, quality: .low, framesPerSecond: 30,
+            capturesSystemAudio: true, capturesMicrophone: true
+        ))
+        try await feed(writer, from: 10, seconds: 2)
+        _ = try await writer.finish(at: t(12))
+
+        #expect(try await AudioMixdown.addMixedTrack(to: url))
+
+        let asset = AVURLAsset(url: url)
+        #expect(abs(try await asset.load(.duration).seconds - 2) < 0.1)
+        #expect(try await asset.loadTracks(withMediaType: .video).count == 1)
+        let audio = try await asset.loadTracks(withMediaType: .audio)
+        try #require(audio.count == 3)
+        var tracks: [(name: String, enabled: Bool)] = []
+        for track in audio {
+            let name = try await track.load(.metadata).first { $0.commonKey == .commonKeyTitle }?.load(.stringValue)
+            tracks.append((name ?? "?", try await track.load(.isEnabled)))
+        }
+        #expect(tracks.map(\.name) == [RecordingWriter.TrackName.mix, RecordingWriter.TrackName.systemAudio, RecordingWriter.TrackName.microphone])
+        #expect(tracks.map(\.enabled) == [true, false, false])
+        // No leftover temporary file next to the recording.
+        #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["out.mp4"])
+    }
+
     /// Simulates a crash: snapshot the fragmented file mid-recording (as a power
     /// loss would leave it), then recover the snapshot.
     @Test func interruptedRecordingIsRecoverable() async throws {

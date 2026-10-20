@@ -26,6 +26,9 @@ public actor RecordingWriter {
     public enum TrackName {
         public static let systemAudio = "System"
         public static let microphone = "Microphone"
+        /// System + mic mixed for players that play one track (`AudioMixdown`).
+        /// The editor ignores it.
+        public static let mix = "Mix"
     }
 
     public struct Settings: Sendable {

@@ -63,6 +63,19 @@ public final class WebcamBubble {
         return true
     }
 
+    /// Moves the bubble to the bottom-left of `frame` (AppKit global) unless
+    /// it's already fully inside, so it lands in the recorded region.
+    public func keepInside(_ frame: CGRect) {
+        guard let panel, !frame.contains(panel.frame) else { return }
+        let inset: CGFloat = 24
+        let size = panel.frame.size
+        let origin = CGPoint(
+            x: min(frame.minX + inset, frame.maxX - size.width),
+            y: min(frame.minY + inset, frame.maxY - size.height)
+        )
+        panel.setFrameOrigin(origin)
+    }
+
     public func hide() {
         sessionHandle?.stopRunning()
         sessionHandle = nil

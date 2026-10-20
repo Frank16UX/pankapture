@@ -322,6 +322,12 @@ public final class ScreenRecorder {
             await writer.cancel()
             throw (error as? RecordingError) ?? RecordingError.writerFailed(error.localizedDescription)
         }
+        // Players that play only the first audio track would miss the mic.
+        do {
+            try await AudioMixdown.addMixedTrack(to: summary.url)
+        } catch {
+            Log.recording.error("Audio mixdown failed; keeping separate tracks: \(error.localizedDescription, privacy: .public)")
+        }
 
         let fm = FileManager.default
         try fm.createDirectory(at: manifest.destinationDirectory, withIntermediateDirectories: true)
