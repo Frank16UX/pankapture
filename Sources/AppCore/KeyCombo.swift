@@ -56,7 +56,12 @@ public struct KeyCombo: Hashable, Codable, Sendable {
         modifiers.symbols + Self.keyName(for: keyCode)
     }
 
-    static func keyName(for keyCode: UInt32) -> String {
+    /// F1–F12 may be used without modifiers.
+    public static func isFunctionKey(_ keyCode: Int) -> Bool {
+        [kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10, kVK_F11, kVK_F12].contains(keyCode)
+    }
+
+    public static func keyName(for keyCode: UInt32) -> String {
         keyNames[Int(keyCode)] ?? "#\(keyCode)"
     }
 

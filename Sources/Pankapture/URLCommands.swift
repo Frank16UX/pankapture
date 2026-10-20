@@ -20,6 +20,8 @@ enum URLCommands {
         Log.app.info("URL command: \(path, privacy: .public)")
 
         switch path {
+        // Interactive: these open the overlay (annotate mode, optionally preselected).
+        // Nothing leaves memory until the user picks copy/save/share there.
         case "capture/area":
             let rect = query.first { $0.name == "rect" }?.value.flatMap(parseRect)
             Task { await coordinator.captureArea(preselect: rect) }
