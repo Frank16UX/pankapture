@@ -9,6 +9,7 @@ import Foundation
 public struct CameraOverlay: Codable, Hashable, Sendable {
     public enum Shape: String, Codable, CaseIterable, Sendable, Identifiable {
         case circle
+        case square
         case roundedRectangle
 
         public var id: String { rawValue }
@@ -16,12 +17,16 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
         public var title: String {
             switch self {
             case .circle: "Circle"
+            case .square: "Square"
             case .roundedRectangle: "Rectangle"
             }
         }
 
         /// Width ÷ height.
-        public var aspect: Double { self == .circle ? 1 : 4.0 / 3.0 }
+        public var aspect: Double { self == .roundedRectangle ? 4.0 / 3.0 : 1 }
+
+        /// Square and rectangle take a corner radius; a circle is always round.
+        public var hasCorners: Bool { self != .circle }
     }
 
     public var isVisible: Bool
@@ -31,13 +36,24 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
     /// Width as a fraction of the video's shorter side.
     public var size: Double
     public var shape: Shape
+    /// Corner radius of a square or rectangle, as a fraction of its shorter
+    /// side (0 = sharp corners, 0.5 = fully rounded ends).
+    public var roundness: Double
     public var isMirrored: Bool
 
-    public init(isVisible: Bool = true, center: CGPoint, size: Double, shape: Shape = .circle, isMirrored: Bool = true) {
+    public init(
+        isVisible: Bool = true,
+        center: CGPoint,
+        size: Double,
+        shape: Shape = .circle,
+        roundness: Double = CameraOverlay.defaultRoundness,
+        isMirrored: Bool = true
+    ) {
         self.isVisible = isVisible
         self.center = center
         self.size = size
         self.shape = shape
+        self.roundness = roundness
         self.isMirrored = isMirrored
     }
 
@@ -46,14 +62,37 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
         self.init(
             center: sidecar.center,
             size: sidecar.size.clamped(to: Self.sizeRange),
-            shape: sidecar.isCircle ? .circle : .roundedRectangle,
+            shape: sidecar.shape.flatMap(Shape.init(rawValue:)) ?? (sidecar.isCircle ? .circle : .roundedRectangle),
             isMirrored: sidecar.isMirrored
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case isVisible, center, size, shape, roundness, isMirrored
+    }
+
+    /// Projects saved before `roundness` existed still open.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        isVisible = try container.decode(Bool.self, forKey: .isVisible)
+        center = try container.decode(CGPoint.self, forKey: .center)
+        size = try container.decode(Double.self, forKey: .size)
+        shape = try container.decode(Shape.self, forKey: .shape)
+        roundness = try container.decodeIfPresent(Double.self, forKey: .roundness) ?? Self.defaultRoundness
+        isMirrored = try container.decode(Bool.self, forKey: .isMirrored)
+    }
+
+    /// Corner radius for a layer of `size`, in the same units.
+    public func cornerRadius(for size: CGSize) -> CGFloat {
+        let shortSide = min(size.width, size.height)
+        return shape.hasCorners ? shortSide * CGFloat(roundness.clamped(to: Self.roundnessRange)) : shortSide / 2
     }
 
     /// Bottom-left of the video, when the recording didn't say.
     public static let standard = CameraOverlay(center: CGPoint(x: 0.12, y: 0.8), size: 0.25)
     public static let sizeRange: ClosedRange<Double> = 0.08...0.6
+    public static let roundnessRange: ClosedRange<Double> = 0...0.5
+    public static let defaultRoundness = 0.18
 
     /// The layer's rect in a **top-left** coordinate space, given the video
     /// rect and the canvas in that space. Kept inside the canvas.

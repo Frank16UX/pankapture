@@ -52,6 +52,10 @@ final class VideoEditorModel {
         didSet { Self.saveExportSettings(exportSettings) }
     }
     private(set) var exportState: ExportState = .idle
+    /// What the running (or last) export is making, e.g. "MP4 · 1920 × 1080 · 60 fps".
+    private(set) var exportDescription = ""
+    /// When the running export started, for the time-left estimate.
+    private(set) var exportStartDate: Date?
     var isShowingExportSheet = false
 
     @ObservationIgnored var onExportFinished: ((VideoExportResult) -> Void)?
@@ -662,6 +666,11 @@ final class VideoEditorModel {
         exportGeneration += 1
         let generation = exportGeneration
         exportState = .running(progress: 0)
+        exportStartDate = .now
+        let size = exportRenderSize
+        exportDescription = settings.format == .mp4
+            ? "\(settings.format.title) · \(Int(size.width)) × \(Int(size.height)) · \(exportFrameRate) fps"
+            : "\(settings.format.title) · \(Int(size.width)) px wide · \(settings.gif.fps) fps"
         let reporter = ProgressReporter { [weak self] value in
             Task { @MainActor in
                 guard let self, self.exportGeneration == generation, case .running = self.exportState else { return }

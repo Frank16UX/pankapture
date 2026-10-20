@@ -21,6 +21,8 @@ enum TestMovie {
         /// Adds a disabled second video track titled "Camera" in this color,
         /// like the recorder's webcam track.
         var cameraColor: (b: UInt8, g: UInt8, r: UInt8)?
+        /// Tags the video Rec. 709, like the recorder's files.
+        var tagsRec709 = false
     }
 
     static func temporaryDirectory() throws -> URL {
@@ -36,11 +38,19 @@ enum TestMovie {
         let url = directory.appendingPathComponent("movie-\(UUID().uuidString).mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
 
-        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
+        var videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: spec.width,
             AVVideoHeightKey: spec.height,
-        ])
+        ]
+        if spec.tagsRec709 {
+            videoSettings[AVVideoColorPropertiesKey] = [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2,
+            ]
+        }
+        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         videoInput.expectsMediaDataInRealTime = false
         videoInput.transform = spec.transform
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: videoInput, sourcePixelBufferAttributes: [

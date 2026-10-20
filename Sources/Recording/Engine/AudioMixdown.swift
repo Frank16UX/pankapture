@@ -16,11 +16,11 @@ import Foundation
 /// 3. "System" and 4. "Microphone" (passthrough), disabled, in the same group.
 ///
 /// The video editor skips the "Mix" track and reads the separate ones.
-enum AudioMixdown {
+public enum AudioMixdown {
     /// Rewrites `url` in place when it has two or more audio tracks. Returns
     /// `false` (leaving the file untouched) when there's nothing to mix.
     @discardableResult
-    static func addMixedTrack(to url: URL) async throws -> Bool {
+    public static func addMixedTrack(to url: URL) async throws -> Bool {
         let signpostID = Log.signposter.makeSignpostID()
         let interval = Log.signposter.beginInterval("audioMixdown", id: signpostID)
         defer { Log.signposter.endInterval("audioMixdown", interval) }

@@ -167,7 +167,7 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 | REC-7 | **Countdown** (0/3/5 s) before recording starts. | Should | M3 ✅ |
 | REC-8 | **Pause / resume** produces one continuous file. | Must | M3 ✅ |
 | REC-9 | Crash-safe: a recording interrupted by a crash or power loss is recoverable up to the last few seconds. | Must | M3 ✅ |
-| REC-10 | **Webcam overlay:** a floating camera bubble (circle / rounded rectangle), resizable, draggable, mirror toggle, camera picker. The camera is recorded as its own layer (editable in the video editor); the saved video gets a copy with the camera drawn where the bubble was. | Must | M4 ✅ |
+| REC-10 | **Webcam overlay:** a floating camera bubble (circle, rounded square, or rounded rectangle), resizable, draggable, mirror toggle, camera picker. The camera is recorded as its own layer (editable in the video editor); the saved video gets a copy with the camera drawn where the bubble was, made in the background with its progress on the thumbnail (its size is a setting). Alternatively the camera is recorded into the video, saved at once. | Must | M4 ✅ |
 | REC-11 | **Click highlighting:** a visual ring on mouse clicks (color/size configurable). | Must | M4 ✅ |
 | REC-12 | **Keystroke display:** shows pressed shortcuts/keys on screen (modifier combos only or all keys). Requires Accessibility. | Must | M4 ✅ |
 | REC-13 | Option to hide desktop icons and to hide the cursor. | Should | M4 ✅ |
@@ -189,7 +189,7 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 | VE-9 | Export runs in the background with progress; the editor stays responsive. | Must | M5 ✅ |
 | VE-10 | Copy the exported file to the clipboard; drag the exported file out. | Should | M5 ✅ |
 | VE-11 | Speed change for segments (e.g. 2× during boring parts). | Could | M5 ✅ |
-| VE-13 | **Camera layer:** move and resize the webcam in the preview; shape, size, mirror, show/hide. Zooms leave it in place unless the zoom fills the frame. | Must | M5 ✅ |
+| VE-13 | **Camera layer:** move and resize the webcam in the preview; shape (circle, square, rectangle) with adjustable corner roundness, size, mirror, show/hide. Zooms leave it in place unless the zoom fills the frame. | Must | M5 ✅ |
 | VE-12 | **Edit projects:** edits are saved explicitly (⌘S); closing or quitting with unsaved edits asks to Save / Don't Save / Cancel; unsaved edits survive a crash as a draft. Reopening the recording restores the saved project. | Must | M5 ✅ |
 
 ### 5.10 Capture history (library)

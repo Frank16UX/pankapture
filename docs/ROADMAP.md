@@ -90,7 +90,7 @@ The day this lands, the old screenshot tool can be uninstalled.
 - [x] Audio lanes labeled by source; silent tracks hidden (VE-7); 1440p and 4K export (VE-8)
 - [x] Screenshots and recordings can include Pankapture's own editor/history/Settings windows (SC-11, ADR-26)
 
-**QA:** timeline gestures with a real mouse (trim handles, zoom edges, zoom-rectangle editor); a video background playing in the preview; a recording with the webcam on (camera track timing vs. the screen, composite after stop, editing the layer); screenshot and recording of the editor window.
+**QA:** timeline gestures with a real mouse (trim handles, zoom edges, zoom-rectangle editor); a video background playing in the preview; a recording with the webcam on (no camera dropout at start, thumbnail progress during the composite, editing the layer and its roundness); the export bottom sheet over bright and dark video; "Save camera: In the video" saves at once; closing the options panel hides the camera preview; screenshot and recording of the editor window.
 
 ## M6 · Capture history ✅
 

@@ -34,15 +34,19 @@ public struct RecordingSidecar: Codable, Equatable, Sendable {
         public var center: CGPoint
         /// Bubble width as a fraction of the recorded frame's shorter side.
         public var size: Double
-        /// `true` for a circle, `false` for a rounded rectangle (4:3).
+        /// `true` for a circle, `false` for a rounded square or rectangle.
         public var isCircle: Bool
+        /// "circle", "square", or "roundedRectangle" (4:3); `nil` in sidecars
+        /// written before squares existed (then `isCircle` decides).
+        public var shape: String?
         /// Whether the preview was mirrored (the track itself never is).
         public var isMirrored: Bool
 
-        public init(center: CGPoint, size: Double, isCircle: Bool, isMirrored: Bool) {
+        public init(center: CGPoint, size: Double, isCircle: Bool, shape: String? = nil, isMirrored: Bool) {
             self.center = center
             self.size = size
             self.isCircle = isCircle
+            self.shape = shape
             self.isMirrored = isMirrored
         }
     }

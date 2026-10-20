@@ -28,7 +28,8 @@ struct RecordingOptionsTests {
         options.microphoneDeviceID = "mic-1"
         options.showsCamera = true
         options.cameraDeviceID = "cam-9"
-        options.cameraShape = .roundedRectangle
+        options.cameraShape = .square
+        options.cameraAsLayer = false
         options.cameraMirrored = false
         options.cameraSize = 320
         options.framesPerSecond = 30

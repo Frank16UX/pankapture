@@ -78,45 +78,109 @@ struct ExportSheet: View {
     }
 }
 
-/// Floating card over the preview: progress with Cancel while exporting, then
+/// Bottom sheet over the preview: progress with Cancel while exporting, then
 /// the result as a draggable file chip with Copy and Show in Finder (VE-10).
+/// The editor stays usable underneath, so the sheet says so.
 struct ExportStatusView: View {
     @Bindable var model: VideoEditorModel
 
     var body: some View {
-        Group {
-            switch model.exportState {
-            case let .running(progress):
-                HStack(spacing: PK.Spacing.m) {
-                    ProgressView(value: progress)
-                        .frame(width: 180)
-                        .accessibilityLabel("Export progress")
-                    Text(Format.percent(progress))
-                        .font(.callout.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .frame(width: 40, alignment: .trailing)
-                    Button("Cancel", action: model.cancelExport)
-                        .controlSize(.small)
-                }
-            case let .finished(result):
-                FinishedExport(model: model, result: result)
-            case let .failed(message):
-                HStack(spacing: PK.Spacing.s) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
-                    Text(message).font(.callout).lineLimit(2)
-                    Button("Dismiss") { model.resetExport() }
-                        .controlSize(.small)
-                }
-            case .idle:
-                EmptyView()
+        ZStack(alignment: .bottom) {
+            if model.exportState != .idle {
+                content
+                    .padding(PK.Spacing.l)
+                    .frame(maxWidth: 620)
+                    .pkSheetSurface()
+                    .padding(PK.Spacing.m)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        .padding(.horizontal, PK.Spacing.m)
-        .padding(.vertical, PK.Spacing.s)
-        .pkSurface()
-        .padding(PK.Spacing.m)
-        .opacity(model.exportState == .idle ? 0 : 1)
-        .animation(PK.Motion.standard, value: model.exportState == .idle)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        .animation(PK.Motion.emphasized, value: model.exportState == .idle)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch model.exportState {
+        case let .running(progress):
+            RunningExport(model: model, progress: progress)
+        case let .finished(result):
+            FinishedExport(model: model, result: result)
+        case let .failed(message):
+            SheetHeader(symbol: "exclamationmark.triangle.fill", tint: .red, title: "Export Failed", subtitle: message) {
+                Button("Dismiss") { model.resetExport() }
+            }
+        case .idle:
+            EmptyView()
+        }
+    }
+}
+
+/// Icon, title + subtitle, and trailing buttons: the top row of every state.
+private struct SheetHeader<Actions: View>: View {
+    let symbol: String
+    let tint: Color
+    let title: String
+    let subtitle: String
+    @ViewBuilder let actions: Actions
+
+    var body: some View {
+        HStack(alignment: .center, spacing: PK.Spacing.m) {
+            Image(systemName: symbol)
+                .font(.title2)
+                .foregroundStyle(tint)
+                .frame(width: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
+                Text(title)
+                    .font(.headline)
+                Text(subtitle)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            Spacer(minLength: PK.Spacing.m)
+            HStack(spacing: PK.Spacing.s) { actions }
+        }
+    }
+}
+
+private struct RunningExport: View {
+    let model: VideoEditorModel
+    let progress: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PK.Spacing.m) {
+            SheetHeader(symbol: "square.and.arrow.up.circle.fill", tint: .accentColor, title: "Exporting…", subtitle: model.exportDescription) {
+                Button("Cancel", role: .cancel, action: model.cancelExport)
+            }
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .accessibilityLabel("Export progress")
+            HStack {
+                Text("You can keep editing; this export uses the edits from when it started.")
+                Spacer(minLength: PK.Spacing.m)
+                Text(status)
+                    .monospacedDigit()
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+    }
+
+    private var status: String {
+        let percent = Format.percent(progress)
+        guard let start = model.exportStartDate, progress > 0.03, progress < 1 else { return percent }
+        let elapsed = Date.now.timeIntervalSince(start)
+        let remaining = elapsed * (1 - progress) / progress
+        return "\(percent) · \(Self.timeLeft(remaining))"
+    }
+
+    static func timeLeft(_ seconds: Double) -> String {
+        switch seconds {
+        case ..<5: "a few seconds left"
+        case ..<60: "about \(Int((seconds / 5).rounded()) * 5) s left"
+        default: "about \(Int((seconds / 60).rounded())) min left"
+        }
     }
 }
 
@@ -125,36 +189,36 @@ private struct FinishedExport: View {
     let result: VideoExportResult
 
     var body: some View {
-        HStack(spacing: PK.Spacing.m) {
-            HStack(spacing: PK.Spacing.s) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: result.url.path))
-                    .resizable()
-                    .frame(width: 32, height: 32)
-                VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
-                    Text(result.url.lastPathComponent)
-                        .font(.callout.weight(.medium))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Text("\(Format.bytes(result.byteCount)) · \(Int(result.pixelSize.width)) × \(Int(result.pixelSize.height))")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: PK.Spacing.m) {
+            SheetHeader(symbol: "checkmark.circle.fill", tint: .green, title: "Export Complete", subtitle: "Drag the file anywhere, or copy it.") {
+                Button("Done") { model.resetExport() }
             }
-            .padding(PK.Spacing.xs)
-            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: PK.Radius.control, style: .continuous))
-            .frame(maxWidth: 260)
-            .onDrag { NSItemProvider(contentsOf: result.url) ?? NSItemProvider() }
-            .help("Drag the exported file anywhere")
-            .accessibilityLabel("Exported file \(result.url.lastPathComponent), draggable")
+            HStack(spacing: PK.Spacing.m) {
+                HStack(spacing: PK.Spacing.s) {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: result.url.path))
+                        .resizable()
+                        .frame(width: 32, height: 32)
+                    VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
+                        Text(result.url.lastPathComponent)
+                            .font(.callout.weight(.medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Text("\(Format.bytes(result.byteCount)) · \(Int(result.pixelSize.width)) × \(Int(result.pixelSize.height))")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(PK.Spacing.s)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: PK.Radius.control, style: .continuous))
+                .onDrag { NSItemProvider(contentsOf: result.url) ?? NSItemProvider() }
+                .help("Drag the exported file anywhere")
+                .accessibilityLabel("Exported file \(result.url.lastPathComponent), draggable")
 
-            Button("Copy", systemImage: "doc.on.doc") { model.copyToPasteboard(result.url) }
-                .help("Copy the file to the clipboard")
-            Button("Show in Finder", systemImage: "folder") { model.revealInFinder(result.url) }
-            Button("Close", systemImage: "xmark") { model.resetExport() }
-                .labelStyle(.iconOnly)
-                .buttonStyle(PKToolButtonStyle())
-                .help("Dismiss")
+                Button("Copy", systemImage: "doc.on.doc") { model.copyToPasteboard(result.url) }
+                    .help("Copy the file to the clipboard")
+                Button("Show in Finder", systemImage: "folder") { model.revealInFinder(result.url) }
+            }
         }
-        .controlSize(.small)
     }
 }

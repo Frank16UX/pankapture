@@ -33,6 +33,10 @@ public final class WebcamBubble {
     /// Called when the user changes the bubble directly (resize, context menu),
     /// so the options/preferences can follow.
     public var onAppearanceChange: ((Appearance) -> Void)?
+    /// "Turn Off Camera" in the bubble's menu; offered when set and
+    /// `canTurnOff` agrees (not while recording).
+    public var onTurnOff: (() -> Void)?
+    public var canTurnOff: () -> Bool = { true }
 
     public private(set) var appearance: Appearance
     private var panel: OverlayPanel?
@@ -43,6 +47,7 @@ public final class WebcamBubble {
     private var currentDevice: AVCaptureDevice?
     private var frameOutput: AVCaptureVideoDataOutput?
     private var frameDelegate: CameraFrameDelegate?
+    private var deliveryQueue: DispatchSerialQueue?
 
     public init(appearance: Appearance = Appearance()) {
         self.appearance = appearance
@@ -85,6 +90,7 @@ public final class WebcamBubble {
         sessionHandle?.stopRunning()
         sessionHandle = nil
         session = nil
+        frameOutput = nil
         currentDeviceID = nil
         panel?.orderOut(nil)
         panel = nil
@@ -121,7 +127,7 @@ public final class WebcamBubble {
 
     static func bubbleSize(for appearance: Appearance) -> NSSize {
         let width = appearance.size.clamped(to: RecordingOptions.cameraSizeRange)
-        let height = appearance.shape == .circle ? width : (width * 3 / 4).rounded()
+        let height = (width * appearance.shape.heightRatio).rounded()
         return NSSize(width: width, height: height)
     }
 
@@ -167,6 +173,10 @@ public final class WebcamBubble {
             item.state = camera.id == selected ? .on : .off
             menu.addItem(item)
         }
+        if let onTurnOff, canTurnOff() {
+            menu.addItem(.separator())
+            menu.addItem(MenuActionItem(title: "Turn Off Camera") { onTurnOff() })
+        }
         return menu
     }
 
@@ -189,11 +199,36 @@ public final class WebcamBubble {
             Log.recording.error("No camera available for the webcam bubble")
             return
         }
+        let wasDelivering = frameDelegate
+        frameOutput?.setSampleBufferDelegate(nil, queue: nil)
         let session = AVCaptureSession()
         session.beginConfiguration()
         if session.canSetSessionPreset(.high) { session.sessionPreset = .high }
         if session.canAddInput(input) { session.addInput(input) }
+        // The recording's frame output is part of the session from the start:
+        // adding it when recording begins reconfigures the running camera,
+        // which blanks the bubble and drops about the first second of frames.
+        let output = AVCaptureVideoDataOutput()
+        output.alwaysDiscardsLateVideoFrames = true
+        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+            // The track is never mirrored; the editor mirrors on request.
+            if let connection = output.connection(with: .video), connection.isVideoMirroringSupported {
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = false
+            }
+            frameOutput = output
+        } else {
+            Log.recording.error("Camera frames can't be recorded: output rejected")
+            frameOutput = nil
+        }
         session.commitConfiguration()
+        if let wasDelivering, let frameOutput, let queue = deliveryQueue {
+            let delegate = wasDelivering.rebound(to: session.synchronizationClock)
+            frameOutput.setSampleBufferDelegate(delegate, queue: queue)
+            frameDelegate = delegate
+        }
 
         bubbleView?.attach(session: session, appearance: appearance)
         let handle = CaptureSessionHandle(session: session)
@@ -230,40 +265,20 @@ extension WebcamBubble: RecordingCameraSource {
     }
 
     public func startDeliveringFrames(on queue: DispatchSerialQueue, _ handler: @escaping @Sendable (CMSampleBuffer) -> Void) -> Bool {
-        guard let session, frameOutput == nil else { return frameOutput != nil }
-        let output = AVCaptureVideoDataOutput()
-        output.alwaysDiscardsLateVideoFrames = true
-        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
+        guard let session, let frameOutput else { return false }
+        guard frameDelegate == nil else { return true }
+        // Only the delegate changes: the session keeps running untouched.
         let delegate = CameraFrameDelegate(clock: session.synchronizationClock, handler: handler)
-        output.setSampleBufferDelegate(delegate, queue: queue)
-        session.beginConfiguration()
-        guard session.canAddOutput(output) else {
-            session.commitConfiguration()
-            Log.recording.error("Camera frames can't be recorded: output rejected")
-            return false
-        }
-        session.addOutput(output)
-        // The track is never mirrored; the editor mirrors on request.
-        if let connection = output.connection(with: .video), connection.isVideoMirroringSupported {
-            connection.automaticallyAdjustsVideoMirroring = false
-            connection.isVideoMirrored = false
-        }
-        session.commitConfiguration()
-        frameOutput = output
+        frameOutput.setSampleBufferDelegate(delegate, queue: queue)
         frameDelegate = delegate
+        deliveryQueue = queue
         return true
     }
 
     public func stopDeliveringFrames() {
-        guard let output = frameOutput else { return }
-        output.setSampleBufferDelegate(nil, queue: nil)
-        if let session {
-            session.beginConfiguration()
-            session.removeOutput(output)
-            session.commitConfiguration()
-        }
-        frameOutput = nil
+        frameOutput?.setSampleBufferDelegate(nil, queue: nil)
         frameDelegate = nil
+        deliveryQueue = nil
     }
 
     public func layout(in recordedFrame: CGRect) -> RecordingSidecar.Camera? {
@@ -276,6 +291,7 @@ extension WebcamBubble: RecordingCameraSource {
             ),
             size: frame.width / min(recordedFrame.width, recordedFrame.height),
             isCircle: appearance.shape == .circle,
+            shape: appearance.shape.rawValue,
             isMirrored: appearance.isMirrored
         )
     }
@@ -293,6 +309,11 @@ private final class CameraFrameDelegate: NSObject, AVCaptureVideoDataOutputSampl
     init(clock: CMClock?, handler: @escaping @Sendable (CMSampleBuffer) -> Void) {
         self.clock = clock
         self.handler = handler
+    }
+
+    /// The same handler on a new session's clock (the camera was switched mid-recording).
+    func rebound(to clock: CMClock?) -> CameraFrameDelegate {
+        CameraFrameDelegate(clock: clock, handler: handler)
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
@@ -354,7 +375,8 @@ private final class BubbleView: NSView {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let radius = shape == .circle ? min(bounds.width, bounds.height) / 2 : 18
+        // Square and rectangle match the editor's default roundness.
+        let radius = min(bounds.width, bounds.height) * (shape == .circle ? 0.5 : 0.18)
         layer?.cornerRadius = radius
         layer?.cornerCurve = .continuous
         previewLayer.frame = bounds

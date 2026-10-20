@@ -7,6 +7,7 @@ import Observation
 import Overlay
 import QuickAccess
 import Recording
+import Synchronization
 import VideoEditor
 
 /// Routes user intents (shortcuts, menu items, URLs) to capture flows and owns
@@ -19,6 +20,8 @@ final class CaptureCoordinator {
     private(set) var lastRecordingURL: URL?
     /// Recordings whose webcam is being drawn into the saved copy (ADR-25).
     private(set) var recordingsBeingPrepared = 0
+    /// 0…1 for the newest of them, `nil` when none is being prepared.
+    private(set) var cameraCompositeProgress: Double?
     private(set) var lastErrorMessage: String?
     /// Actions whose shortcut couldn't be registered (taken by another app).
     private(set) var shortcutConflicts: Set<ShortcutAction> = []
@@ -482,10 +485,16 @@ final class CaptureCoordinator {
         }
     }
 
-    private func recordingSaved(at url: URL, videoSize: CGSize, kind: CaptureKind = .recording) {
+    /// - Parameter thumbnail: the card already showing this recording while
+    ///   it was being prepared; it switches to the saved file.
+    private func recordingSaved(at url: URL, videoSize: CGSize, kind: CaptureKind = .recording, thumbnail: QuickAccessItem? = nil) {
         lastCaptureURL = url
         if kind == .recording { lastRecordingURL = url }
-        if UserDefaults.standard.bool(forKey: PreferenceKey.showThumbnail) {
+        if let thumbnail {
+            thumbnail.content = .video(url, size: videoSize)
+            thumbnail.fileURL = url
+            thumbnail.progress = nil
+        } else if UserDefaults.standard.bool(forKey: PreferenceKey.showThumbnail) {
             QuickAccessController.shared.show(.video(url, size: videoSize), fileURL: url)
         }
         CaptureNotifier.shared.notifyRecording(savedURL: url)
@@ -496,33 +505,68 @@ final class CaptureCoordinator {
     /// show. Keep that layered file as the editable original (Application
     /// Support) and save a copy with the webcam drawn in under the same name.
     /// The editor opens the original when asked for the copy.
+    ///
+    /// Drawing the copy re-encodes every frame, which is bound by the hardware
+    /// encoder (roughly real time for a 60 fps Retina recording), so nothing
+    /// waits for it: the thumbnail appears at once with a progress bar, and
+    /// the editor opens on the original.
     private func compositeCamera(_ result: RecordingResult, opensEditor: Bool) {
         let destination = result.url
         let source = AppPaths.recordingSources.appendingPathComponent(destination.lastPathComponent)
-        recordingsBeingPrepared += 1
-        Task {
-            defer { recordingsBeingPrepared -= 1 }
-            do {
-                try AppPaths.ensure(AppPaths.recordingSources)
-                try FileManager.default.moveItem(at: destination, to: source)
-            } catch {
-                Log.recording.error("Couldn't keep the layered recording: \(error.localizedDescription, privacy: .public)")
+        do {
+            try AppPaths.ensure(AppPaths.recordingSources)
+            try FileManager.default.moveItem(at: destination, to: source)
+        } catch {
+            Log.recording.error("Couldn't keep the layered recording: \(error.localizedDescription, privacy: .public)")
+            Task {
+                // Separate tracks only: give players a mixed one before saving.
+                _ = try? await AudioMixdown.addMixedTrack(to: destination)
                 recordingSaved(at: destination, videoSize: result.videoSize)
-                return
+                if opensEditor { videoEditor.open(url: destination) }
+            }
+            return
+        }
+
+        lastRecordingURL = destination
+        // The progress card shows even with thumbnails turned off, so it's
+        // clear the recording is still being saved; it then goes away.
+        let showsThumbnail = UserDefaults.standard.bool(forKey: PreferenceKey.showThumbnail)
+        let thumbnail = QuickAccessController.shared.show(.video(source, size: result.videoSize))
+        thumbnail.progressTitle = "Saving with camera"
+        thumbnail.progress = 0
+        if opensEditor { videoEditor.open(url: source) }
+
+        recordingsBeingPrepared += 1
+        cameraCompositeProgress = 0
+        let reporter = ProgressReporter { [weak self] fraction in
+            if thumbnail.isProcessing { thumbnail.progress = fraction }
+            self?.cameraCompositeProgress = fraction
+        }
+        Task {
+            defer {
+                recordingsBeingPrepared -= 1
+                if recordingsBeingPrepared == 0 { cameraCompositeProgress = nil }
             }
             do {
                 let start = ContinuousClock.now
-                let exported = try await CameraComposite.export(recordingAt: source, to: destination)
+                let resolution = UserDefaults.standard.string(forKey: PreferenceKey.recordingCameraCompositeResolution)
+                    .flatMap(ExportResolution.init(rawValue:)) ?? .original
+                let exported = try await CameraComposite.export(recordingAt: source, to: destination, resolution: resolution) {
+                    reporter.report($0)
+                }
                 Log.recording.info("Webcam composited in \((ContinuousClock.now - start).formatted(.units(allowed: [.seconds])), privacy: .public)")
-                recordingSaved(at: destination, videoSize: exported.pixelSize)
+                recordingSaved(at: destination, videoSize: exported.pixelSize, thumbnail: thumbnail)
+                if !showsThumbnail { QuickAccessController.shared.dismiss(thumbnail) }
             } catch {
-                // Give the user the layered file rather than nothing.
-                try? FileManager.default.moveItem(at: source, to: destination)
+                // Give the user the layered file rather than nothing, with a
+                // mixed audio track so every player has the mic.
                 Log.recording.error("Webcam composite failed: \(error.localizedDescription, privacy: .public)")
-                recordingSaved(at: destination, videoSize: result.videoSize)
+                _ = try? await AudioMixdown.addMixedTrack(to: source)
+                try? FileManager.default.moveItem(at: source, to: destination)
+                recordingSaved(at: destination, videoSize: result.videoSize, thumbnail: thumbnail)
+                if !showsThumbnail { QuickAccessController.shared.dismiss(thumbnail) }
                 OutputService.presentError("The camera couldn't be added to the saved video. Open it in the editor and export it to include the camera.", error)
             }
-            if opensEditor { videoEditor.open(url: destination) }
         }
     }
 
@@ -653,5 +697,28 @@ final class CaptureCoordinator {
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
         return screen?.displayID
+    }
+}
+
+/// Forwards export progress (called on an encoder queue, once per frame) to
+/// the main actor in whole-percent steps.
+private final class ProgressReporter: Sendable {
+    private let lastPercent = Mutex(-1)
+    private let update: @MainActor (Double) -> Void
+
+    init(_ update: @escaping @MainActor (Double) -> Void) {
+        self.update = update
+    }
+
+    func report(_ fraction: Double) {
+        let percent = Int((fraction * 100).rounded(.down))
+        let changed = lastPercent.withLock { last in
+            guard percent > last else { return false }
+            last = percent
+            return true
+        }
+        guard changed else { return }
+        let update = self.update
+        Task { @MainActor in update(Double(percent) / 100) }
     }
 }

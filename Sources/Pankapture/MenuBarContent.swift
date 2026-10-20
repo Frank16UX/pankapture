@@ -29,7 +29,11 @@ struct MenuBarContent: View {
 
         Section("Recording") {
             if coordinator.recordingsBeingPrepared > 0 {
-                Text("Adding the camera to your recording…")
+                if let progress = coordinator.cameraCompositeProgress {
+                    Text("Adding the camera to your recording… \(progress, format: .percent.precision(.fractionLength(0)))")
+                } else {
+                    Text("Adding the camera to your recording…")
+                }
             }
             if coordinator.recording.isRecording {
                 let recorder = coordinator.recording.recorder

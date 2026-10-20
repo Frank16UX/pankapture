@@ -258,6 +258,16 @@ private struct CameraSection: View {
                             .accessibilityLabel("Camera size")
                     }
                     Toggle("Mirror", isOn: $model.options.cameraMirrored)
+                    Picker("Save camera", selection: $model.options.cameraAsLayer) {
+                        Text("As a layer").tag(true)
+                        Text("In the video").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    Text(model.options.cameraAsLayer
+                         ? "Move, resize, or hide the camera in the editor. The saved video takes a moment after you stop while the camera is added."
+                         : "The camera is recorded as you see it, in one video file that's saved as soon as you stop. It can't be moved later.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Text("Drag the bubble to move it. Drag its corner or ⌘-scroll to resize.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

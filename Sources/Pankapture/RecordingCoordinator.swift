@@ -12,6 +12,7 @@ import SwiftUI
 final class RecordingCoordinator {
     let controller = RecordingController()
     @ObservationIgnored private var optionsPanel: NSPanel?
+    @ObservationIgnored private var optionsCloseObserver: (any NSObjectProtocol)?
 
     var recorder: ScreenRecorder { controller.recorder }
     var isRecording: Bool { controller.recorder.state.isActive }
@@ -53,6 +54,14 @@ final class RecordingCoordinator {
             panel.setFrameOrigin(CGPoint(x: max(visible.minX + 8, visible.maxX - size.width - 16),
                                          y: max(visible.minY + 8, visible.maxY - size.height - 8)))
         }
+        // Closing the panel (its close button, ⌘W) cancels the setup. SwiftUI's
+        // onDisappear doesn't fire for a closed window that's kept around, so
+        // tell the controller directly; it hides the camera preview.
+        optionsCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.optionsClosed() }
+        }
         optionsPanel = panel
         NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
@@ -60,7 +69,13 @@ final class RecordingCoordinator {
 
     func closeOptions() {
         optionsPanel?.close()
+    }
+
+    private func optionsClosed() {
+        if let optionsCloseObserver { NotificationCenter.default.removeObserver(optionsCloseObserver) }
+        optionsCloseObserver = nil
         optionsPanel = nil
+        controller.optionsDidDisappear()
     }
 
     /// ⌥⇧⌘X: stop if recording, otherwise open the options.

@@ -90,7 +90,8 @@ final class VideoEditCompositor: NSObject, AVVideoCompositing, Sendable {
             .flatMap { request.sourceFrame(byTrackID: $0) }
             .map { CIImage(cvPixelBuffer: $0) }
         var image: CIImage
-        if let sourceBuffer = request.sourceFrame(byTrackID: instruction.sourceTrackID) {
+        let sourceBuffer = request.sourceFrame(byTrackID: instruction.sourceTrackID)
+        if let sourceBuffer {
             image = renderer.render(
                 source: CIImage(cvPixelBuffer: sourceBuffer),
                 outputTime: request.compositionTime.seconds,
@@ -118,9 +119,23 @@ final class VideoEditCompositor: NSObject, AVVideoCompositing, Sendable {
             image,
             to: output,
             bounds: CGRect(origin: .zero, size: contextSize),
-            colorSpace: Self.colorSpace
+            colorSpace: Self.outputColorSpace(matching: sourceBuffer, output: output)
         )
         request.finish(withComposedVideoFrame: output)
+    }
+
+    /// The color space the output frame is encoded in. Core Image reads the
+    /// source in the color space attached to its buffer; rendering back into
+    /// that same space leaves unedited pixels exactly as recorded. Rendering
+    /// to sRGB instead brightened every frame against the original (the
+    /// video is tagged Rec. 709).
+    static func outputColorSpace(matching source: CVPixelBuffer?, output: CVPixelBuffer) -> CGColorSpace {
+        if let source, let space = CVImageBufferGetColorSpace(source)?.takeUnretainedValue() { return space }
+        if let attachments = CVBufferCopyAttachments(output, .shouldPropagate),
+           let space = CVImageBufferCreateColorSpaceFromAttachments(attachments)?.takeRetainedValue() {
+            return space
+        }
+        return colorSpace
     }
 
     /// The fill + shadow for this plan, rendered to a bitmap once and reused

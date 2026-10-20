@@ -420,6 +420,14 @@ private struct CameraSection: View {
                     ForEach(CameraOverlay.Shape.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                if camera.shape.hasCorners {
+                    EditSlider(model: model, title: "Roundness", value: camera.roundness, range: CameraOverlay.roundnessRange,
+                               format: { Format.percent($0 / CameraOverlay.roundnessRange.upperBound) }) { project, roundness in
+                        var camera = project.camera ?? .standard
+                        camera.roundness = roundness
+                        project.camera = camera
+                    }
+                }
                 EditSlider(model: model, title: "Size", value: camera.size, range: CameraOverlay.sizeRange,
                            format: { Format.percent($0) }) { project, size in
                     var camera = project.camera ?? .standard

@@ -40,11 +40,26 @@ public struct RecordingOptions: Equatable, Sendable {
 
     public enum CameraShape: String, CaseIterable, Sendable, Identifiable {
         case circle
+        case square
         case roundedRectangle
 
         public var id: String { rawValue }
-        public var title: String { self == .circle ? "Circle" : "Rounded" }
-        public var symbolName: String { self == .circle ? "circle" : "rectangle" }
+        public var title: String {
+            switch self {
+            case .circle: "Circle"
+            case .square: "Square"
+            case .roundedRectangle: "Rectangle"
+            }
+        }
+        public var symbolName: String {
+            switch self {
+            case .circle: "circle"
+            case .square: "square"
+            case .roundedRectangle: "rectangle"
+            }
+        }
+        /// Height ÷ width of the bubble.
+        var heightRatio: Double { self == .roundedRectangle ? 3.0 / 4.0 : 1 }
     }
 
     /// Click-ring colors. These are *content* (they're recorded), so they're
@@ -85,6 +100,9 @@ public struct RecordingOptions: Equatable, Sendable {
     public var cameraMirrored = true
     /// Bubble width in points.
     public var cameraSize: Double = 200
+    /// The camera as its own editable track (ADR-25) instead of recorded
+    /// into the screen video. See `PreferenceKey.recordingCameraAsLayer`.
+    public var cameraAsLayer = true
     public var framesPerSecond = 60
     public var codec: RecordingConfiguration.Codec = .h264
     public var quality: RecordingConfiguration.Quality = .medium
@@ -145,6 +163,7 @@ public struct RecordingOptions: Equatable, Sendable {
         options.cameraMirrored = bool(PreferenceKey.recordingCameraMirrored, options.cameraMirrored)
         options.cameraSize = double(PreferenceKey.recordingCameraSize, options.cameraSize)
             .clamped(to: cameraSizeRange)
+        options.cameraAsLayer = bool(PreferenceKey.recordingCameraAsLayer, options.cameraAsLayer)
         options.framesPerSecond = int(PreferenceKey.recordingFrameRate, options.framesPerSecond)
         options.codec = string(PreferenceKey.recordingCodec).flatMap(RecordingConfiguration.Codec.init(rawValue:)) ?? options.codec
         options.quality = string(PreferenceKey.recordingQuality).flatMap(RecordingConfiguration.Quality.init(rawValue:)) ?? options.quality
@@ -169,6 +188,7 @@ public struct RecordingOptions: Equatable, Sendable {
         defaults.set(cameraShape.rawValue, forKey: PreferenceKey.recordingCameraShape)
         defaults.set(cameraMirrored, forKey: PreferenceKey.recordingCameraMirrored)
         defaults.set(cameraSize, forKey: PreferenceKey.recordingCameraSize)
+        defaults.set(cameraAsLayer, forKey: PreferenceKey.recordingCameraAsLayer)
         defaults.set(framesPerSecond, forKey: PreferenceKey.recordingFrameRate)
         defaults.set(codec.rawValue, forKey: PreferenceKey.recordingCodec)
         defaults.set(quality.rawValue, forKey: PreferenceKey.recordingQuality)

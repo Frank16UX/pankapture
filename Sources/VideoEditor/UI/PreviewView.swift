@@ -201,7 +201,7 @@ private struct CameraLayerEditor: View {
             let pixels = camera.frame(video: plan.videoRect, canvas: CGRect(origin: .zero, size: plan.renderSize))
             let rect = CGRect(x: canvas.minX + pixels.minX * scale, y: canvas.minY + pixels.minY * scale,
                               width: pixels.width * scale, height: pixels.height * scale)
-            let shape = RoundedRectangle(cornerRadius: camera.shape == .circle ? rect.height / 2 : rect.height * 0.12, style: .continuous)
+            let shape = RoundedRectangle(cornerRadius: camera.cornerRadius(for: rect.size))
             ZStack(alignment: .topLeading) {
                 shape
                     // Overlay chrome over arbitrary video: fixed overlay tokens (DESIGN §2).

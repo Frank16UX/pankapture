@@ -278,6 +278,9 @@ struct CameraLayerTests {
         let sidecar = RecordingSidecar.Camera(center: CGPoint(x: 0.2, y: 0.75), size: 0.3, isCircle: false, isMirrored: false)
         let camera = CameraOverlay(sidecar)
         #expect(camera.shape == .roundedRectangle)
+        // Newer sidecars name the shape, including the square.
+        let square = RecordingSidecar.Camera(center: .zero, size: 0.3, isCircle: false, shape: "square", isMirrored: true)
+        #expect(CameraOverlay(square).shape == .square)
         let frame = camera.frame(video: CGRect(x: 0, y: 0, width: 200, height: 100), canvas: CGRect(x: 0, y: 0, width: 200, height: 100))
         #expect(abs(frame.width - 30) < 1e-9 && abs(frame.height - 22.5) < 1e-9)
         #expect(abs(frame.midX - 40) < 1e-9 && abs(frame.midY - 75) < 1e-9)
@@ -320,6 +323,24 @@ struct CameraLayerTests {
         #expect(RenderPlan(project: project, sourceSize: CGSize(width: 100, height: 100), hasCameraTrack: false).camera == nil)
     }
 
+    @Test func squareAndRectangleTakeTheChosenRoundness() throws {
+        var camera = CameraOverlay(center: CGPoint(x: 0.5, y: 0.5), size: 0.3, shape: .square, roundness: 0.25)
+        #expect(camera.shape.aspect == 1)
+        #expect(camera.cornerRadius(for: CGSize(width: 200, height: 200)) == 50)
+        camera.shape = .roundedRectangle
+        #expect(camera.cornerRadius(for: CGSize(width: 200, height: 150)) == 37.5)
+        camera.roundness = 0
+        #expect(camera.cornerRadius(for: CGSize(width: 200, height: 150)) == 0)
+        camera.shape = .circle // always round, whatever the roundness
+        #expect(camera.cornerRadius(for: CGSize(width: 120, height: 120)) == 60)
+
+        // Projects saved before roundness existed get the default.
+        let old = #"{"isVisible":true,"center":[0.2,0.8],"size":0.25,"shape":"roundedRectangle","isMirrored":true}"#
+        let decoded = try JSONDecoder().decode(CameraOverlay.self, from: Data(old.utf8))
+        #expect(decoded.roundness == CameraOverlay.defaultRoundness)
+        #expect(decoded.shape == .roundedRectangle)
+    }
+
     @Test func cameraTrackIsFoundAndExportedAsALayer() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -344,6 +365,46 @@ struct CameraLayerTests {
         let center = pixel(Int(rect.midX), frame.height - Int(rect.midY))
         #expect(center.g > 200 && center.b < 60)
         #expect(pixel(150, 10).b > 200)
+    }
+
+    /// The size setting for the camera copy only ever shrinks it.
+    @Test func cameraCopyIsNeverUpscaled() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await TestMovie.make(TestMovie.Spec(duration: 0.5, cameraColor: (0, 255, 0)), in: directory)
+        let result = try await CameraComposite.export(
+            recordingAt: url, to: directory.appendingPathComponent("copy.mp4"), resolution: .uhd4K
+        )
+        #expect(result.pixelSize == CGSize(width: 160, height: 90))
+    }
+
+    /// Showing the camera switches the preview to the Core Image compositor;
+    /// the screen around it must look exactly as with the camera hidden (the
+    /// plain built-in compositor). It came out brighter when rendered to sRGB.
+    @Test func compositorKeepsTheRecordingsColors() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await TestMovie.make(
+            TestMovie.Spec(duration: 1, color: (50, 50, 50), cameraColor: (0, 255, 0), tagsRec709: true), in: directory
+        )
+        let source = try await SourceMedia.load(url: url)
+
+        func frame(cameraVisible: Bool) async throws -> CGImage {
+            var project = VideoEditProject.initial(for: source)
+            project.camera?.isVisible = cameraVisible
+            let edit = try await CompositionBuilder.build(source: source, project: project, options: .preview(frameRate: 30))
+            #expect((edit.videoComposition?.customVideoCompositorClass != nil) == cameraVisible)
+            let generator = AVAssetImageGenerator(asset: edit.composition)
+            generator.videoComposition = edit.videoComposition
+            generator.requestedTimeToleranceBefore = .zero
+            generator.requestedTimeToleranceAfter = .zero
+            return try await generator.image(at: CMTime(value: 1, timescale: 2)).image
+        }
+        let plain = rgb(of: try await frame(cameraVisible: false))(150, 10)
+        let composited = rgb(of: try await frame(cameraVisible: true))(150, 10)
+        for (a, b) in [(plain.r, composited.r), (plain.g, composited.g), (plain.b, composited.b)] {
+            #expect(abs(Int(a) - Int(b)) <= 2, "built-in \(plain) vs compositor \(composited)")
+        }
     }
 
     private func rgb(of image: CGImage) -> (Int, Int) -> (r: UInt8, g: UInt8, b: UInt8) {

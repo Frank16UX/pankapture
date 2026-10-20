@@ -83,6 +83,8 @@ public final class RecordingController {
             options.cameraDeviceID = appearance.deviceID
             self.optionsModel.options = options
         }
+        webcam.onTurnOff = { [weak self] in self?.optionsModel.options.showsCamera = false }
+        webcam.canTurnOff = { [weak self] in self?.isBusy == false }
         self.recorder.onInterrupted = { [weak self] error, result in
             self?.tearDownOverlays()
             self?.onFinish?(.interrupted(error, result))
@@ -236,16 +238,21 @@ public final class RecordingController {
         // its display (`StreamSetup.windowWithOverlays`).
         var overlayIDs: [CGWindowID] = []
 
-        // The camera is its own track (ADR-25): the bubble stays on screen as
-        // a preview but out of the screen capture, so the editor can move it.
+        // As a layer (ADR-25), the bubble stays on screen as a preview but
+        // out of the screen capture, so the editor can move it. Otherwise
+        // it's recorded like the other overlays: one file, nothing to add later.
         recorder.cameraSource = nil
         recorder.cameraLayoutProvider = nil
         if options.showsCamera, await webcam.show(on: screen) {
-            if let recordedFrame {
-                webcam.keepInside(recordedFrame)
-                recorder.cameraLayoutProvider = { [weak webcam] in webcam?.layout(in: recordedFrame) }
+            if let recordedFrame { webcam.keepInside(recordedFrame) }
+            if options.cameraAsLayer {
+                if let recordedFrame {
+                    recorder.cameraLayoutProvider = { [weak webcam] in webcam?.layout(in: recordedFrame) }
+                }
+                recorder.cameraSource = webcam
+            } else if let id = webcam.windowID {
+                overlayIDs.append(id)
             }
-            recorder.cameraSource = webcam
         }
         if options.highlightsClicks {
             clickHighlighter.style = .init(color: options.clickColor, diameter: options.clickSize)

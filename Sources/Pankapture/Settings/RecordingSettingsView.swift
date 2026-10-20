@@ -1,5 +1,6 @@
 import AppCore
 import SwiftUI
+import VideoEditor
 
 /// Recording preferences that aren't per-take (the options panel holds those).
 struct RecordingSettingsView: View {
@@ -8,6 +9,7 @@ struct RecordingSettingsView: View {
     @AppStorage(PreferenceKey.recordingCodec) private var codec = "h264"
     @AppStorage(PreferenceKey.recordingFrameRate) private var frameRate = 60
     @AppStorage(PreferenceKey.recordingQuality) private var quality = "medium"
+    @AppStorage(PreferenceKey.recordingCameraCompositeResolution) private var compositeResolution = ExportResolution.original.rawValue
 
     var body: some View {
         Form {
@@ -33,6 +35,18 @@ struct RecordingSettingsView: View {
                     Text("Medium").tag("medium")
                     Text("High").tag("high")
                 }
+            }
+
+            Section {
+                Picker("Video size with camera", selection: $compositeResolution) {
+                    ForEach(ExportResolution.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+            } header: {
+                Text("Camera")
+            } footer: {
+                Text("When the camera is saved as a layer, the video you share is re-rendered with the camera after you stop. Smaller sizes are ready sooner; the editable original keeps full size. Never larger than the recording.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section {

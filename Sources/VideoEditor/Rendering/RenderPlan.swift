@@ -251,7 +251,7 @@ public struct FrameRenderer: Sendable {
                 .concatenating(CGAffineTransform(translationX: rect.minX, y: rect.minY)))
             .cropped(to: rect)
 
-        let radius = overlay.shape == .circle ? rect.height / 2 : rect.height * 0.12
+        let radius = overlay.cornerRadius(for: rect.size)
         let blend = CIFilter.blendWithAlphaMask()
         blend.inputImage = placed
         blend.backgroundImage = CIImage.empty()

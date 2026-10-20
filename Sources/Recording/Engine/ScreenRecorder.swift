@@ -339,10 +339,15 @@ public final class ScreenRecorder {
             throw (error as? RecordingError) ?? RecordingError.writerFailed(error.localizedDescription)
         }
         // Players that play only the first audio track would miss the mic.
-        do {
-            try await AudioMixdown.addMixedTrack(to: summary.url)
-        } catch {
-            Log.recording.error("Audio mixdown failed; keeping separate tracks: \(error.localizedDescription, privacy: .public)")
+        // With a camera track the app saves a re-rendered copy (ADR-25) that
+        // mixes the audio itself, so this pass over the file would only delay it.
+        let hasCameraTrack = await writer.hasCameraTrack
+        if !hasCameraTrack {
+            do {
+                try await AudioMixdown.addMixedTrack(to: summary.url)
+            } catch {
+                Log.recording.error("Audio mixdown failed; keeping separate tracks: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         let fm = FileManager.default
@@ -362,7 +367,6 @@ public final class ScreenRecorder {
             guard time >= 0, time <= summary.duration else { return nil }
             return RecordingSidecar.Click(time: time, location: click.location, isRightClick: click.isRightClick)
         }
-        let hasCameraTrack = await writer.hasCameraTrack
         let sidecar = RecordingSidecar(
             videoSize: summary.videoSize, duration: summary.duration, clicks: sidecarClicks,
             camera: hasCameraTrack ? cameraLayout : nil
