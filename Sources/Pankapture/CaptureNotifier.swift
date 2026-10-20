@@ -12,20 +12,32 @@ final class CaptureNotifier: NSObject {
     private enum ID {
         static let savedCategory = "capture.saved"
         static let copiedCategory = "capture.copied"
+        static let recordingCategory = "recording.saved"
         static let open = "capture.open"
         static let reveal = "capture.reveal"
+        static let edit = "recording.edit"
         static let fileKey = "fileURL"
     }
 
     private let center = UNUserNotificationCenter.current()
+
+    /// Opens a recording in the video editor (clicking a "Recording saved"
+    /// notification, or its Edit action).
+    var onEditRecording: ((URL) -> Void)?
+
+    private func edit(_ url: URL) {
+        if let onEditRecording { onEditRecording(url) } else { NSWorkspace.shared.open(url) }
+    }
 
     /// Call once at launch.
     func configure() {
         center.delegate = self
         let open = UNNotificationAction(identifier: ID.open, title: "Open", options: [.foreground])
         let reveal = UNNotificationAction(identifier: ID.reveal, title: "Show in Finder", options: [.foreground])
+        let edit = UNNotificationAction(identifier: ID.edit, title: "Edit", options: [.foreground])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: ID.savedCategory, actions: [open, reveal], intentIdentifiers: []),
+            UNNotificationCategory(identifier: ID.recordingCategory, actions: [edit, reveal], intentIdentifiers: []),
             UNNotificationCategory(identifier: ID.copiedCategory, actions: [], intentIdentifiers: []),
         ])
     }
@@ -63,13 +75,15 @@ final class CaptureNotifier: NSObject {
         }
     }
 
-    /// Confirms a saved recording, with Open and Show in Finder.
+    /// Confirms a saved recording. Clicking it (or Edit) opens the video
+    /// editor; GIFs get Open and Show in Finder.
     func notifyRecording(savedURL: URL) {
         guard UserDefaults.standard.bool(forKey: PreferenceKey.showNotifications) else { return }
         let content = UNMutableNotificationContent()
-        content.title = savedURL.pathExtension.lowercased() == "gif" ? "GIF saved" : "Recording saved"
-        content.body = savedURL.lastPathComponent
-        content.categoryIdentifier = ID.savedCategory
+        let isGIF = savedURL.pathExtension.lowercased() == "gif"
+        content.title = isGIF ? "GIF saved" : "Recording saved"
+        content.body = isGIF ? savedURL.lastPathComponent : "\(savedURL.lastPathComponent) · click to edit"
+        content.categoryIdentifier = isGIF ? ID.savedCategory : ID.recordingCategory
         content.userInfo = [ID.fileKey: savedURL.path]
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         Task {
@@ -137,10 +151,15 @@ extension CaptureNotifier: UNUserNotificationCenterDelegate {
         guard let path = response.notification.request.content.userInfo[ID.fileKey] as? String else { return }
         let url = URL(fileURLWithPath: path)
         let action = response.actionIdentifier
+        let isRecording = response.notification.request.content.categoryIdentifier == ID.recordingCategory
         await MainActor.run {
             switch action {
             case ID.reveal:
                 NSWorkspace.shared.activateFileViewerSelecting([url])
+            case ID.edit:
+                CaptureNotifier.shared.edit(url)
+            case UNNotificationDefaultActionIdentifier where isRecording:
+                CaptureNotifier.shared.edit(url)
             case ID.open, UNNotificationDefaultActionIdentifier:
                 NSWorkspace.shared.open(url)
             default:

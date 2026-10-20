@@ -12,7 +12,7 @@ struct MediaPipelineTests {
     @Test func loadsSourceProperties() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let url = try TestMovie.make(TestMovie.Spec(audioAmplitudes: [0.5, 0]), in: directory)
+        let url = try await TestMovie.make(TestMovie.Spec(audioAmplitudes: [0.5, 0]), in: directory)
 
         let source = try await SourceMedia.load(url: url)
         #expect(abs(source.duration - 2) < 0.1)
@@ -25,7 +25,7 @@ struct MediaPipelineTests {
     @Test func compositionDropsCutsAndAppliesSpeed() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let url = try TestMovie.make(in: directory)
+        let url = try await TestMovie.make(in: directory)
         let source = try await SourceMedia.load(url: url)
 
         var project = VideoEditProject(sourceURL: url, sourceDuration: source.duration)
@@ -45,7 +45,7 @@ struct MediaPipelineTests {
     @Test func mutedTracksAreLeftOutOfExports() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let url = try TestMovie.make(in: directory)
+        let url = try await TestMovie.make(in: directory)
         let source = try await SourceMedia.load(url: url)
         var project = VideoEditProject(sourceURL: url, sourceDuration: source.duration)
         project.trackVolumes.system.isMuted = true
@@ -61,7 +61,7 @@ struct MediaPipelineTests {
     @Test func exportsMP4WithEdits() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let url = try TestMovie.make(in: directory)
+        let url = try await TestMovie.make(in: directory)
         let source = try await SourceMedia.load(url: url)
         var project = VideoEditProject(sourceURL: url, sourceDuration: source.duration)
         project.addCut(TimeRange(start: 0.5, end: 1.0))
@@ -92,7 +92,7 @@ struct MediaPipelineTests {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         // Blue movie on a red background.
-        let url = try TestMovie.make(TestMovie.Spec(color: (255, 0, 0)), in: directory)
+        let url = try await TestMovie.make(TestMovie.Spec(color: (255, 0, 0)), in: directory)
         let source = try await SourceMedia.load(url: url)
         var project = VideoEditProject(sourceURL: url, sourceDuration: source.duration)
         project.addCut(TimeRange(start: 0.5, end: 1.0))
@@ -124,7 +124,7 @@ struct MediaPipelineTests {
     @Test func convertsAWholeMovieToGIF() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let url = try TestMovie.make(TestMovie.Spec(duration: 1), in: directory)
+        let url = try await TestMovie.make(TestMovie.Spec(duration: 1), in: directory)
         let output = directory.appendingPathComponent("direct.gif")
         let result = try await GIFExporter.convert(videoAt: url, to: output, options: GIFOptions(width: nil, fps: 10))
         #expect(result.pixelSize == CGSize(width: 160, height: 90))
@@ -135,7 +135,7 @@ struct MediaPipelineTests {
     @Test func cancellingAnExportStopsItAndRemovesTheFile() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let url = try TestMovie.make(in: directory)
+        let url = try await TestMovie.make(in: directory)
         let source = try await SourceMedia.load(url: url)
         let project = VideoEditProject(sourceURL: url, sourceDuration: source.duration)
         let output = directory.appendingPathComponent("cancelled.mp4")
@@ -151,7 +151,7 @@ struct MediaPipelineTests {
     @Test func waveformsReflectTrackLoudness() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let url = try TestMovie.make(TestMovie.Spec(audioAmplitudes: [0.5, 0]), in: directory)
+        let url = try await TestMovie.make(TestMovie.Spec(audioAmplitudes: [0.5, 0]), in: directory)
         let source = try await SourceMedia.load(url: url)
 
         let loud = try await WaveformExtractor.waveform(asset: source.asset, trackID: source.audioTracks[0].trackID)
@@ -165,7 +165,7 @@ struct MediaPipelineTests {
     @Test func filmstripFramesAreGenerated() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let url = try TestMovie.make(in: directory)
+        let url = try await TestMovie.make(in: directory)
         let source = try await SourceMedia.load(url: url)
         let frames = await FilmstripGenerator.frames(asset: source.asset, duration: source.duration, count: 4, maximumSize: CGSize(width: 64, height: 64))
         #expect(frames.count == 4)
@@ -181,7 +181,7 @@ struct MediaPipelineTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         // Stored frame: left half red, right half blue. Rotated 90° clockwise
         // for display, the left half ends up on top.
-        let url = try TestMovie.make(
+        let url = try await TestMovie.make(
             TestMovie.Spec(duration: 1, color: (0, 0, 255), rightColor: (255, 0, 0), transform: CGAffineTransform(rotationAngle: .pi / 2)),
             in: directory
         )

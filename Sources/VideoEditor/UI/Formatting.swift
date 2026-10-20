@@ -52,3 +52,16 @@ extension GradientPreset {
         )
     }
 }
+
+extension CustomGradient {
+    /// The same direction as the export (`endpoints(in:)`), in unit points.
+    var linearGradient: LinearGradient {
+        let radians = angle * .pi / 180
+        let dx = cos(radians) / 2, dy = sin(radians) / 2
+        return LinearGradient(
+            colors: [start.swiftUIColor, end.swiftUIColor],
+            startPoint: UnitPoint(x: 0.5 - dx, y: 0.5 - dy),
+            endPoint: UnitPoint(x: 0.5 + dx, y: 0.5 + dy)
+        )
+    }
+}

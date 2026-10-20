@@ -50,6 +50,10 @@ struct StreamSetup {
             guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
                 throw RecordingError.windowNotFound(windowID)
             }
+            if !config.includedOverlayWindowIDs.isEmpty,
+               let setup = windowWithOverlays(window, config: config, content: content, stream: stream) {
+                return setup
+            }
             let filter = SCContentFilter(desktopIndependentWindow: window)
             let size = RecordingGeometry.outputPixelSize(
                 forPointSize: filter.contentRect.size, scale: CGFloat(filter.pointPixelScale)
@@ -91,6 +95,43 @@ struct StreamSetup {
         }
     }
 
+    /// A single-window filter renders only that window, so the webcam bubble,
+    /// click rings, and keystrokes (ADR-5) would be missing. With overlays,
+    /// record the window's area of its display instead, showing only the
+    /// window and the overlays. The area is fixed at the window's frame when
+    /// recording starts. Returns `nil` if the window isn't on a display.
+    private static func windowWithOverlays(
+        _ window: SCWindow,
+        config: RecordingConfiguration,
+        content: SCShareableContent,
+        stream: SCStreamConfiguration
+    ) -> StreamSetup? {
+        // SCWindow/SCDisplay frames are Quartz global points.
+        let windowFrame = window.frame
+        guard let display = content.displays.max(by: {
+            area($0.frame.intersection(windowFrame)) < area($1.frame.intersection(windowFrame))
+        }), area(display.frame.intersection(windowFrame)) > 0 else { return nil }
+
+        let included = Set(config.includedOverlayWindowIDs)
+        let overlays = content.windows.filter { included.contains($0.windowID) }
+        let filter = SCContentFilter(display: display, including: [window] + overlays)
+        let displayLocal = windowFrame.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
+        guard let capture = RecordingGeometry.areaCapture(
+            rect: displayLocal, displaySize: display.frame.size, scale: CGFloat(filter.pointPixelScale)
+        ) else { return nil }
+        stream.sourceRect = capture.sourceRect
+        stream.width = capture.width
+        stream.height = capture.height
+        return StreamSetup(
+            filter: filter, configuration: stream, sourceRect: capture.sourceRect,
+            outputSize: CGSize(width: capture.width, height: capture.height)
+        )
+    }
+
+    private static func area(_ rect: CGRect) -> CGFloat {
+        rect.isNull ? 0 : rect.width * rect.height
+    }
+
     /// Re-resolves just the filter (used to keep newly opened Finder windows
     /// visible while desktop icons are hidden).
     @MainActor
@@ -102,7 +143,9 @@ struct StreamSetup {
     }
 
     /// Display filter that excludes every Pankapture window except the overlays
-    /// that belong in the video (ADR-5), and optionally Finder's desktop icons.
+    /// that belong in the video (ADR-5) and its standard windows such as the
+    /// editors (`OwnWindows`), and optionally Finder's desktop icons.
+    @MainActor
     private static func displayFilter(
         _ displayID: CGDirectDisplayID,
         config: RecordingConfiguration,
@@ -113,7 +156,7 @@ struct StreamSetup {
         }
         let ownPID = ProcessInfo.processInfo.processIdentifier
         var excludedApps = content.applications.filter { $0.processID == ownPID }
-        let included = Set(config.includedOverlayWindowIDs)
+        let included = Set(config.includedOverlayWindowIDs).union(OwnWindows.capturableIDs())
         var exceptions = content.windows.filter { included.contains($0.windowID) }
 
         if config.hidesDesktopIcons {

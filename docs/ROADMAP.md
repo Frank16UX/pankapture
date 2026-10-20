@@ -70,7 +70,8 @@ The day this lands, the old screenshot tool can be uninstalled.
 - [x] Keystroke display with Accessibility onboarding (REC-12) (needs QA)
 - [x] Hide desktop icons / cursor (REC-13); GIF recording mode (REC-14); Focus reminder (REC-15)
 
-Known limit: window recordings don't include the webcam/click/keystroke overlays (single-window capture only sees that window).
+- [x] Window recordings include the webcam/click/keystroke overlays (ADR-23)
+- [x] Mixed default audio track so single-track players include the mic (REC-4, ADR-22)
 
 ## M5 · Video editor ✅
 
@@ -81,8 +82,15 @@ Known limit: window recordings don't include the webcam/click/keystroke overlays
 - [x] Per-track volume/mute (VE-7)
 - [x] Export MP4/GIF with presets, size estimate, background progress (VE-8, VE-9); copy/drag result (VE-10)
 - [x] Segment speed (VE-11)
+- [x] Split at playhead and delete segments (VE-3); zoom duration handles, ⌫ deletes a zoom, full-frame zoom (VE-4)
+- [x] Custom gradient, image, and video backgrounds; shadow no longer cut off at padding (VE-6)
+- [x] Explicit save with unsaved-changes prompt and crash drafts (VE-12, ADR-24)
+- [x] Editor reachable from the notification, menu bar (Edit Last Recording), and Open With (VE-1)
+- [x] Webcam as its own layer: move/resize/shape/mirror/hide in the editor, unaffected by zooms; saved video composited automatically (VE-13, ADR-25)
+- [x] Audio lanes labeled by source; silent tracks hidden (VE-7); 1440p and 4K export (VE-8)
+- [x] Screenshots and recordings can include Pankapture's own editor/history/Settings windows (SC-11, ADR-26)
 
-**QA:** timeline gestures with a real mouse (trim handles, zoom edges, zoom-rectangle editor).
+**QA:** timeline gestures with a real mouse (trim handles, zoom edges, zoom-rectangle editor); a video background playing in the preview; a recording with the webcam on (no camera dropout at start, thumbnail progress during the composite, editing the layer and its roundness); the export bottom sheet over bright and dark video; "Save camera: In the video" saves at once; closing the options panel hides the camera preview; screenshot and recording of the editor window.
 
 ## M6 · Capture history ✅
 

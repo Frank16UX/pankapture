@@ -72,6 +72,11 @@ public final class ScreenRecorder {
     @ObservationIgnored private var countdown: CountdownOverlay?
     @ObservationIgnored private var signpostState: OSSignpostIntervalState?
 
+    /// Records the camera as its own track when set before `start` (ADR-25).
+    @ObservationIgnored public var cameraSource: RecordingCameraSource?
+    /// Where the camera bubble is, read when the recording is finalized.
+    @ObservationIgnored public var cameraLayoutProvider: (() -> RecordingSidecar.Camera?)?
+
     private struct LoggedClick {
         var hostTime: CMTime
         var location: CGPoint
@@ -151,7 +156,8 @@ public final class ScreenRecorder {
                 capturesSystemAudio: config.capturesSystemAudio,
                 capturesMicrophone: config.capturesMicrophone,
                 microphoneSampleRate: micFormat.sampleRate,
-                microphoneChannels: micFormat.channels
+                microphoneChannels: micFormat.channels,
+                cameraSize: cameraSource?.frameSize
             ),
             levelHandler: { [weak self] level in
                 Task { @MainActor in self?.microphoneLevel = level }
@@ -197,6 +203,13 @@ public final class ScreenRecorder {
         self.stream = stream
         self.output = output
         self.writer = writer
+        if cameraSource?.frameSize != nil {
+            // Delivered on the writer's queue, which is its executor.
+            _ = cameraSource?.startDeliveringFrames(on: writer.queue) { buffer in
+                let sample = ReadySampleBuffer(buffer)
+                writer.assumeIsolated { $0.appendCamera(sample.buffer) }
+            }
+        }
         self.manifest = manifest
         self.setup = setup
         activeRecordingID = manifest.id
@@ -211,7 +224,8 @@ public final class ScreenRecorder {
 
         startTicking()
         startClickLogging()
-        if config.hidesDesktopIcons, config.source.displayID != nil { startFilterRefresh() }
+        capturedOwnWindows = OwnWindows.capturableIDs()
+        if config.source.displayID != nil { startFilterRefresh() }
         Log.recording.info("Recording started: \(Int(setup.outputSize.width))×\(Int(setup.outputSize.height))")
     }
 
@@ -305,6 +319,8 @@ public final class ScreenRecorder {
         let pendingCommands = writerCommands
         let loggedClicks = clicks
         let clickTimeline = timeline
+        // Before the bubble is hidden: it may have moved while recording.
+        let cameraLayout = cameraLayoutProvider?()
         tearDown()
 
         try? await stream?.stopCapture()
@@ -321,6 +337,17 @@ public final class ScreenRecorder {
         } catch {
             await writer.cancel()
             throw (error as? RecordingError) ?? RecordingError.writerFailed(error.localizedDescription)
+        }
+        // Players that play only the first audio track would miss the mic.
+        // With a camera track the app saves a re-rendered copy (ADR-25) that
+        // mixes the audio itself, so this pass over the file would only delay it.
+        let hasCameraTrack = await writer.hasCameraTrack
+        if !hasCameraTrack {
+            do {
+                try await AudioMixdown.addMixedTrack(to: summary.url)
+            } catch {
+                Log.recording.error("Audio mixdown failed; keeping separate tracks: \(error.localizedDescription, privacy: .public)")
+            }
         }
 
         let fm = FileManager.default
@@ -340,7 +367,10 @@ public final class ScreenRecorder {
             guard time >= 0, time <= summary.duration else { return nil }
             return RecordingSidecar.Click(time: time, location: click.location, isRightClick: click.isRightClick)
         }
-        let sidecar = RecordingSidecar(videoSize: summary.videoSize, duration: summary.duration, clicks: sidecarClicks)
+        let sidecar = RecordingSidecar(
+            videoSize: summary.videoSize, duration: summary.duration, clicks: sidecarClicks,
+            camera: hasCameraTrack ? cameraLayout : nil
+        )
         do { try sidecar.save(for: finalURL) } catch {
             Log.recording.error("Sidecar save failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -353,7 +383,8 @@ public final class ScreenRecorder {
             fileSize: size,
             videoSize: summary.videoSize,
             clickCount: sidecarClicks.count,
-            configuration: config
+            configuration: config,
+            hasCameraTrack: hasCameraTrack
         )
     }
 
@@ -367,6 +398,7 @@ public final class ScreenRecorder {
     }
 
     private func tearDown() {
+        cameraSource?.stopDeliveringFrames()
         tickTimer?.invalidate()
         tickTimer = nil
         filterRefreshTimer?.invalidate()
@@ -444,8 +476,16 @@ public final class ScreenRecorder {
         }
     }
 
+    /// Pankapture's standard windows in the current filter (see `OwnWindows`).
+    @ObservationIgnored private var capturedOwnWindows: Set<CGWindowID> = []
+
+    /// Keeps the filter current: Finder windows opened while desktop icons
+    /// are hidden, and Pankapture windows (editors) opened or closed.
     private func refreshFilter() {
         guard state.isCapturing, let config = configuration, let stream else { return }
+        let ownWindows = OwnWindows.capturableIDs()
+        guard config.hidesDesktopIcons || ownWindows != capturedOwnWindows else { return }
+        capturedOwnWindows = ownWindows
         Task {
             guard let filter = await StreamSetup.refreshedFilter(for: config) else { return }
             try? await stream.updateContentFilter(filter)

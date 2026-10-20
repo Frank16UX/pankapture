@@ -1,4 +1,5 @@
 import AppCore
+import CoreGraphics
 import Foundation
 import Observation
 
@@ -19,6 +20,12 @@ public final class RecordingOptionsModel {
 
     /// Source highlighted in the options UI (not persisted).
     public var selectedSource: RecordingOptions.SourceKind = .area
+
+    /// Windows offered for the Window source.
+    public private(set) var windows: [RecordableWindow] = []
+    /// Window chosen from the list; nil means click one on screen. Not
+    /// persisted: window IDs don't survive the app quitting.
+    public var chosenWindowID: CGWindowID?
 
     public private(set) var microphones: [CaptureDeviceInfo] = []
     public private(set) var cameras: [CaptureDeviceInfo] = []
@@ -49,6 +56,14 @@ public final class RecordingOptionsModel {
         }
         if let id = options.cameraDeviceID, !cameras.contains(where: { $0.id == id }) {
             options.cameraDeviceID = nil
+        }
+    }
+
+    /// Re-reads the window list; drops the chosen window if it closed.
+    public func refreshWindows() async {
+        windows = await RecordableWindows.list()
+        if let id = chosenWindowID, !windows.contains(where: { $0.id == id }) {
+            chosenWindowID = nil
         }
     }
 

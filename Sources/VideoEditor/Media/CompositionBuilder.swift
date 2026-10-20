@@ -11,6 +11,10 @@ public struct EditComposition {
     public let audioMix: AVAudioMix?
     public let plan: RenderPlan
     public let timeline: Timeline
+    /// The looped background movie's track in `composition`, if any.
+    public let backgroundTrackID: CMPersistentTrackID?
+    /// The webcam track in `composition`, if the source has one (ADR-25).
+    public let cameraTrackID: CMPersistentTrackID?
     /// Whether at least one unmuted, non-silent audio track is included.
     public let hasAudibleAudio: Bool
 
@@ -29,6 +33,8 @@ public enum CompositionBuilder {
     public struct Options: Sendable {
         /// MP4 resolution cap (shorter side), `nil` = canvas size.
         public var shortSideCap: Double?
+        /// MP4 export size (shorter side, up or down), `nil` = canvas size.
+        public var shortSide: Double?
         /// GIF width cap, `nil` = canvas width.
         public var width: Int?
         public var frameRate: Int
@@ -41,6 +47,7 @@ public enum CompositionBuilder {
 
         public init(
             shortSideCap: Double? = nil,
+            shortSide: Double? = nil,
             width: Int? = nil,
             frameRate: Int = 30,
             zoomEnabled: Bool = true,
@@ -48,6 +55,7 @@ public enum CompositionBuilder {
             includeMutedAudio: Bool = false
         ) {
             self.shortSideCap = shortSideCap
+            self.shortSide = shortSide
             self.width = width
             self.frameRate = frameRate
             self.zoomEnabled = zoomEnabled
@@ -78,10 +86,19 @@ public enum CompositionBuilder {
 
     public static func build(source: SourceMedia, project: VideoEditProject, options: Options) async throws -> sending EditComposition {
         let tracks = try await source.loadTracks()
-        return try build(source: source, tracks: tracks, project: project, options: options)
+        let background = await BackgroundVideo.load(for: project)
+        return try build(source: source, tracks: tracks, project: project, options: options, background: background)
     }
 
-    public static func build(source: SourceMedia, tracks: LoadedTracks, project: VideoEditProject, options: Options) throws -> EditComposition {
+    /// - Parameter background: the project's background movie (load it with
+    ///   `BackgroundVideo.load(for:)`); ignored unless the fill is that movie.
+    public static func build(
+        source: SourceMedia,
+        tracks: LoadedTracks,
+        project: VideoEditProject,
+        options: Options,
+        background: BackgroundVideo? = nil
+    ) throws -> EditComposition {
         let signpostID = Log.signposter.makeSignpostID()
         let interval = Log.signposter.beginInterval("buildComposition", id: signpostID)
         defer { Log.signposter.endInterval("buildComposition", interval) }
@@ -94,6 +111,12 @@ public enum CompositionBuilder {
             throw VideoEditorError.compositionFailed("Couldn't add a video track")
         }
         videoTrack.preferredTransform = source.preferredTransform
+
+        // The webcam, edited exactly like the screen (same cuts and speeds).
+        var cameraTrack: AVMutableCompositionTrack?
+        if source.camera != nil, tracks.camera != nil {
+            cameraTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid)
+        }
 
         // Audio tracks, each tagged with its role for the mix.
         var audioTracks: [(composition: AVMutableCompositionTrack, source: AudioTrackInfo, track: AVAssetTrack, volume: Double)] = []
@@ -116,6 +139,11 @@ public enum CompositionBuilder {
                 let offset = cmTime(range.start) - cmTime(segment.source.start)
                 try videoTrack.insertTimeRange(cmRange(range), of: tracks.video, at: pieceStart + offset)
             }
+            if let cameraTrack, let camera = tracks.camera, let info = source.camera,
+               let range = segment.source.intersection(info.timeRange)?.intersection(TimeRange(start: 0, end: source.duration)) {
+                let offset = cmTime(range.start) - cmTime(segment.source.start)
+                try cameraTrack.insertTimeRange(cmRange(range), of: camera, at: pieceStart + offset)
+            }
             for audio in audioTracks {
                 // Never past the last video frame (see `SourceMedia.duration`).
                 guard let range = segment.source.intersection(audio.source.timeRange)?
@@ -133,18 +161,40 @@ public enum CompositionBuilder {
             }
         }
 
+        // The background movie, looped over the whole output. Inserted after
+        // the speed changes: `scaleTimeRange` would otherwise retime it too.
+        var backgroundTrackID: CMPersistentTrackID?
+        if let background, background.url == project.background.fill.videoURL,
+           let track = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let total = composition.duration
+            let loop = cmTime(background.duration)
+            var at = CMTime.zero
+            while at < total {
+                let piece = CMTimeMinimum(loop, total - at)
+                try track.insertTimeRange(CMTimeRange(start: .zero, duration: piece), of: background.track, at: at)
+                at = at + piece
+            }
+            backgroundTrackID = track.trackID
+        }
+
         let plan = RenderPlan(
             project: project,
             sourceSize: source.size,
             orientation: source.orientation,
             shortSideCap: options.shortSideCap,
+            shortSide: options.shortSide,
             width: options.width,
-            zoomEnabled: options.zoomEnabled
+            zoomEnabled: options.zoomEnabled,
+            backgroundOrientation: background?.orientation ?? .up,
+            hasCameraTrack: cameraTrack != nil,
+            cameraOrientation: source.camera?.orientation ?? .up
         )
         let videoComposition = makeVideoComposition(
             plan: plan,
             source: source,
             videoTrackID: videoTrack.trackID,
+            backgroundTrackID: backgroundTrackID,
+            cameraTrackID: cameraTrack?.trackID,
             duration: composition.duration,
             frameRate: options.frameRate,
             force: options.forceVideoComposition
@@ -168,6 +218,8 @@ public enum CompositionBuilder {
             audioMix: audioMix,
             plan: plan,
             timeline: timeline,
+            backgroundTrackID: backgroundTrackID,
+            cameraTrackID: cameraTrack?.trackID,
             hasAudibleAudio: audioTracks.contains { $0.volume > 0 }
         )
     }
@@ -182,6 +234,8 @@ public enum CompositionBuilder {
         plan: RenderPlan,
         source: SourceMedia,
         videoTrackID: CMPersistentTrackID,
+        backgroundTrackID: CMPersistentTrackID? = nil,
+        cameraTrackID: CMPersistentTrackID? = nil,
         duration: CMTime,
         frameRate: Int,
         force: Bool
@@ -194,10 +248,18 @@ public enum CompositionBuilder {
             videoComposition = AVMutableVideoComposition()
             videoComposition.customVideoCompositorClass = VideoEditCompositor.self
             videoComposition.instructions = [
-                VideoEditInstruction(timeRange: outputRange, sourceTrackID: videoTrackID, renderer: FrameRenderer(plan: plan)),
+                VideoEditInstruction(
+                    timeRange: outputRange,
+                    sourceTrackID: videoTrackID,
+                    backgroundTrackID: backgroundTrackID,
+                    cameraTrackID: plan.camera == nil ? nil : cameraTrackID,
+                    renderer: FrameRenderer(plan: plan)
+                ),
             ]
-        } else if force {
+        } else if force || cameraTrackID != nil {
             // Built-in compositor: orient + scale only. Much cheaper per frame.
+            // Also when a (hidden) camera track exists: without a video
+            // composition the player would stack both video tracks.
             videoComposition = AVMutableVideoComposition()
             let instruction = AVMutableVideoCompositionInstruction()
             instruction.timeRange = outputRange

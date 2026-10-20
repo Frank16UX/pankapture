@@ -28,6 +28,13 @@ struct MenuBarContent: View {
         }
 
         Section("Recording") {
+            if coordinator.recordingsBeingPrepared > 0 {
+                if let progress = coordinator.cameraCompositeProgress {
+                    Text("Adding the camera to your recording… \(progress, format: .percent.precision(.fractionLength(0)))")
+                } else {
+                    Text("Adding the camera to your recording…")
+                }
+            }
             if coordinator.recording.isRecording {
                 let recorder = coordinator.recording.recorder
                 Button("Stop Recording (\(recorder.formattedElapsed))", systemImage: "stop.circle") {
@@ -42,6 +49,11 @@ struct MenuBarContent: View {
                     coordinator.recording.showOptions()
                 }
                 .keyboardShortcut(store.combo(for: .recordScreen).flatMap(\.menuShortcut))
+                if coordinator.lastRecordingURL != nil {
+                    Button("Edit Last Recording…", systemImage: "film") {
+                        coordinator.editLastRecording()
+                    }
+                }
             }
         }
 

@@ -33,11 +33,13 @@ public enum VideoExporter {
 
         let fps = settings.frameRate.resolve(sourceFrameRate: source.frameRate)
         let tracks = try await source.loadTracks()
+        let background = await BackgroundVideo.load(for: project)
         let edit = try CompositionBuilder.build(
             source: source,
             tracks: tracks,
             project: project,
-            options: .init(shortSideCap: settings.resolution.shortSideCap, frameRate: fps)
+            options: .init(shortSide: settings.resolution.shortSide, frameRate: fps),
+            background: background
         )
         let bitrate = ExportEstimator.videoBitrate(renderSize: edit.plan.renderSize, fps: fps, quality: settings.quality)
 
@@ -245,5 +247,26 @@ final class MP4WriterJob: @unchecked Sendable {
         guard let continuation else { return }
         self.continuation = nil
         continuation.resume(with: result)
+    }
+}
+
+/// The shareable copy of a recording whose webcam is its own track (ADR-25):
+/// the webcam drawn where the bubble was, nothing else changed.
+public enum CameraComposite {
+    /// Exports `sourceURL` to `destination` at the recording's frame rate,
+    /// high quality. `resolution` sizes it down (never up): the encode time
+    /// scales with the pixel count, so smaller copies are ready sooner.
+    public static func export(
+        recordingAt sourceURL: URL,
+        to destination: URL,
+        resolution: ExportResolution = .original,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> VideoExportResult {
+        let source = try await SourceMedia.load(url: sourceURL)
+        let project = VideoEditProject.initial(for: source)
+        let sourceShortSide = min(source.size.width, source.size.height)
+        let size = resolution.shortSide.map { $0 < sourceShortSide } == true ? resolution : .original
+        let settings = ExportSettings(format: .mp4, resolution: size, quality: .high, frameRate: .original)
+        return try await VideoExporter.exportMP4(source: source, project: project, settings: settings, to: destination, progress: progress)
     }
 }

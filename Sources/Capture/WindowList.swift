@@ -15,17 +15,19 @@ public struct WindowInfo: Sendable, Equatable, Identifiable {
 
 public enum WindowList {
     /// On-screen windows, **front to back**, excluding `excludingPID` (our own
-    /// app), invisible windows, and tiny ones (status items, cursors).
+    /// app) except the windows in `keeping` (its editors, see `OwnWindows`),
+    /// invisible windows, and tiny ones (status items, cursors).
     /// Normal app windows are layer 0; pass `includeAllLayers` to also return
     /// menus, the Dock, and other system UI.
     public static func onScreenWindows(excludingPID: pid_t = ProcessInfo.processInfo.processIdentifier,
+                                       keeping: Set<CGWindowID> = [],
                                        includeAllLayers: Bool = false) -> [WindowInfo] {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return [] }
 
         return list.compactMap { entry -> WindowInfo? in
             guard let id = entry[kCGWindowNumber as String] as? CGWindowID,
-                  let pid = entry[kCGWindowOwnerPID as String] as? pid_t, pid != excludingPID,
+                  let pid = entry[kCGWindowOwnerPID as String] as? pid_t, pid != excludingPID || keeping.contains(id),
                   let layer = entry[kCGWindowLayer as String] as? Int,
                   includeAllLayers || layer == 0,
                   let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,

@@ -6,6 +6,7 @@ public enum VideoEditorError: LocalizedError, Sendable, Equatable {
     case compositionFailed(String)
     case exportFailed(String)
     case cancelled
+    case unsupportedBackground
 
     public var errorDescription: String? {
         switch self {
@@ -14,6 +15,7 @@ public enum VideoEditorError: LocalizedError, Sendable, Equatable {
         case let .compositionFailed(detail): "Couldn't prepare the video (\(detail))."
         case let .exportFailed(detail): "Export failed: \(detail)"
         case .cancelled: "Export was cancelled."
+        case .unsupportedBackground: "Choose a picture or a movie file for the background."
         }
     }
 }

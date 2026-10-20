@@ -42,12 +42,18 @@ public struct Waveform: Sendable, Equatable {
     public let bucketDuration: Double
     /// Peak amplitude per bucket, normalized so the loudest bucket is 1.
     public let peaks: [Float]
+    /// The loudest bucket before normalizing, 0…1 of full scale.
+    public let loudestPeak: Float
 
-    public init(startTime: Double = 0, bucketDuration: Double, peaks: [Float]) {
+    public init(startTime: Double = 0, bucketDuration: Double, peaks: [Float], loudestPeak: Float = 1) {
         self.startTime = startTime
         self.bucketDuration = bucketDuration
         self.peaks = peaks
+        self.loudestPeak = loudestPeak
     }
+
+    /// Nothing above about -50 dBFS: e.g. system audio while no app made a sound.
+    public var isSilent: Bool { loudestPeak < 0.003 }
 
     /// Loudest peak within a source time range.
     public func peak(in range: TimeRange) -> Float {
@@ -121,7 +127,8 @@ public enum WaveformExtractor {
         return Waveform(
             startTime: trackStart.isFinite ? trackStart : 0,
             bucketDuration: Double(samplesPerBucket) / sampleRate,
-            peaks: peaks
+            peaks: peaks,
+            loudestPeak: loudest
         )
     }
 }

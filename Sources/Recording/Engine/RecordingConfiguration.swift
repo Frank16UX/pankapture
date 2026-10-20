@@ -129,14 +129,19 @@ public struct RecordingResult: Equatable, Sendable {
     /// Number of clicks logged to the sidecar.
     public var clickCount: Int
     public var configuration: RecordingConfiguration
+    /// The file has the camera as its own (disabled) track, not in the
+    /// picture: share an export that composites it (ADR-25).
+    public var hasCameraTrack: Bool
 
-    public init(url: URL, duration: Double, fileSize: Int64, videoSize: CGSize, clickCount: Int, configuration: RecordingConfiguration) {
+    public init(url: URL, duration: Double, fileSize: Int64, videoSize: CGSize, clickCount: Int,
+                configuration: RecordingConfiguration, hasCameraTrack: Bool = false) {
         self.url = url
         self.duration = duration
         self.fileSize = fileSize
         self.videoSize = videoSize
         self.clickCount = clickCount
         self.configuration = configuration
+        self.hasCameraTrack = hasCameraTrack
     }
 }
 

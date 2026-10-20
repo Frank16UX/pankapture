@@ -40,6 +40,15 @@ make run    # builds build/Pankapture.app and launches it
 | ⌘Z / ⇧⌘Z · ⌫ · arrows (⇧ = 10 pt) | undo / redo · delete selected annotation · nudge |
 | Esc | close |
 
+Video editor (after a recording: the thumbnail, the notification, or **Edit Last Recording** in the menu bar):
+
+| Key | Action |
+|---|---|
+| Space · J K L · ← → | play/pause · back, pause, faster · step a frame (⇧ = 1 s) |
+| S · drag on the filmstrip · ⌫ | split at the playhead · select a range · delete the selected part or zoom |
+| I · O · Z | trim start / end at the playhead · add a zoom |
+| ⌘S · ⌘E · ⌘Z / ⇧⌘Z | save edits · export · undo / redo |
+
 `pankapture://capture/area` (and `/previous`) open the overlay from launchers; non-interactive URL commands are off by default.
 
 ## Commands

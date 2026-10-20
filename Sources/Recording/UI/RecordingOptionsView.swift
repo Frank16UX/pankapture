@@ -30,6 +30,9 @@ public struct RecordingOptionsView: View {
                 .padding(.bottom, PK.Spacing.s)
 
             Form {
+                if model.selectedSource == .window {
+                    WindowSection(model: model)
+                }
                 AudioSection(model: model)
                 CameraSection(model: model)
                 VideoSection(options: $model.options)
@@ -48,7 +51,11 @@ public struct RecordingOptionsView: View {
                 }
                 Spacer()
                 Button {
-                    controller.record(model.selectedSource)
+                    if model.selectedSource == .window, let windowID = model.chosenWindowID {
+                        controller.record(source: .window(windowID))
+                    } else {
+                        controller.record(model.selectedSource)
+                    }
                     onDismiss()
                 } label: {
                     Label("Record", systemImage: "record.circle")
@@ -108,6 +115,36 @@ private struct SourcePicker: View {
                 .animation(PK.Motion.quick, value: isSelected)
             }
         }
+    }
+}
+
+// MARK: Window
+
+/// Choose the window from a list: reaches windows hidden behind a full-screen
+/// app or in another Space, which clicking on screen can't.
+private struct WindowSection: View {
+    @Bindable var model: RecordingOptionsModel
+
+    var body: some View {
+        Section {
+            Picker("Window", selection: $model.chosenWindowID) {
+                Text("Click a window on screen").tag(CGWindowID?.none)
+                ForEach(appNames, id: \.self) { appName in
+                    Section(appName) {
+                        ForEach(model.windows.filter { $0.appName == appName }) { window in
+                            Text(window.title).tag(CGWindowID?.some(window.id))
+                        }
+                    }
+                }
+            }
+        }
+        .task { await model.refreshWindows() }
+    }
+
+    /// App names in list order, each once.
+    private var appNames: [String] {
+        var seen = Set<String>()
+        return model.windows.map(\.appName).filter { seen.insert($0).inserted }
     }
 }
 
@@ -221,6 +258,16 @@ private struct CameraSection: View {
                             .accessibilityLabel("Camera size")
                     }
                     Toggle("Mirror", isOn: $model.options.cameraMirrored)
+                    Picker("Save camera", selection: $model.options.cameraAsLayer) {
+                        Text("As a layer").tag(true)
+                        Text("In the video").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    Text(model.options.cameraAsLayer
+                         ? "Move, resize, or hide the camera in the editor. The saved video takes a moment after you stop while the camera is added."
+                         : "The camera is recorded as you see it, in one video file that's saved as soon as you stop. It can't be moved later.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     Text("Drag the bubble to move it. Drag its corner or ⌘-scroll to resize.")
                         .font(.caption)
                         .foregroundStyle(.secondary)

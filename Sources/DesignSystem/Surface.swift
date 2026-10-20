@@ -21,7 +21,27 @@ struct PKSurface: ViewModifier {
     }
 }
 
+/// Surface for sheets docked over busy content (video, screenshots): a
+/// heavily frosted material so text stays legible over anything behind it.
+/// The clear glass of `PKSurface` lets too much of a moving picture through.
+struct PKSheetSurface: ViewModifier {
+    var cornerRadius: CGFloat
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background(.thickMaterial, in: shape)
+            .overlay(shape.strokeBorder(.separator, lineWidth: PK.Metrics.hairline))
+            .shadow(color: .black.opacity(0.28), radius: 18, y: 6)
+    }
+}
+
 public extension View {
+    /// Frosted sheet surface for panels over video or images.
+    func pkSheetSurface(cornerRadius: CGFloat = PK.Radius.panel) -> some View {
+        modifier(PKSheetSurface(cornerRadius: cornerRadius))
+    }
+
     func pkSurface(cornerRadius: CGFloat = PK.Radius.toolbar) -> some View {
         modifier(PKSurface(cornerRadius: cornerRadius))
     }

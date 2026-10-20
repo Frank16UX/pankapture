@@ -57,8 +57,15 @@ public enum PreferenceKey {
     public static let recordingCamera = "recording.camera"
     /// `AVCaptureDevice.uniqueID`; empty means the system default camera.
     public static let recordingCameraDeviceID = "recording.cameraDeviceID"
-    /// `circle` or `roundedRectangle`.
+    /// `circle`, `square`, or `roundedRectangle`.
     public static let recordingCameraShape = "recording.cameraShape"
+    /// `true`: the camera is its own track, editable in the editor, and the
+    /// saved video is a composite made after Stop (ADR-25). `false`: the
+    /// bubble is recorded into the screen video, saved as soon as you stop.
+    public static let recordingCameraAsLayer = "recording.cameraAsLayer"
+    /// Size of the composite saved for camera-layer recordings: an
+    /// `ExportResolution` raw value (`original`, `uhd4K`, `qhd1440`, `hd1080`, `hd720`).
+    public static let recordingCameraCompositeResolution = "recording.cameraCompositeResolution"
     public static let recordingCameraMirrored = "recording.cameraMirrored"
     /// Webcam bubble width in points.
     public static let recordingCameraSize = "recording.cameraSize"
@@ -137,6 +144,8 @@ public enum Preferences {
             PreferenceKey.recordingCamera: false,
             PreferenceKey.recordingCameraDeviceID: "",
             PreferenceKey.recordingCameraShape: "circle",
+            PreferenceKey.recordingCameraAsLayer: true,
+            PreferenceKey.recordingCameraCompositeResolution: "original",
             PreferenceKey.recordingCameraMirrored: true,
             PreferenceKey.recordingCameraSize: 200.0,
             PreferenceKey.recordingFrameRate: 60,

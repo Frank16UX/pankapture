@@ -3,8 +3,9 @@ import AppKit
 import AVFoundation
 import QuartzCore
 
-/// Floating webcam bubble (REC-10). A Pankapture window that **is** recorded:
-/// pass `windowID` in `RecordingConfiguration.includedOverlayWindowIDs`.
+/// Floating webcam bubble (REC-10). On screen it's a live preview; the
+/// recording gets the camera as its own track (ADR-25) through
+/// `RecordingCameraSource`, so the editor can move, resize, or hide it.
 ///
 /// Drag to move; drag the bottom-right corner or ⌘-scroll to resize;
 /// right-click for shape, mirror, and camera.
@@ -32,6 +33,10 @@ public final class WebcamBubble {
     /// Called when the user changes the bubble directly (resize, context menu),
     /// so the options/preferences can follow.
     public var onAppearanceChange: ((Appearance) -> Void)?
+    /// "Turn Off Camera" in the bubble's menu; offered when set and
+    /// `canTurnOff` agrees (not while recording).
+    public var onTurnOff: (() -> Void)?
+    public var canTurnOff: () -> Bool = { true }
 
     public private(set) var appearance: Appearance
     private var panel: OverlayPanel?
@@ -39,6 +44,10 @@ public final class WebcamBubble {
     private var session: AVCaptureSession?
     private var sessionHandle: CaptureSessionHandle?
     private var currentDeviceID: String?
+    private var currentDevice: AVCaptureDevice?
+    private var frameOutput: AVCaptureVideoDataOutput?
+    private var frameDelegate: CameraFrameDelegate?
+    private var deliveryQueue: DispatchSerialQueue?
 
     public init(appearance: Appearance = Appearance()) {
         self.appearance = appearance
@@ -63,10 +72,25 @@ public final class WebcamBubble {
         return true
     }
 
+    /// Moves the bubble to the bottom-left of `frame` (AppKit global) unless
+    /// it's already fully inside, so it lands in the recorded region.
+    public func keepInside(_ frame: CGRect) {
+        guard let panel, !frame.contains(panel.frame) else { return }
+        let inset: CGFloat = 24
+        let size = panel.frame.size
+        let origin = CGPoint(
+            x: min(frame.minX + inset, frame.maxX - size.width),
+            y: min(frame.minY + inset, frame.maxY - size.height)
+        )
+        panel.setFrameOrigin(origin)
+    }
+
     public func hide() {
+        stopDeliveringFrames()
         sessionHandle?.stopRunning()
         sessionHandle = nil
         session = nil
+        frameOutput = nil
         currentDeviceID = nil
         panel?.orderOut(nil)
         panel = nil
@@ -103,7 +127,7 @@ public final class WebcamBubble {
 
     static func bubbleSize(for appearance: Appearance) -> NSSize {
         let width = appearance.size.clamped(to: RecordingOptions.cameraSizeRange)
-        let height = appearance.shape == .circle ? width : (width * 3 / 4).rounded()
+        let height = (width * appearance.shape.heightRatio).rounded()
         return NSSize(width: width, height: height)
     }
 
@@ -149,6 +173,10 @@ public final class WebcamBubble {
             item.state = camera.id == selected ? .on : .off
             menu.addItem(item)
         }
+        if let onTurnOff, canTurnOff() {
+            menu.addItem(.separator())
+            menu.addItem(MenuActionItem(title: "Turn Off Camera") { onTurnOff() })
+        }
         return menu
     }
 
@@ -171,11 +199,36 @@ public final class WebcamBubble {
             Log.recording.error("No camera available for the webcam bubble")
             return
         }
+        let wasDelivering = frameDelegate
+        frameOutput?.setSampleBufferDelegate(nil, queue: nil)
         let session = AVCaptureSession()
         session.beginConfiguration()
         if session.canSetSessionPreset(.high) { session.sessionPreset = .high }
         if session.canAddInput(input) { session.addInput(input) }
+        // The recording's frame output is part of the session from the start:
+        // adding it when recording begins reconfigures the running camera,
+        // which blanks the bubble and drops about the first second of frames.
+        let output = AVCaptureVideoDataOutput()
+        output.alwaysDiscardsLateVideoFrames = true
+        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+            // The track is never mirrored; the editor mirrors on request.
+            if let connection = output.connection(with: .video), connection.isVideoMirroringSupported {
+                connection.automaticallyAdjustsVideoMirroring = false
+                connection.isVideoMirrored = false
+            }
+            frameOutput = output
+        } else {
+            Log.recording.error("Camera frames can't be recorded: output rejected")
+            frameOutput = nil
+        }
         session.commitConfiguration()
+        if let wasDelivering, let frameOutput, let queue = deliveryQueue {
+            let delegate = wasDelivering.rebound(to: session.synchronizationClock)
+            frameOutput.setSampleBufferDelegate(delegate, queue: queue)
+            frameDelegate = delegate
+        }
 
         bubbleView?.attach(session: session, appearance: appearance)
         let handle = CaptureSessionHandle(session: session)
@@ -183,6 +236,93 @@ public final class WebcamBubble {
         self.session = session
         sessionHandle = handle
         currentDeviceID = wanted
+        currentDevice = device
+    }
+}
+
+// MARK: - Recording the camera as a track
+
+/// Supplies camera frames to the recording writer (ADR-25).
+@MainActor
+public protocol RecordingCameraSource: AnyObject {
+    /// Pixel size of the frames `startDeliveringFrames` will send, or `nil`
+    /// if no camera is running.
+    var frameSize: CGSize? { get }
+    /// Sends every camera frame, with host-clock timestamps, to `handler` on
+    /// `queue`. Returns `false` if the camera isn't running.
+    func startDeliveringFrames(on queue: DispatchSerialQueue, _ handler: @escaping @Sendable (CMSampleBuffer) -> Void) -> Bool
+    func stopDeliveringFrames()
+    /// The bubble's place relative to `recordedFrame` (AppKit global).
+    func layout(in recordedFrame: CGRect) -> RecordingSidecar.Camera?
+}
+
+extension WebcamBubble: RecordingCameraSource {
+    public var frameSize: CGSize? {
+        guard session != nil, let device = currentDevice else { return nil }
+        let dimensions = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        guard dimensions.width > 0, dimensions.height > 0 else { return nil }
+        return CGSize(width: Int(dimensions.width), height: Int(dimensions.height))
+    }
+
+    public func startDeliveringFrames(on queue: DispatchSerialQueue, _ handler: @escaping @Sendable (CMSampleBuffer) -> Void) -> Bool {
+        guard let session, let frameOutput else { return false }
+        guard frameDelegate == nil else { return true }
+        // Only the delegate changes: the session keeps running untouched.
+        let delegate = CameraFrameDelegate(clock: session.synchronizationClock, handler: handler)
+        frameOutput.setSampleBufferDelegate(delegate, queue: queue)
+        frameDelegate = delegate
+        deliveryQueue = queue
+        return true
+    }
+
+    public func stopDeliveringFrames() {
+        frameOutput?.setSampleBufferDelegate(nil, queue: nil)
+        frameDelegate = nil
+        deliveryQueue = nil
+    }
+
+    public func layout(in recordedFrame: CGRect) -> RecordingSidecar.Camera? {
+        guard let panel, recordedFrame.width > 0, recordedFrame.height > 0 else { return nil }
+        let frame = panel.frame // AppKit global, bottom-left origin
+        return RecordingSidecar.Camera(
+            center: CGPoint(
+                x: (frame.midX - recordedFrame.minX) / recordedFrame.width,
+                y: (recordedFrame.maxY - frame.midY) / recordedFrame.height
+            ),
+            size: frame.width / min(recordedFrame.width, recordedFrame.height),
+            isCircle: appearance.shape == .circle,
+            shape: appearance.shape.rawValue,
+            isMirrored: appearance.isMirrored
+        )
+    }
+}
+
+/// Forwards camera frames, converted to the host clock (the screen samples'
+/// clock), to the recording writer.
+///
+/// `@unchecked Sendable`: immutable after `init`; `CMClock` is a thread-safe
+/// CF type, and AVFoundation calls the delegate on the writer's serial queue.
+private final class CameraFrameDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    private let clock: CMClock?
+    private let handler: @Sendable (CMSampleBuffer) -> Void
+
+    init(clock: CMClock?, handler: @escaping @Sendable (CMSampleBuffer) -> Void) {
+        self.clock = clock
+        self.handler = handler
+    }
+
+    /// The same handler on a new session's clock (the camera was switched mid-recording).
+    func rebound(to clock: CMClock?) -> CameraFrameDelegate {
+        CameraFrameDelegate(clock: clock, handler: handler)
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let host = CMClockGetHostTimeClock()
+        guard let clock, !CFEqual(clock, host) else { return handler(sampleBuffer) }
+        let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let hostTime = CMSyncConvertTime(time, from: clock, to: host)
+        guard hostTime.isValid, let converted = AudioBuffers.retimed(sampleBuffer, by: time - hostTime) else { return }
+        handler(converted)
     }
 }
 
@@ -235,7 +375,8 @@ private final class BubbleView: NSView {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let radius = shape == .circle ? min(bounds.width, bounds.height) / 2 : 18
+        // Square and rectangle match the editor's default roundness.
+        let radius = min(bounds.width, bounds.height) * (shape == .circle ? 0.5 : 0.18)
         layer?.cornerRadius = radius
         layer?.cornerCurve = .continuous
         previewLayer.frame = bounds

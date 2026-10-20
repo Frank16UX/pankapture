@@ -22,11 +22,19 @@ public enum ThumbnailAction: Sendable {
 @Observable
 public final class QuickAccessItem: Identifiable {
     public let id = UUID()
-    public let content: ThumbnailContent
+    /// Replaceable: a recording's preview switches to the finished file.
+    public var content: ThumbnailContent
     /// Where the capture was saved, if it was; used for dragging and reveal.
     public var fileURL: URL?
     /// History item, when recorded.
     public var libraryID: UUID?
+    /// 0…1 while the file is still being produced (shown as a progress bar;
+    /// only Edit and Close are offered), `nil` once it's ready.
+    public var progress: Double?
+    /// What the progress bar is doing, e.g. "Adding camera".
+    public var progressTitle = ""
+
+    public var isProcessing: Bool { progress != nil }
 
     init(content: ThumbnailContent, fileURL: URL?, libraryID: UUID?) {
         self.content = content
@@ -41,6 +49,7 @@ public final class QuickAccessItem: Identifiable {
 
     /// A file to drag out: the saved file, or a temporary PNG.
     func draggableURL() -> URL? {
+        guard !isProcessing else { return nil }
         if let fileURL { return fileURL }
         switch content {
         case let .video(url, _): return url
@@ -202,6 +211,14 @@ final class ThumbnailPanel: NSPanel {
         guard seconds > 0 else { return }
         dismissTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(seconds))
+            // Stay while the file is still being made, then give the user
+            // the usual time with the finished one.
+            var waited = false
+            while !Task.isCancelled, self?.item.isProcessing == true {
+                waited = true
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+            if waited { try? await Task.sleep(for: .seconds(seconds)) }
             guard !Task.isCancelled, let self else { return }
             self.controller.dismiss(self.item)
         }
@@ -249,11 +266,17 @@ private struct ThumbnailCard: View {
     var body: some View {
         ZStack {
             preview
+            if let progress = item.progress {
+                ProcessingBar(title: item.progressTitle, progress: progress)
+                    .frame(maxHeight: .infinity, alignment: .bottom)
+                    .transition(.opacity)
+            }
             if isHovering {
                 hoverControls
                     .transition(.opacity)
             }
         }
+        .animation(PK.Motion.quick, value: item.isProcessing)
         .clipShape(RoundedRectangle(cornerRadius: PK.Radius.thumbnail, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: PK.Radius.thumbnail, style: .continuous)
@@ -279,6 +302,7 @@ private struct ThumbnailCard: View {
                 .aspectRatio(contentMode: .fill)
         case let .video(url, _):
             VideoPreview(url: url, isPlaying: isHovering)
+                .id(url)
         }
     }
 
@@ -287,7 +311,9 @@ private struct ThumbnailCard: View {
             Rectangle().fill(.regularMaterial).opacity(0.85)
 
             VStack(spacing: PK.Spacing.s) {
-                if item.isVideo {
+                if item.isProcessing {
+                    pill("Edit", "scissors", .edit)
+                } else if item.isVideo {
                     pill("Edit", "scissors", .edit)
                     pill("Copy", "doc.on.doc", .copy)
                 } else {
@@ -306,14 +332,16 @@ private struct ThumbnailCard: View {
                     }
                 }
                 Spacer()
-                HStack {
-                    if item.isVideo {
-                        corner("Show in Finder", "folder") { onAction(.reveal) }
-                    } else {
-                        corner("Annotate", "pencil.tip.crop.circle") { onAction(.edit) }
+                if !item.isProcessing {
+                    HStack {
+                        if item.isVideo {
+                            corner("Show in Finder", "folder") { onAction(.reveal) }
+                        } else {
+                            corner("Annotate", "pencil.tip.crop.circle") { onAction(.edit) }
+                        }
+                        Spacer()
+                        corner("Delete", "trash") { onAction(.delete) }
                     }
-                    Spacer()
-                    corner("Delete", "trash") { onAction(.delete) }
                 }
             }
             .padding(PK.Spacing.xs)
@@ -338,6 +366,33 @@ private struct ThumbnailCard: View {
         }
         .buttonStyle(PKToolButtonStyle())
         .help(title)
+    }
+}
+
+/// "Adding camera… 40%" along the bottom of a card whose file is still being made.
+private struct ProcessingBar: View {
+    let title: String
+    let progress: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
+            HStack {
+                Text("\(title)…")
+                Spacer(minLength: PK.Spacing.xs)
+                Text(progress, format: .percent.precision(.fractionLength(0)))
+                    .monospacedDigit()
+            }
+            .font(.caption.weight(.semibold))
+            ProgressView(value: progress)
+                .progressViewStyle(.linear)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, PK.Spacing.s)
+        .padding(.vertical, PK.Spacing.xs)
+        .background(.thickMaterial)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(title)
+        .accessibilityValue(Text(progress, format: .percent.precision(.fractionLength(0))))
     }
 }
 

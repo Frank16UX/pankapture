@@ -26,8 +26,8 @@ final class ScrollingCaptureController {
     /// Starts the flow; `onFinish` receives the stitched image and its scale.
     static func start(onFinish: @escaping (CGImage, CGFloat) -> Void) async {
         guard current == nil, OverlayController.current == nil else { return }
-        let windows = WindowList.onScreenWindows()
-        guard let snapshots = try? await ScreenshotService.snapshotDisplays() else { return }
+        let windows = WindowList.onScreenWindows(keeping: OwnWindows.capturableIDs())
+        guard let snapshots = try? await ScreenshotService.snapshotDisplays(ownWindowIDs: OwnWindows.capturableIDs()) else { return }
 
         let area: PickedArea? = await withCheckedContinuation { continuation in
             let presented = OverlayController.present(
@@ -41,7 +41,7 @@ final class ScrollingCaptureController {
         guard let area else { return }
 
         do {
-            let grabber = try await AreaGrabber.make(displayID: area.displayID, rect: area.rect)
+            let grabber = try await AreaGrabber.make(displayID: area.displayID, rect: area.rect, ownWindowIDs: OwnWindows.capturableIDs())
             let controller = ScrollingCaptureController(area: area, grabber: grabber, onFinish: onFinish)
             current = controller
             controller.begin()

@@ -32,6 +32,8 @@ struct PreviewArea: View {
             PlayerSurface(player: model.player)
             if let zoom = model.selectedZoom, let plan = model.previewPlan {
                 ZoomRectEditor(model: model, zoom: zoom, plan: plan)
+            } else if let camera = model.project.camera, camera.isVisible, let plan = model.previewPlan, plan.camera != nil {
+                CameraLayerEditor(model: model, camera: camera, plan: plan)
             }
             if let error = model.loadError {
                 ContentUnavailableView("Can't Open Video", systemImage: "exclamationmark.triangle", description: Text(error))
@@ -183,6 +185,102 @@ private struct ZoomRectEditor: View {
     }
 }
 
+/// Drag the webcam layer to move it; drag its corner grip to resize (ADR-25).
+private struct CameraLayerEditor: View {
+    @Bindable var model: VideoEditorModel
+    let camera: CameraOverlay
+    let plan: RenderPlan
+
+    @State private var dragStart: CameraOverlay?
+    @State private var isHovering = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            let canvas = CanvasLayout.aspectFit(plan.renderSize, in: CGRect(origin: .zero, size: geometry.size))
+            let scale = canvas.width / max(1, plan.renderSize.width)
+            let pixels = camera.frame(video: plan.videoRect, canvas: CGRect(origin: .zero, size: plan.renderSize))
+            let rect = CGRect(x: canvas.minX + pixels.minX * scale, y: canvas.minY + pixels.minY * scale,
+                              width: pixels.width * scale, height: pixels.height * scale)
+            let shape = RoundedRectangle(cornerRadius: camera.cornerRadius(for: rect.size))
+            ZStack(alignment: .topLeading) {
+                shape
+                    // Overlay chrome over arbitrary video: fixed overlay tokens (DESIGN §2).
+                    .strokeBorder(PK.Overlay.selectionStroke.opacity(isHovering || dragStart != nil ? 0.9 : 0), lineWidth: 1.5)
+                    .contentShape(shape)
+                    .frame(width: rect.width, height: rect.height)
+                    .offset(x: rect.minX, y: rect.minY)
+                    .onHover { isHovering = $0 }
+                    .pointerStyle(.grabActive)
+                    .gesture(moveGesture(scale: scale))
+                    .help("Drag to move the camera")
+                    .accessibilityLabel("Camera")
+                    .accessibilityHint("Drag to move")
+
+                Circle()
+                    .fill(PK.Overlay.selectionStroke)
+                    .overlay(Circle().strokeBorder(Color.black.opacity(0.4), lineWidth: PK.Metrics.hairline))
+                    .frame(width: PK.Overlay.handleSize + 5, height: PK.Overlay.handleSize + 5)
+                    .contentShape(Circle().inset(by: -6))
+                    .position(x: rect.maxX - rect.width * 0.15, y: rect.maxY - rect.height * 0.15)
+                    .opacity(isHovering || dragStart != nil ? 1 : 0.6)
+                    .pointerStyle(.frameResize(position: .bottomTrailing))
+                    .gesture(resizeGesture(canvas: canvas, scale: scale))
+                    .help("Drag to resize the camera")
+                    .accessibilityLabel("Camera size")
+            }
+            .coordinateSpace(.named(Self.space))
+        }
+    }
+
+    private static let space = "cameraLayerEditor"
+
+    private func moveGesture(scale: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+                if dragStart == nil {
+                    dragStart = camera
+                    model.beginContinuousEdit()
+                }
+                guard let start = dragStart, scale > 0 else { return }
+                let pixels = start.frame(video: plan.videoRect, canvas: CGRect(origin: .zero, size: plan.renderSize))
+                var updated = start
+                updated.setCenter(
+                    CGPoint(x: pixels.midX + value.translation.width / scale, y: pixels.midY + value.translation.height / scale),
+                    video: plan.videoRect
+                )
+                model.edit { $0.camera = updated }
+            }
+            .onEnded { _ in
+                dragStart = nil
+                model.endContinuousEdit()
+            }
+    }
+
+    private func resizeGesture(canvas: CGRect, scale: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .named(Self.space))
+            .onChanged { value in
+                if dragStart == nil {
+                    dragStart = camera
+                    model.beginContinuousEdit()
+                }
+                guard let start = dragStart, scale > 0 else { return }
+                let pixels = start.frame(video: plan.videoRect, canvas: CGRect(origin: .zero, size: plan.renderSize))
+                let pointer = CGPoint(x: (value.location.x - canvas.minX) / scale, y: (value.location.y - canvas.minY) / scale)
+                let aspect = CGFloat(start.shape.aspect)
+                // The grip sits 0.35 × the width from the center (see `position`).
+                let width = max(abs(pointer.x - pixels.midX), abs(pointer.y - pixels.midY) * aspect) / 0.35
+                var updated = start
+                updated.size = Double(width / max(1, min(plan.videoRect.width, plan.videoRect.height)))
+                    .clamped(to: CameraOverlay.sizeRange)
+                model.edit { $0.camera = updated }
+            }
+            .onEnded { _ in
+                dragStart = nil
+                model.endContinuousEdit()
+            }
+    }
+}
+
 /// Play/pause, time, and quick actions under the preview.
 struct TransportBar: View {
     @Bindable var model: VideoEditorModel
@@ -214,12 +312,17 @@ struct TransportBar: View {
                 Text("Selected \(Format.time(selection.duration))")
                     .font(.callout.monospacedDigit())
                     .foregroundStyle(.secondary)
-                Button("Cut", systemImage: "scissors", action: model.cutSelection)
-                    .help("Cut Selection — ⌘X")
+                Button("Delete", systemImage: "trash", action: model.cutSelection)
+                    .help("Remove the selected part — ⌫")
             } else if let cut = model.selectedCut {
                 Button("Restore Cut", systemImage: "arrow.uturn.backward") { model.removeCut(cut) }
                     .help("Restore the removed part — ⌫")
             }
+
+            Button("Split", systemImage: "scissors", action: model.splitAtPlayhead)
+                .help("Split at Playhead — S. Click a part to select it, then press ⌫ to remove it.")
+
+            Divider().frame(height: 16)
 
             Button("Set In", systemImage: "arrow.right.to.line", action: model.setTrimInAtPlayhead)
                 .labelStyle(.iconOnly)

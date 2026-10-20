@@ -12,6 +12,7 @@ import SwiftUI
 final class RecordingCoordinator {
     let controller = RecordingController()
     @ObservationIgnored private var optionsPanel: NSPanel?
+    @ObservationIgnored private var optionsCloseObserver: (any NSObjectProtocol)?
 
     var recorder: ScreenRecorder { controller.recorder }
     var isRecording: Bool { controller.recorder.state.isActive }
@@ -30,6 +31,9 @@ final class RecordingCoordinator {
         let host = NSHostingController(rootView: RecordingOptionsView(controller: controller) { [weak self] in
             self?.closeOptions()
         })
+        // The panel gets an explicit size below. Letting SwiftUI resize it later
+        // grows it upward from the bottom-left origin, off the top of the screen.
+        host.sizingOptions = .minSize
         let panel = NSPanel(contentViewController: host)
         panel.styleMask = [.titled, .closable, .fullSizeContentView, .utilityWindow]
         panel.titleVisibility = .hidden
@@ -41,10 +45,22 @@ final class RecordingCoordinator {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
         // Under the menu bar, near the right edge, like a menu bar popover.
-        let screen = NSScreen.screens.first { NSMouseInRect(NSEvent.mouseLocation, $0.frame, false) } ?? NSScreen.main
+        // The pointer sits on the menu bar's top edge, which NSMouseInRect excludes.
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { $0.frame.insetBy(dx: 0, dy: -1).contains(mouse) } ?? NSScreen.main
         if let visible = screen?.visibleFrame {
+            panel.setContentSize(CGSize(width: 360, height: min(620, visible.height - 16)))
             let size = panel.frame.size
-            panel.setFrameOrigin(CGPoint(x: visible.maxX - size.width - 16, y: visible.maxY - size.height - 8))
+            panel.setFrameOrigin(CGPoint(x: max(visible.minX + 8, visible.maxX - size.width - 16),
+                                         y: max(visible.minY + 8, visible.maxY - size.height - 8)))
+        }
+        // Closing the panel (its close button, ⌘W) cancels the setup. SwiftUI's
+        // onDisappear doesn't fire for a closed window that's kept around, so
+        // tell the controller directly; it hides the camera preview.
+        optionsCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: panel, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.optionsClosed() }
         }
         optionsPanel = panel
         NSApp.activate()
@@ -53,7 +69,13 @@ final class RecordingCoordinator {
 
     func closeOptions() {
         optionsPanel?.close()
+    }
+
+    private func optionsClosed() {
+        if let optionsCloseObserver { NotificationCenter.default.removeObserver(optionsCloseObserver) }
+        optionsCloseObserver = nil
         optionsPanel = nil
+        controller.optionsDidDisappear()
     }
 
     /// ⌥⇧⌘X: stop if recording, otherwise open the options.
@@ -72,8 +94,14 @@ final class RecordingCoordinator {
     // MARK: Area picking
 
     private static func pickArea() async -> AreaSelection? {
-        let windows = WindowList.onScreenWindows()
-        guard let snapshots = try? await ScreenshotService.snapshotDisplays() else { return nil }
+        let windows = WindowList.onScreenWindows(keeping: OwnWindows.capturableIDs())
+        let snapshots: [DisplaySnapshot]
+        do {
+            snapshots = try await ScreenshotService.snapshotDisplays(ownWindowIDs: OwnWindows.capturableIDs())
+        } catch {
+            Log.recording.error("Area picking: display snapshot failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
         return await withCheckedContinuation { continuation in
             let presented = OverlayController.present(
                 snapshots: snapshots, windows: windows,
@@ -85,7 +113,10 @@ final class RecordingCoordinator {
                     continuation.resume(returning: nil)
                 }
             }
-            if presented == nil { continuation.resume(returning: nil) }
+            if presented == nil {
+                Log.recording.notice("Area picking: overlay couldn't be presented (another overlay is open?)")
+                continuation.resume(returning: nil)
+            }
         }
     }
 

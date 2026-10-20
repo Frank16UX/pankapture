@@ -16,6 +16,14 @@ public enum CanvasLayout {
         return even(CGSize(width: source.width, height: source.width / ratio))
     }
 
+    /// Scales `size` so its shorter side is exactly `shortSide` (up or
+    /// down), keeping the aspect ratio. `nil` = unchanged.
+    public static func scaled(_ size: CGSize, shortSide: Double?) -> CGSize {
+        guard let shortSide, size.width > 0, size.height > 0 else { return even(size) }
+        let factor = shortSide / min(size.width, size.height)
+        return even(CGSize(width: size.width * factor, height: size.height * factor))
+    }
+
     /// Scales `size` down so its shorter side is at most `shortSideCap`
     /// (never up), keeping the aspect ratio. `nil` cap = unchanged.
     public static func scaled(_ size: CGSize, shortSideCap: Double?) -> CGSize {

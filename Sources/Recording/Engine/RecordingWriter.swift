@@ -20,12 +20,19 @@ import VideoToolbox
 ///   written as `.commonIdentifierTitle`; in MP4 it's stored as ISO user data
 ///   `uiso/titl`. Read it with `track.load(.metadata)` and pick the item whose
 ///   `commonKey == .commonKeyTitle`.
+/// - With the camera on, a second video track titled `"Camera"`, disabled so
+///   players show only the screen (ADR-25).
 public actor RecordingWriter {
     /// Track names written into each audio track's metadata. The video editor
     /// should identify tracks by these names, falling back to track order.
     public enum TrackName {
         public static let systemAudio = "System"
         public static let microphone = "Microphone"
+        /// System + mic mixed for players that play one track (`AudioMixdown`).
+        /// The editor ignores it.
+        public static let mix = "Mix"
+        /// The webcam video track (ADR-25).
+        public static let camera = "Camera"
     }
 
     public struct Settings: Sendable {
@@ -38,6 +45,8 @@ public actor RecordingWriter {
         /// Expected mic format if no mic sample has arrived by the first video frame.
         public var microphoneSampleRate: Double
         public var microphoneChannels: Int
+        /// Pixel size of the camera frames; `nil` = no camera track.
+        public var cameraSize: CGSize?
 
         public init(
             url: URL,
@@ -47,7 +56,8 @@ public actor RecordingWriter {
             capturesSystemAudio: Bool,
             capturesMicrophone: Bool,
             microphoneSampleRate: Double = 48_000,
-            microphoneChannels: Int = 1
+            microphoneChannels: Int = 1,
+            cameraSize: CGSize? = nil
         ) {
             self.url = url
             self.codec = codec
@@ -57,6 +67,7 @@ public actor RecordingWriter {
             self.capturesMicrophone = capturesMicrophone
             self.microphoneSampleRate = microphoneSampleRate
             self.microphoneChannels = microphoneChannels
+            self.cameraSize = cameraSize
         }
     }
 
@@ -85,6 +96,8 @@ public actor RecordingWriter {
     private var videoInput: AVAssetWriterInput?
     private var systemInput: AVAssetWriterInput?
     private var microphoneInput: AVAssetWriterInput?
+    private var cameraInput: AVAssetWriterInput?
+    private var lastCameraTime: CMTime = .negativeInfinity
 
     private var timeline = PauseTimeline()
     /// Host time of the first written video frame; the output timeline starts here.
@@ -187,6 +200,24 @@ public actor RecordingWriter {
         }
     }
 
+    /// Appends a camera frame (host-clock timestamps) to the camera track.
+    /// Frames before the first screen frame are dropped.
+    public func appendCamera(_ sampleBuffer: CMSampleBuffer) {
+        guard !isFinishing, failure == nil, let sessionStart, let cameraInput,
+              CMSampleBufferIsValid(sampleBuffer) else { return }
+        let hostTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard hostTime >= sessionStart, let outputTime = timeline.outputTime(for: hostTime),
+              outputTime > lastCameraTime, cameraInput.isReadyForMoreMediaData,
+              let retimed = AudioBuffers.retimed(sampleBuffer, by: hostTime - outputTime) else { return }
+        if cameraInput.append(retimed) {
+            lastCameraTime = outputTime
+        } else {
+            checkWriterStatus()
+        }
+    }
+
+    public var hasCameraTrack: Bool { cameraInput != nil }
+
     // MARK: Control (called from the main actor)
 
     public func pause(at hostTime: CMTime) { timeline.pause(at: hostTime) }
@@ -216,6 +247,7 @@ public actor RecordingWriter {
         videoInput?.markAsFinished()
         systemInput?.markAsFinished()
         microphoneInput?.markAsFinished()
+        cameraInput?.markAsFinished()
         writer.endSession(atSourceTime: endTime)
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -281,6 +313,14 @@ public actor RecordingWriter {
             if writer.canAdd(input) { writer.add(input); microphoneInput = input }
         }
 
+        if let cameraSize = settings.cameraSize {
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: Self.cameraSettings(for: cameraSize))
+            input.expectsMediaDataInRealTime = true
+            input.marksOutputTrackAsEnabled = false
+            input.metadata = [Self.trackNameItem(TrackName.camera)]
+            if writer.canAdd(input) { writer.add(input); cameraInput = input }
+        }
+
         guard writer.startWriting() else {
             throw RecordingError.writerFailed(writer.error?.localizedDescription ?? "startWriting failed")
         }
@@ -317,6 +357,24 @@ public actor RecordingWriter {
                 AVVideoMaxKeyFrameIntervalDurationKey: 2,
                 AVVideoAllowFrameReorderingKey: false,
                 AVVideoProfileLevelKey: profile,
+            ] as [String: Any],
+        ]
+    }
+
+    /// H.264 for the camera track, at most 1280 px wide (it's shown small).
+    static func cameraSettings(for size: CGSize) -> [String: Any] {
+        let scale = min(1, 1280 / max(size.width, 1))
+        let width = max(2, Int((size.width * scale / 2).rounded()) * 2)
+        let height = max(2, Int((size.height * scale / 2).rounded()) * 2)
+        return [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+            AVVideoScalingModeKey: AVVideoScalingModeResizeAspectFill,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: 3_000_000,
+                AVVideoMaxKeyFrameIntervalDurationKey: 2,
+                AVVideoAllowFrameReorderingKey: false,
             ] as [String: Any],
         ]
     }

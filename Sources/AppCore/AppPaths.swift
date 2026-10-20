@@ -25,6 +25,21 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("Library", isDirectory: true)
     }
 
+    /// Layered originals of recordings made with the camera as its own track
+    /// (ADR-25). The save folder gets a composited copy with the same name;
+    /// the video editor opens the original from here.
+    public static var recordingSources: URL {
+        applicationSupport.appendingPathComponent("Recordings/Sources", isDirectory: true)
+    }
+
+    /// The file to edit for `url`: its layered original, if there is one.
+    public static func editableRecording(for url: URL) -> URL {
+        let source = recordingSources.appendingPathComponent(url.lastPathComponent)
+        guard url.deletingLastPathComponent().standardizedFileURL != recordingSources.standardizedFileURL,
+              FileManager.default.fileExists(atPath: source.path) else { return url }
+        return source
+    }
+
     /// Creates `url` (and parents) if needed and returns it.
     @discardableResult
     public static func ensure(_ url: URL) throws -> URL {
