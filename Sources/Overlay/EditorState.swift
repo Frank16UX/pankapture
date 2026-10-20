@@ -139,6 +139,10 @@ final class EditorState {
         documentDidChange?()
     }
 
+    func clearHistory() {
+        document.clearHistory()
+    }
+
     func undo() {
         document.undo()
         dropStaleSelection()

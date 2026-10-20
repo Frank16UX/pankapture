@@ -35,7 +35,9 @@ final class OverlayView: NSView {
     private let chrome = ChromeLayerView()
     private var toolsHost: NSHostingView<ToolsBar>?
     private var actionsHost: NSHostingView<ActionsBar>?
-    private var textEditor: InlineTextEditor?
+    private lazy var annotations = AnnotationInteraction(state: state, host: self) { [weak self] in
+        self?.canvas.needsDisplay = true
+    }
 
     private(set) var selection: CGRect?
     private var hoverRect: CGRect?
@@ -49,8 +51,7 @@ final class OverlayView: NSView {
         case creating(anchor: CGPoint)
         case resizing(handle: SelectionHandle, original: CGRect)
         case movingSelection(start: CGPoint, original: CGRect)
-        case drawing(tool: AnnotationTool, start: CGPoint, points: [CGPoint])
-        case movingAnnotation(original: Annotation, start: CGPoint)
+        case annotating
     }
 
     init(snapshot: DisplaySnapshot, windows: [WindowInfo], state: EditorState, mode: OverlayMode, controller: OverlayController) {
@@ -92,7 +93,7 @@ final class OverlayView: NSView {
 
     /// Clears this display's selection (another display became active).
     func resetSelection() {
-        commitTextIfNeeded()
+        annotations.commitText()
         selection = nil
         interaction = .none
         canvas.isHidden = true
@@ -113,7 +114,7 @@ final class OverlayView: NSView {
 
     /// Commits any open text field (before rendering the result).
     func endEditing() {
-        commitTextIfNeeded()
+        annotations.commitText()
     }
 
     /// Screen rect (AppKit global) of the actions bar, to anchor the share menu.
@@ -165,8 +166,8 @@ final class OverlayView: NSView {
         lastMouse = point
         window?.makeFirstResponder(self)
 
-        if textEditor != nil {
-            commitTextIfNeeded()
+        if annotations.isEditingText {
+            annotations.commitText()
             return
         }
         controller.activate(self)
@@ -192,38 +193,12 @@ final class OverlayView: NSView {
             return
         }
 
-        guard mode == .annotate, !spaceHeld else {
+        guard mode == .annotate, !spaceHeld,
+              annotations.mouseDown(at: point, modifiers: event.modifierFlags) else {
             interaction = .movingSelection(start: point, original: selection)
             return
         }
-
-        if let hit = state.document.hitTest(point) {
-            if state.tool == .text, case .text = hit.shape {
-                beginTextEditing(at: point, existing: hit)
-                return
-            }
-            state.selectedAnnotationID = hit.id
-            interaction = .movingAnnotation(original: hit, start: point)
-            canvas.needsDisplay = true
-            return
-        }
-
-        if state.selectedAnnotationID != nil {
-            state.selectedAnnotationID = nil
-            canvas.needsDisplay = true
-        }
-
-        switch state.tool {
-        case nil:
-            interaction = .movingSelection(start: point, original: selection)
-        case .text:
-            beginTextEditing(at: point)
-        case .counter:
-            state.add(Annotation(shape: .counter(center: point, number: state.document.nextCounterNumber), style: state.style))
-        case let tool?:
-            interaction = .drawing(tool: tool, start: point, points: [point])
-            state.draft = makeDraft(tool: tool, start: point, current: point, points: [point], modifiers: event.modifierFlags)
-        }
+        interaction = .annotating
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -244,7 +219,7 @@ final class OverlayView: NSView {
         case let .pending(start):
             guard hypot(point.x - start.x, point.y - start.y) > 3 else { return }
             controller.activate(self)
-            commitTextIfNeeded()
+            annotations.commitText()
             selection = nil
             hoverRect = nil
             hideToolbars()
@@ -273,18 +248,8 @@ final class OverlayView: NSView {
             hideToolbars()
             updateChrome()
 
-        case let .drawing(tool, start, points):
-            var points = points
-            if tool == .pen || tool == .highlighter {
-                points.append(point)
-                interaction = .drawing(tool: tool, start: start, points: points)
-            }
-            state.draft = makeDraft(tool: tool, start: start, current: point, points: points, modifiers: modifiers)
-
-        case let .movingAnnotation(original, start):
-            var moved = original
-            moved.shape = original.shape.translated(by: CGVector(dx: point.x - start.x, dy: point.y - start.y))
-            state.draft = moved
+        case .annotating:
+            annotations.mouseDragged(to: point, modifiers: modifiers)
         }
     }
 
@@ -323,19 +288,8 @@ final class OverlayView: NSView {
             }
             finishSelectionChange()
 
-        case .drawing:
-            if let draft = state.draft, isMeaningful(draft) {
-                state.commitDraft()
-            } else {
-                state.draft = nil
-            }
-
-        case let .movingAnnotation(original, _):
-            if let draft = state.draft, draft.shape != original.shape {
-                state.commitDraft()
-            } else {
-                state.draft = nil
-            }
+        case .annotating:
+            annotations.mouseUp()
         }
     }
 
@@ -346,7 +300,11 @@ final class OverlayView: NSView {
 
     override func flagsChanged(with event: NSEvent) {
         // Re-apply ⇧/⌥ constraints live without waiting for the next mouse move.
-        drag(to: lastMouse, delta: .zero, modifiers: event.modifierFlags)
+        if case .annotating = interaction {
+            annotations.flagsChanged(event.modifierFlags)
+        } else {
+            drag(to: lastMouse, delta: .zero, modifiers: event.modifierFlags)
+        }
     }
 
     private func finishSelectionChange() {
@@ -364,95 +322,6 @@ final class OverlayView: NSView {
         }
     }
 
-    // MARK: - Drawing helpers
-
-    private func makeDraft(tool: AnnotationTool, start: CGPoint, current: CGPoint, points: [CGPoint],
-                           modifiers: NSEvent.ModifierFlags) -> Annotation {
-        let shift = modifiers.contains(.shift)
-        let option = modifiers.contains(.option)
-        let id = state.draft?.id ?? UUID()
-        let snapped = shift ? ShapeConstraints.snap45(from: start, to: current) : current
-        let rect = ShapeConstraints.rect(from: start, to: current, square: shift, fromCenter: option)
-        let shape: AnnotationShape = switch tool {
-        case .pen: .freehand(points: shift ? [start, snapped] : points)
-        case .highlighter: .highlighter(points: shift ? [start, snapped] : points)
-        case .line: .line(from: start, to: snapped)
-        case .arrow: .arrow(from: start, to: snapped)
-        case .rectangle: .rectangle(rect)
-        case .ellipse: .ellipse(rect)
-        case .blur: .blur(rect)
-        case .pixelate: .pixelate(rect)
-        case .text, .counter: .counter(center: current, number: 0) // placed by clicking, never dragged
-        }
-        return Annotation(id: id, shape: shape, style: state.style)
-    }
-
-    private func isMeaningful(_ annotation: Annotation) -> Bool {
-        let bounds = annotation.shape.geometryBounds
-        switch annotation.shape {
-        case .freehand, .highlighter:
-            return true // a single click leaves a dot
-        case .line, .arrow:
-            return hypot(bounds.width, bounds.height) >= 3
-        default:
-            return bounds.width >= 3 && bounds.height >= 3
-        }
-    }
-
-    // MARK: - Text
-
-    private func beginTextEditing(at point: CGPoint, existing: Annotation? = nil) {
-        let fontSize: Double
-        let origin: CGPoint
-        let string: String
-        let color: RGBAColor
-        if let existing, case let .text(existingOrigin, existingString, existingSize) = existing.shape {
-            origin = existingOrigin
-            string = existingString
-            fontSize = existingSize
-            color = existing.style.color
-            state.editingTextID = existing.id
-            state.selectedAnnotationID = nil
-            canvas.needsDisplay = true
-        } else {
-            fontSize = state.size.fontSize
-            // The click marks the middle of the first line.
-            origin = CGPoint(x: point.x, y: point.y - TextMetrics.size(of: "X", fontSize: fontSize).height / 2)
-            string = ""
-            color = state.color
-        }
-
-        let editor = InlineTextEditor(origin: origin, string: string, fontSize: fontSize, color: color)
-        editor.existingID = existing?.id
-        editor.onCommit = { [weak self] in self?.commitTextIfNeeded() }
-        addSubview(editor)
-        textEditor = editor
-        window?.makeFirstResponder(editor)
-    }
-
-    private func commitTextIfNeeded() {
-        guard let editor = textEditor else { return }
-        textEditor = nil
-        editor.onCommit = nil
-        let string = editor.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : editor.string
-        let shape = AnnotationShape.text(origin: editor.textOrigin, string: string, fontSize: editor.fontSize)
-        let style = AnnotationStyle(color: editor.color, lineWidth: state.size.lineWidth)
-        editor.removeFromSuperview()
-        state.editingTextID = nil
-
-        if let id = editor.existingID {
-            if string.isEmpty {
-                state.remove(id: id)
-            } else {
-                state.update(Annotation(id: id, shape: shape, style: style))
-            }
-        } else if !string.isEmpty {
-            state.add(Annotation(shape: shape, style: style))
-        }
-        canvas.needsDisplay = true
-        window?.makeFirstResponder(self)
-    }
-
     // MARK: - Keyboard
 
     override func keyDown(with event: NSEvent) {
@@ -466,7 +335,7 @@ final class OverlayView: NSView {
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         // While typing, let the text view (and the standard Edit menu) handle ⌘ keys.
-        if textEditor != nil { return super.performKeyEquivalent(with: event) }
+        if annotations.isEditingText { return super.performKeyEquivalent(with: event) }
         guard event.type == .keyDown, event.modifierFlags.contains(.command) else {
             return super.performKeyEquivalent(with: event)
         }
@@ -484,9 +353,6 @@ final class OverlayView: NSView {
             return true
         case kVK_Return, kVK_ANSI_KeypadEnter:
             if selection != nil { perform(mode == .annotate ? .done : .confirmPick) }
-            return true
-        case kVK_Delete, kVK_ForwardDelete:
-            if let id = state.selectedAnnotationID { state.remove(id: id) }
             return true
         case kVK_LeftArrow, kVK_RightArrow, kVK_UpArrow, kVK_DownArrow:
             nudge(keyCode: keyCode, by: flags.contains(.shift) ? 10 : 1)
@@ -519,15 +385,11 @@ final class OverlayView: NSView {
             return true
         }
 
-        if flags.isDisjoint(with: [.command, .control, .option]), mode == .annotate,
-           let tool = AnnotationTool.allCases.first(where: { String($0.keyEquivalent) == key }) {
-            state.tool = tool
-            state.selectedAnnotationID = nil
-            canvas.needsDisplay = true
+        if mode == .annotate, annotations.handleKey(event) {
             updateCursor(at: lastMouse)
             return true
         }
-        return false
+        return keyCode == kVK_Delete || keyCode == kVK_ForwardDelete
     }
 
     private func nudge(keyCode: Int, by step: CGFloat) {
@@ -537,17 +399,15 @@ final class OverlayView: NSView {
         case kVK_UpArrow: CGVector(dx: 0, dy: -step)
         default: CGVector(dx: 0, dy: step)
         }
-        if var annotation = state.selectedAnnotation {
-            annotation.shape = annotation.shape.translated(by: delta)
-            state.update(annotation)
-        } else if let selection {
+        if annotations.nudgeSelection(by: delta) { return }
+        if let selection {
             self.selection = SelectionGeometry.move(selection, by: delta, within: displayBounds)
             finishSelectionChange()
         }
     }
 
     private func perform(_ command: EditorCommand) {
-        commitTextIfNeeded()
+        annotations.commitText()
         controller.perform(command, from: self)
     }
 
@@ -622,13 +482,7 @@ final class OverlayView: NSView {
         if let handle = SelectionGeometry.handle(at: point, in: selection, hitRadius: PK.Overlay.handleSize) {
             Self.cursor(for: handle).set()
         } else if selection.contains(point) {
-            if mode != .annotate || state.tool == nil || spaceHeld || state.document.hitTest(point) != nil {
-                NSCursor.openHand.set()
-            } else if state.tool == .text {
-                NSCursor.iBeam.set()
-            } else {
-                NSCursor.crosshair.set()
-            }
+            (mode != .annotate || spaceHeld ? NSCursor.openHand : annotations.cursor(at: point)).set()
         } else {
             NSCursor.crosshair.set()
         }

@@ -19,6 +19,8 @@ public enum PreferenceKey {
     public static let editorTool = "editor.tool"
     public static let editorColor = "editor.color"
     public static let editorSize = "editor.size"
+    /// Last background/beautify options used in the editor window (JSON).
+    public static let editorBeautify = "editor.beautify"
     /// Last area selection, for "Capture Previous Area" (SC-8). JSON `{displayID, rect}`.
     public static let lastSelection = "capture.lastSelection"
 }

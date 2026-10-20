@@ -53,6 +53,12 @@ public struct AnnotationDocument: Sendable, Equatable {
         annotations.removeAll()
     }
 
+    /// Forgets undo/redo history (e.g. after loading a saved document).
+    public mutating func clearHistory() {
+        undoStack.removeAll()
+        redoStack.removeAll()
+    }
+
     public mutating func undo() {
         guard let previous = undoStack.popLast() else { return }
         redoStack.append(annotations)
