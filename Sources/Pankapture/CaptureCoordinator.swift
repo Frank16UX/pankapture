@@ -17,6 +17,8 @@ final class CaptureCoordinator {
     private(set) var lastCaptureURL: URL?
     /// The newest recording (MP4) still on disk, for "Edit Last Recording".
     private(set) var lastRecordingURL: URL?
+    /// Recordings whose webcam is being drawn into the saved copy (ADR-25).
+    private(set) var recordingsBeingPrepared = 0
     private(set) var lastErrorMessage: String?
     /// Actions whose shortcut couldn't be registered (taken by another app).
     private(set) var shortcutConflicts: Set<ShortcutAction> = []
@@ -132,7 +134,7 @@ final class CaptureCoordinator {
 
         let signpost = Log.signposter.beginInterval("hotkey → overlay")
         rememberSourceApp()
-        let windows = WindowList.onScreenWindows()
+        let windows = WindowList.onScreenWindows(keeping: OwnWindows.capturableIDs())
         guard let snapshots = await takeSnapshots() else {
             Log.signposter.endInterval("hotkey → overlay", signpost)
             return
@@ -174,7 +176,7 @@ final class CaptureCoordinator {
         defer { isCapturing = false }
 
         rememberSourceApp()
-        let windows = WindowList.onScreenWindows()
+        let windows = WindowList.onScreenWindows(keeping: OwnWindows.capturableIDs())
         guard let snapshots = await takeSnapshots() else { return }
         OverlayController.present(snapshots: snapshots, windows: windows, mode: .pickWindow) { [weak self] outcome in
             guard case let .pickedWindow(window) = outcome else { return }
@@ -228,7 +230,7 @@ final class CaptureCoordinator {
         defer { isCapturing = false }
 
         rememberSourceApp()
-        let windows = WindowList.onScreenWindows()
+        let windows = WindowList.onScreenWindows(keeping: OwnWindows.capturableIDs())
         guard let snapshots = await takeSnapshots() else { return }
         OverlayController.present(snapshots: snapshots, windows: windows, mode: .pick(confirmTitle: nil)) { outcome in
             guard case let .picked(area) = outcome, let image = area.image else { return }
@@ -455,16 +457,23 @@ final class CaptureCoordinator {
     private func handleRecording(_ outcome: RecordingOutcome) {
         switch outcome {
         case let .finished(result, outputKind):
+            let opensEditor = UserDefaults.standard.bool(forKey: PreferenceKey.videoEditorOpenAfterRecording)
             if outputKind == .gif {
                 convertToGIF(result)
+            } else if result.hasCameraTrack {
+                compositeCamera(result, opensEditor: opensEditor)
             } else {
                 recordingSaved(at: result.url, videoSize: result.videoSize)
-                if UserDefaults.standard.bool(forKey: PreferenceKey.videoEditorOpenAfterRecording) {
-                    videoEditor.open(url: result.url)
-                }
+                if opensEditor { videoEditor.open(url: result.url) }
             }
         case let .interrupted(error, result):
-            if let result { recordingSaved(at: result.url, videoSize: result.videoSize) }
+            if let result {
+                if result.hasCameraTrack {
+                    compositeCamera(result, opensEditor: false)
+                } else {
+                    recordingSaved(at: result.url, videoSize: result.videoSize)
+                }
+            }
             OutputService.presentError("The recording stopped early", error)
         case let .failed(error):
             OutputService.presentError("Couldn't record the screen", error)
@@ -481,6 +490,40 @@ final class CaptureCoordinator {
         }
         CaptureNotifier.shared.notifyRecording(savedURL: url)
         Task { await library?.recordRecording(fileURL: url, kind: kind, sourceAppName: nil) }
+    }
+
+    /// The webcam was recorded as its own track (ADR-25), which players don't
+    /// show. Keep that layered file as the editable original (Application
+    /// Support) and save a copy with the webcam drawn in under the same name.
+    /// The editor opens the original when asked for the copy.
+    private func compositeCamera(_ result: RecordingResult, opensEditor: Bool) {
+        let destination = result.url
+        let source = AppPaths.recordingSources.appendingPathComponent(destination.lastPathComponent)
+        recordingsBeingPrepared += 1
+        Task {
+            defer { recordingsBeingPrepared -= 1 }
+            do {
+                try AppPaths.ensure(AppPaths.recordingSources)
+                try FileManager.default.moveItem(at: destination, to: source)
+            } catch {
+                Log.recording.error("Couldn't keep the layered recording: \(error.localizedDescription, privacy: .public)")
+                recordingSaved(at: destination, videoSize: result.videoSize)
+                return
+            }
+            do {
+                let start = ContinuousClock.now
+                let exported = try await CameraComposite.export(recordingAt: source, to: destination)
+                Log.recording.info("Webcam composited in \((ContinuousClock.now - start).formatted(.units(allowed: [.seconds])), privacy: .public)")
+                recordingSaved(at: destination, videoSize: exported.pixelSize)
+            } catch {
+                // Give the user the layered file rather than nothing.
+                try? FileManager.default.moveItem(at: source, to: destination)
+                Log.recording.error("Webcam composite failed: \(error.localizedDescription, privacy: .public)")
+                recordingSaved(at: destination, videoSize: result.videoSize)
+                OutputService.presentError("The camera couldn't be added to the saved video. Open it in the editor and export it to include the camera.", error)
+            }
+            if opensEditor { videoEditor.open(url: destination) }
+        }
     }
 
     /// GIF mode (REC-14) records an MP4 and converts it here; the MP4 goes to the Trash.
@@ -564,7 +607,11 @@ final class CaptureCoordinator {
             PinController.shared.pin(image, scale: scale)
         case (.delete, _):
             quickAccess.dismiss(item)
-            if let url = item.fileURL { NSWorkspace.shared.recycle([url]) }
+            if let url = item.fileURL {
+                // A recording's layered original (ADR-25) goes with it.
+                let source = AppPaths.editableRecording(for: url)
+                NSWorkspace.shared.recycle(source == url ? [url] : [url, source])
+            }
             if let id = item.libraryID { Task { await library?.delete(ids: [id]) } }
         case (.reveal, _):
             if let url = item.fileURL { NSWorkspace.shared.activateFileViewerSelecting([url]) }
@@ -581,6 +628,7 @@ final class CaptureCoordinator {
         let defaults = UserDefaults.standard
         do {
             let snapshots = try await ScreenshotService.snapshotDisplays(
+                ownWindowIDs: OwnWindows.capturableIDs(),
                 showsCursor: defaults.bool(forKey: PreferenceKey.captureShowsCursor),
                 hidesDesktopIcons: defaults.bool(forKey: PreferenceKey.captureHidesDesktopIcons)
             )

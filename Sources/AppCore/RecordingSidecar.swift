@@ -16,12 +16,35 @@ public struct RecordingSidecar: Codable, Equatable, Sendable {
     /// Seconds of output timeline (pauses already removed).
     public var duration: Double
     public var clicks: [Click]
+    /// Where the webcam bubble was, when the camera was recorded as its own
+    /// track ("Camera"). `nil` for recordings without one.
+    public var camera: Camera?
 
-    public init(version: Int = Self.currentVersion, videoSize: CGSize, duration: Double, clicks: [Click] = []) {
+    public init(version: Int = Self.currentVersion, videoSize: CGSize, duration: Double, clicks: [Click] = [], camera: Camera? = nil) {
         self.version = version
         self.videoSize = videoSize
         self.duration = duration
         self.clicks = clicks
+        self.camera = camera
+    }
+
+    /// The bubble as it looked on screen, relative to the recorded frame.
+    public struct Camera: Codable, Equatable, Sendable {
+        /// Bubble center, normalized to the recorded frame: (0,0) top-left.
+        public var center: CGPoint
+        /// Bubble width as a fraction of the recorded frame's shorter side.
+        public var size: Double
+        /// `true` for a circle, `false` for a rounded rectangle (4:3).
+        public var isCircle: Bool
+        /// Whether the preview was mirrored (the track itself never is).
+        public var isMirrored: Bool
+
+        public init(center: CGPoint, size: Double, isCircle: Bool, isMirrored: Bool) {
+            self.center = center
+            self.size = size
+            self.isCircle = isCircle
+            self.isMirrored = isMirrored
+        }
     }
 
     public struct Click: Codable, Equatable, Sendable {

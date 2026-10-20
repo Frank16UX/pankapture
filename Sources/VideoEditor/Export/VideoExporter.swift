@@ -38,7 +38,7 @@ public enum VideoExporter {
             source: source,
             tracks: tracks,
             project: project,
-            options: .init(shortSideCap: settings.resolution.shortSideCap, frameRate: fps),
+            options: .init(shortSide: settings.resolution.shortSide, frameRate: fps),
             background: background
         )
         let bitrate = ExportEstimator.videoBitrate(renderSize: edit.plan.renderSize, fps: fps, quality: settings.quality)
@@ -247,5 +247,22 @@ final class MP4WriterJob: @unchecked Sendable {
         guard let continuation else { return }
         self.continuation = nil
         continuation.resume(with: result)
+    }
+}
+
+/// The shareable copy of a recording whose webcam is its own track (ADR-25):
+/// the webcam drawn where the bubble was, nothing else changed.
+public enum CameraComposite {
+    /// Exports `sourceURL` to `destination` at the recording's own size and
+    /// frame rate, high quality.
+    public static func export(
+        recordingAt sourceURL: URL,
+        to destination: URL,
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> VideoExportResult {
+        let source = try await SourceMedia.load(url: sourceURL)
+        let project = VideoEditProject.initial(for: source)
+        let settings = ExportSettings(format: .mp4, resolution: .original, quality: .high, frameRate: .original)
+        return try await VideoExporter.exportMP4(source: source, project: project, settings: settings, to: destination, progress: progress)
     }
 }

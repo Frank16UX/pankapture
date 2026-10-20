@@ -13,11 +13,21 @@ public struct AudioTrackInfo: Sendable, Identifiable, Equatable {
     public var id: CMPersistentTrackID { trackID }
 }
 
+/// The recorder's webcam track (ADR-25): drawn as a movable layer.
+public struct CameraTrackInfo: Sendable, Equatable {
+    public let trackID: CMPersistentTrackID
+    /// Upright frame size, pixels.
+    public let size: CGSize
+    public let orientation: CGImagePropertyOrientation
+    public let timeRange: TimeRange
+}
+
 /// The source's tracks, resolved for one composition build. Not `Sendable`
 /// (`AVAssetTrack` isn't); load it in the isolation domain that uses it.
 public struct LoadedTracks {
     public let video: AVAssetTrack
     public let audio: [CMPersistentTrackID: AVAssetTrack]
+    public var camera: AVAssetTrack?
 }
 
 /// The loaded properties of a source movie, gathered once with the async
@@ -41,11 +51,22 @@ public struct SourceMedia: Sendable {
     /// Average video data rate of the source, bits per second (0 if unknown).
     public let videoBitrate: Double
     public let audioTracks: [AudioTrackInfo]
+    /// The webcam, when it was recorded as its own track.
+    public let camera: CameraTrackInfo?
 
     public static func load(url: URL) async throws -> SourceMedia {
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         let duration = try await asset.load(.duration).seconds
-        guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
+        var screenTracks: [AVAssetTrack] = []
+        var cameraTrack: AVAssetTrack?
+        for track in try await asset.loadTracks(withMediaType: .video) {
+            if cameraTrack == nil, await Self.name(of: track)?.lowercased() == Self.cameraTrackName {
+                cameraTrack = track
+            } else {
+                screenTracks.append(track)
+            }
+        }
+        guard let videoTrack = screenTracks.first else {
             throw VideoEditorError.noVideoTrack
         }
         let (naturalSize, transform, nominalRate, minFrameDuration, videoRange) = try await videoTrack.load(
@@ -94,6 +115,20 @@ public struct SourceMedia: Sendable {
         let videoEnd = videoRange.end.seconds
         if videoEnd.isFinite, videoEnd > 0 { editable = min(editable, videoEnd) }
 
+        var camera: CameraTrackInfo?
+        if let cameraTrack {
+            let (size, transform, range) = try await cameraTrack.load(.naturalSize, .preferredTransform, .timeRange)
+            let orientation = Self.orientation(for: transform)
+            let upright: CGSize = switch orientation {
+            case .left, .right, .leftMirrored, .rightMirrored: CGSize(width: size.height, height: size.width)
+            default: size
+            }
+            camera = CameraTrackInfo(
+                trackID: cameraTrack.trackID, size: upright, orientation: orientation,
+                timeRange: TimeRange(start: range.start.seconds, end: range.end.seconds)
+            )
+        }
+
         return SourceMedia(
             url: url,
             asset: asset,
@@ -105,12 +140,15 @@ public struct SourceMedia: Sendable {
             preferredTransform: Self.normalized(transform, naturalSize: naturalSize),
             frameRate: frameRate,
             videoBitrate: Double(dataRate.isFinite ? dataRate : 0),
-            audioTracks: audioTracks
+            audioTracks: audioTracks,
+            camera: camera
         )
     }
 
     /// Title of the recorder's mixed track (`RecordingWriter.TrackName.mix`), lowercased.
     static let mixTrackName = "mix"
+    /// Title of the recorder's webcam track (`RecordingWriter.TrackName.camera`), lowercased.
+    static let cameraTrackName = "camera"
 
     /// Resolves the AVFoundation tracks (cheap: the asset has them loaded).
     public func loadTracks() async throws -> sending LoadedTracks {
@@ -121,7 +159,9 @@ public struct SourceMedia: Sendable {
         for info in audioTracks {
             if let track = try await asset.loadTrack(withTrackID: info.trackID) { audio[info.trackID] = track }
         }
-        return LoadedTracks(video: video, audio: audio)
+        var camera: AVAssetTrack?
+        if let info = self.camera { camera = try await asset.loadTrack(withTrackID: info.trackID) }
+        return LoadedTracks(video: video, audio: audio, camera: camera)
     }
 
     /// Track roles from track names when present ("…mic…" / "…system…");
@@ -167,7 +207,9 @@ public struct SourceMedia: Sendable {
             .quickTimeUserDataTrackName, .commonIdentifierTitle, .quickTimeMetadataDisplayName,
         ]
         for item in items {
-            guard let identifier = item.identifier, identifiers.contains(identifier) else { continue }
+            // MP4 stores the recorder's titles as ISO user data (`uiso/titl`),
+            // which only matches by common key.
+            guard item.commonKey == .commonKeyTitle || item.identifier.map(identifiers.contains) == true else { continue }
             if let value = try? await item.load(.stringValue), !value.isEmpty { return value }
         }
         return nil

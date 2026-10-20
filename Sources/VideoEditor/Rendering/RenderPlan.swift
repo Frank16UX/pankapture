@@ -25,26 +25,36 @@ public struct RenderPlan: Sendable, Equatable {
     public var zooms: [ZoomSegment]
     /// Zoom moves a camera over the whole canvas (see `VideoEditProject.zoomFillsFrame`).
     public var zoomFillsFrame: Bool
+    /// The webcam layer to draw (visible, and the source has a camera track).
+    public var camera: CameraOverlay?
+    /// Rotation that turns camera frames upright.
+    public var cameraOrientation: CGImagePropertyOrientation
     public var timeline: Timeline
     /// The editor turns zoom off while the user positions a zoom rectangle.
     public var zoomEnabled: Bool
     public var altersFrame: Bool
 
     /// - Parameters:
-    ///   - shortSideCap: export resolution cap (MP4 presets).
+    ///   - shortSideCap: resolution cap, never upscaling (the preview).
+    ///   - shortSide: exact shorter side, up or down (MP4 export presets).
     ///   - width: exact output width cap (GIF).
     public init(
         project: VideoEditProject,
         sourceSize: CGSize,
         orientation: CGImagePropertyOrientation = .up,
         shortSideCap: Double? = nil,
+        shortSide: Double? = nil,
         width: Int? = nil,
         zoomEnabled: Bool = true,
-        backgroundOrientation: CGImagePropertyOrientation = .up
+        backgroundOrientation: CGImagePropertyOrientation = .up,
+        hasCameraTrack: Bool = false,
+        cameraOrientation: CGImagePropertyOrientation = .up
     ) {
         let background = project.background
         let canvas = CanvasLayout.canvasSize(source: sourceSize, aspect: background.aspect)
-        var renderSize = CanvasLayout.scaled(canvas, shortSideCap: shortSideCap)
+        var renderSize = shortSide != nil
+            ? CanvasLayout.scaled(canvas, shortSide: shortSide)
+            : CanvasLayout.scaled(canvas, shortSideCap: shortSideCap)
         if width != nil { renderSize = CanvasLayout.scaled(renderSize, width: width) }
         let videoRect = CanvasLayout.videoRect(canvas: renderSize, source: sourceSize, padding: background.effectivePadding)
 
@@ -58,6 +68,9 @@ public struct RenderPlan: Sendable, Equatable {
         self.backgroundOrientation = backgroundOrientation
         self.zooms = project.zooms
         self.zoomFillsFrame = project.zoomFillsFrame
+        let camera = hasCameraTrack ? (project.camera ?? .standard) : nil
+        self.camera = camera?.isVisible == true ? camera : nil
+        self.cameraOrientation = cameraOrientation
         self.timeline = Timeline(project: project)
         self.zoomEnabled = zoomEnabled
         self.altersFrame = background.altersFrame
@@ -66,7 +79,16 @@ public struct RenderPlan: Sendable, Equatable {
     /// When false, frames are a plain scaled copy of the source and the much
     /// cheaper built-in compositor is used instead of `VideoEditCompositor`.
     public var needsCustomCompositor: Bool {
-        altersFrame || (zoomEnabled && !zooms.isEmpty)
+        altersFrame || camera != nil || (zoomEnabled && !zooms.isEmpty)
+    }
+
+    /// Where the camera layer sits in the output, pixels, **bottom-left**
+    /// origin (Core Image), before any full-frame zoom.
+    public var cameraRect: CGRect? {
+        guard let camera else { return nil }
+        // `videoRect` is centered, so it's the same in both origins.
+        let topLeft = camera.frame(video: videoRect, canvas: CGRect(origin: .zero, size: renderSize))
+        return CGRect(x: topLeft.minX, y: renderSize.height - topLeft.maxY, width: topLeft.width, height: topLeft.height)
     }
 
     /// Identity of the static backdrop (fill + shadow) so it can be cached.
@@ -128,8 +150,15 @@ public struct FrameRenderer: Sendable {
     }
 
     /// Composes the output frame at output `time` (seconds). `background` is
-    /// the background video's frame when the fill is a video.
-    public func render(source: CIImage, outputTime time: Double, backdrop: CIImage? = nil, background: CIImage? = nil) -> CIImage {
+    /// the background video's frame when the fill is a video; `camera` the
+    /// webcam track's frame.
+    public func render(
+        source: CIImage,
+        outputTime time: Double,
+        backdrop: CIImage? = nil,
+        background: CIImage? = nil,
+        camera cameraFrame: CIImage? = nil
+    ) -> CIImage {
         let upright = source.oriented(plan.orientation)
         let frame = upright.transformed(by: CGAffineTransform(translationX: -upright.extent.minX, y: -upright.extent.minY))
         let size = frame.extent.size
@@ -176,15 +205,68 @@ public struct FrameRenderer: Sendable {
             video = blend.outputImage ?? video
         }
 
-        guard plan.altersFrame || camera != .identity else { return video.cropped(to: canvas) }
-        var back = backdrop ?? makeBackdrop()
-        if let background, plan.fill.videoURL != nil {
-            back = back.composited(over: aspectFill(background.oriented(plan.backgroundOrientation), in: canvas))
+        var frameImage: CIImage
+        if plan.altersFrame || camera != .identity {
+            var back = backdrop ?? makeBackdrop()
+            if let background, plan.fill.videoURL != nil {
+                back = back.composited(over: aspectFill(background.oriented(plan.backgroundOrientation), in: canvas))
+            }
+            if camera != .identity {
+                back = back.transformed(by: camera)
+            }
+            frameImage = video.composited(over: back.cropped(to: canvas))
+        } else {
+            frameImage = video
         }
-        if camera != .identity {
-            back = back.transformed(by: camera)
+        // The webcam stays put while the video zooms; a full-frame zoom
+        // moves it along with everything else.
+        if let cameraFrame, let layer = cameraLayer(cameraFrame) {
+            frameImage = layer.transformed(by: camera).composited(over: frameImage)
         }
-        return video.composited(over: back.cropped(to: canvas)).cropped(to: canvas)
+        return frameImage.cropped(to: canvas)
+    }
+
+    /// The webcam frame cropped to the layer's shape, with a soft shadow,
+    /// placed at `plan.cameraRect`.
+    func cameraLayer(_ frame: CIImage) -> CIImage? {
+        guard let overlay = plan.camera, let rect = plan.cameraRect, rect.width > 1, rect.height > 1 else { return nil }
+        var image = frame.oriented(plan.cameraOrientation)
+        image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        if overlay.isMirrored {
+            image = image.transformed(by: CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -image.extent.width, y: 0))
+        }
+        // Center-crop to the shape's aspect, then fill the layer.
+        let size = image.extent.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let aspect = CGFloat(overlay.shape.aspect)
+        let cropSize = size.width / size.height > aspect
+            ? CGSize(width: size.height * aspect, height: size.height)
+            : CGSize(width: size.width, height: size.width / aspect)
+        let crop = CGRect(x: (size.width - cropSize.width) / 2, y: (size.height - cropSize.height) / 2,
+                          width: cropSize.width, height: cropSize.height)
+        let scale = rect.width / crop.width
+        let placed = image
+            .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY)
+                .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+                .concatenating(CGAffineTransform(translationX: rect.minX, y: rect.minY)))
+            .cropped(to: rect)
+
+        let radius = overlay.shape == .circle ? rect.height / 2 : rect.height * 0.12
+        let blend = CIFilter.blendWithAlphaMask()
+        blend.inputImage = placed
+        blend.backgroundImage = CIImage.empty()
+        blend.maskImage = roundedRect(rect, radius: radius, color: CIColor(red: 1, green: 1, blue: 1))
+        let masked = blend.outputImage ?? placed
+
+        let sigma = Double(rect.height) * 0.04
+        let reach = CGFloat(sigma * 4)
+        let padded = rect.insetBy(dx: -reach, dy: -reach)
+        let shadow = roundedRect(rect, radius: radius, color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.35))
+            .composited(over: CIImage(color: .clear).cropped(to: padded))
+            .applyingGaussianBlur(sigma: sigma)
+            .cropped(to: padded)
+            .transformed(by: CGAffineTransform(translationX: 0, y: -rect.height * 0.02))
+        return masked.composited(over: shadow)
     }
 
     // MARK: Pieces

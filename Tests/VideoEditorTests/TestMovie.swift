@@ -18,6 +18,9 @@ enum TestMovie {
         var transform: CGAffineTransform = .identity
         /// One entry per audio track: tone amplitude 0…1.
         var audioAmplitudes: [Double] = [0]
+        /// Adds a disabled second video track titled "Camera" in this color,
+        /// like the recorder's webcam track.
+        var cameraColor: (b: UInt8, g: UInt8, r: UInt8)?
     }
 
     static func temporaryDirectory() throws -> URL {
@@ -60,6 +63,26 @@ enum TestMovie {
             return input
         }
 
+        var cameraAdaptor: AVAssetWriterInputPixelBufferAdaptor?
+        if spec.cameraColor != nil {
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+                AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 48,
+            ])
+            input.expectsMediaDataInRealTime = false
+            input.marksOutputTrackAsEnabled = false
+            let title = AVMutableMetadataItem()
+            title.identifier = .commonIdentifierTitle
+            title.value = "Camera" as NSString
+            title.extendedLanguageTag = "und"
+            input.metadata = [title]
+            cameraAdaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: 64,
+                kCVPixelBufferHeightKey as String: 48,
+            ])
+            writer.add(input)
+        }
+
         guard writer.startWriting() else { throw writer.error ?? CocoaError(.fileWriteUnknown) }
         writer.startSession(atSourceTime: .zero)
 
@@ -69,9 +92,22 @@ enum TestMovie {
         let samplesPerFrame = Int(sampleRate) / Int(spec.fps)
         var nextVideo = 0
         var nextAudio = Array(repeating: 0, count: audioInputs.count)
+        var nextCamera = cameraAdaptor == nil ? frameCount : 0
         let deadline = Date().addingTimeInterval(20)
-        while nextVideo < frameCount || nextAudio.contains(where: { $0 < frameCount }) {
+        while nextVideo < frameCount || nextCamera < frameCount || nextAudio.contains(where: { $0 < frameCount }) {
             var progressed = false
+            if let cameraAdaptor, let cameraColor = spec.cameraColor, nextCamera < frameCount,
+               cameraAdaptor.assetWriterInput.isReadyForMoreMediaData {
+                guard let pool = cameraAdaptor.pixelBufferPool else { throw CocoaError(.fileWriteUnknown) }
+                var buffer: CVPixelBuffer?
+                CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+                guard let buffer else { throw CocoaError(.fileWriteUnknown) }
+                fill(buffer, color: cameraColor, rightColor: nil)
+                cameraAdaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(nextCamera), timescale: spec.fps))
+                nextCamera += 1
+                if nextCamera == frameCount { cameraAdaptor.assetWriterInput.markAsFinished() }
+                progressed = true
+            }
             if nextVideo < frameCount, videoInput.isReadyForMoreMediaData {
                 guard let pool = adaptor.pixelBufferPool else { throw CocoaError(.fileWriteUnknown) }
                 var buffer: CVPixelBuffer?

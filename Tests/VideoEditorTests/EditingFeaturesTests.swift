@@ -1,3 +1,4 @@
+import AppCore
 import AVFoundation
 import CoreGraphics
 import CoreImage
@@ -250,5 +251,139 @@ struct BackgroundVideoTests {
             let i = (y * width + x) * 4
             return (data[i], data[i + 1], data[i + 2])
         }
+    }
+}
+
+@Suite("Camera layer")
+struct CameraLayerTests {
+    private let context = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.sRGB)!])
+
+    private func pixels(_ image: CIImage, size: CGSize) -> (Int, Int) -> (r: UInt8, g: UInt8, b: UInt8) {
+        let width = Int(size.width), height = Int(size.height)
+        var data = [UInt8](repeating: 0, count: width * height * 4)
+        context.render(image, toBitmap: &data, rowBytes: width * 4,
+                       bounds: CGRect(origin: .zero, size: size), format: .RGBA8,
+                       colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
+        return { x, y in
+            let i = (y * width + x) * 4
+            return (data[i], data[i + 1], data[i + 2])
+        }
+    }
+
+    private func solid(_ color: CIColor, _ size: CGSize) -> CIImage {
+        CIImage(color: color).cropped(to: CGRect(origin: .zero, size: size))
+    }
+
+    @Test func layerFollowsTheRecordedBubble() {
+        let sidecar = RecordingSidecar.Camera(center: CGPoint(x: 0.2, y: 0.75), size: 0.3, isCircle: false, isMirrored: false)
+        let camera = CameraOverlay(sidecar)
+        #expect(camera.shape == .roundedRectangle)
+        let frame = camera.frame(video: CGRect(x: 0, y: 0, width: 200, height: 100), canvas: CGRect(x: 0, y: 0, width: 200, height: 100))
+        #expect(abs(frame.width - 30) < 1e-9 && abs(frame.height - 22.5) < 1e-9)
+        #expect(abs(frame.midX - 40) < 1e-9 && abs(frame.midY - 75) < 1e-9)
+        // Dragged past the edge: kept inside the canvas.
+        var moved = camera
+        moved.center = CGPoint(x: 1.5, y: -1)
+        let clamped = moved.frame(video: CGRect(x: 0, y: 0, width: 200, height: 100), canvas: CGRect(x: 0, y: 0, width: 200, height: 100))
+        #expect(abs(clamped.maxX - 200) < 1e-9 && abs(clamped.minY) < 1e-9)
+    }
+
+    /// The webcam stays on top while the video zooms; a full-frame zoom moves it.
+    @Test func zoomLeavesTheCameraInPlaceUnlessItFillsTheFrame() {
+        let zoom = ZoomSegment(range: TimeRange(start: 0, end: 4), rect: CGRect(x: 0.5, y: 0, width: 0.5, height: 0.5), easeDuration: 1)
+        func render(fillsFrame: Bool) -> (Int, Int) -> (r: UInt8, g: UInt8, b: UInt8) {
+            var project = VideoEditProject(sourceURL: URL(fileURLWithPath: "/tmp/x.mp4"), sourceDuration: 10)
+            project.zooms = [zoom]
+            project.zoomFillsFrame = fillsFrame
+            project.camera = CameraOverlay(center: CGPoint(x: 0.15, y: 0.7), size: 0.4, shape: .roundedRectangle, isMirrored: false)
+            let plan = RenderPlan(project: project, sourceSize: CGSize(width: 200, height: 100), hasCameraTrack: true)
+            let image = FrameRenderer(plan: plan).render(
+                source: solid(CIColor(red: 0, green: 0, blue: 1), plan.sourceSize),
+                outputTime: 2,
+                camera: solid(CIColor(red: 0, green: 1, blue: 0), CGSize(width: 64, height: 48))
+            )
+            return pixels(image, size: plan.renderSize)
+        }
+        // Layer center: x = 30, y = 70 (this bitmap's rows count from the top).
+        #expect(render(fillsFrame: false)(30, 70) == (0, 255, 0))
+        #expect(render(fillsFrame: true)(30, 70) == (0, 0, 255))
+    }
+
+    @Test func hiddenCameraIsNotDrawn() {
+        var project = VideoEditProject(sourceURL: URL(fileURLWithPath: "/tmp/x.mp4"), sourceDuration: 10)
+        project.camera = CameraOverlay(isVisible: false, center: CGPoint(x: 0.5, y: 0.5), size: 0.5)
+        let plan = RenderPlan(project: project, sourceSize: CGSize(width: 100, height: 100), hasCameraTrack: true)
+        #expect(plan.camera == nil)
+        #expect(!plan.needsCustomCompositor)
+        project.camera?.isVisible = true
+        #expect(RenderPlan(project: project, sourceSize: CGSize(width: 100, height: 100), hasCameraTrack: true).needsCustomCompositor)
+        #expect(RenderPlan(project: project, sourceSize: CGSize(width: 100, height: 100), hasCameraTrack: false).camera == nil)
+    }
+
+    @Test func cameraTrackIsFoundAndExportedAsALayer() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await TestMovie.make(TestMovie.Spec(duration: 1, color: (255, 0, 0), cameraColor: (0, 255, 0)), in: directory)
+        let source = try await SourceMedia.load(url: url)
+        let camera = try #require(source.camera)
+        #expect(camera.size == CGSize(width: 64, height: 48))
+        #expect(source.size == CGSize(width: 160, height: 90))
+
+        let project = VideoEditProject.initial(for: source)
+        #expect(project.camera == .standard)
+        let edit = try await CompositionBuilder.build(source: source, project: project, options: .init(frameRate: 10))
+        #expect(edit.cameraTrackID != nil)
+        #expect(edit.plan.camera != nil)
+
+        let output = directory.appendingPathComponent("camera.gif")
+        _ = try await GIFExporter.export(source: source, project: project, options: GIFOptions(width: 160, fps: 10), to: output)
+        let imageSource = try #require(CGImageSourceCreateWithURL(output as CFURL, nil))
+        let frame = try #require(CGImageSourceCreateImageAtIndex(imageSource, 3, nil))
+        let rect = try #require(edit.plan.cameraRect) // bottom-left origin
+        let pixel = rgb(of: frame)
+        let center = pixel(Int(rect.midX), frame.height - Int(rect.midY))
+        #expect(center.g > 200 && center.b < 60)
+        #expect(pixel(150, 10).b > 200)
+    }
+
+    private func rgb(of image: CGImage) -> (Int, Int) -> (r: UInt8, g: UInt8, b: UInt8) {
+        let width = image.width, height = image.height
+        var data = [UInt8](repeating: 0, count: width * height * 4)
+        data.withUnsafeMutableBytes { raw in
+            let context = CGContext(
+                data: raw.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+            context?.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+        return { x, y in
+            let i = (y * width + x) * 4
+            return (data[i], data[i + 1], data[i + 2])
+        }
+    }
+}
+
+@Suite("Export sizes and silent tracks")
+struct ExportSizeTests {
+    @Test func presetsSetTheShorterSideEvenWhenUpscaling() {
+        #expect(CanvasLayout.scaled(CGSize(width: 1662, height: 1080), shortSide: 2160) == CGSize(width: 3324, height: 2160))
+        #expect(CanvasLayout.scaled(CGSize(width: 1662, height: 1080), shortSide: 1440) == CGSize(width: 2216, height: 1440))
+        #expect(CanvasLayout.scaled(CGSize(width: 2880, height: 1800), shortSide: 1080) == CGSize(width: 1728, height: 1080))
+        #expect(ExportResolution.allCases.map(\.title) == ["Original", "4K", "1440p", "1080p", "720p"])
+        let project = VideoEditProject(sourceURL: URL(fileURLWithPath: "/tmp/x.mp4"), sourceDuration: 1)
+        let plan = RenderPlan(project: project, sourceSize: CGSize(width: 1920, height: 1080), shortSide: ExportResolution.uhd4K.shortSide)
+        #expect(plan.renderSize == CGSize(width: 3840, height: 2160))
+    }
+
+    @Test func silentTracksAreDetected() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await TestMovie.make(TestMovie.Spec(duration: 1, audioAmplitudes: [0.5, 0]), in: directory)
+        let source = try await SourceMedia.load(url: url)
+        let loud = try await WaveformExtractor.waveform(asset: source.asset, trackID: source.audioTracks[0].trackID)
+        let silent = try await WaveformExtractor.waveform(asset: source.asset, trackID: source.audioTracks[1].trackID)
+        #expect(!loud.isSilent)
+        #expect(silent.isSilent)
     }
 }

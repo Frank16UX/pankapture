@@ -63,7 +63,7 @@ public enum GIFExporter {
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> VideoExportResult {
         let source = try await SourceMedia.load(url: videoURL)
-        let project = VideoEditProject(sourceURL: videoURL, sourceDuration: source.duration)
+        let project = VideoEditProject.initial(for: source)
         let url = try outputURL ?? ExportDestination.newFileURL(for: .gif)
         return try await export(source: source, project: project, options: options, to: url, progress: progress)
     }

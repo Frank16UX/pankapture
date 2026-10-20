@@ -86,8 +86,11 @@ The day this lands, the old screenshot tool can be uninstalled.
 - [x] Custom gradient, image, and video backgrounds; shadow no longer cut off at padding (VE-6)
 - [x] Explicit save with unsaved-changes prompt and crash drafts (VE-12, ADR-24)
 - [x] Editor reachable from the notification, menu bar (Edit Last Recording), and Open With (VE-1)
+- [x] Webcam as its own layer: move/resize/shape/mirror/hide in the editor, unaffected by zooms; saved video composited automatically (VE-13, ADR-25)
+- [x] Audio lanes labeled by source; silent tracks hidden (VE-7); 1440p and 4K export (VE-8)
+- [x] Screenshots and recordings can include Pankapture's own editor/history/Settings windows (SC-11, ADR-26)
 
-**QA:** timeline gestures with a real mouse (trim handles, zoom edges, zoom-rectangle editor); a video background playing in the preview; a window recording with the webcam on.
+**QA:** timeline gestures with a real mouse (trim handles, zoom edges, zoom-rectangle editor); a video background playing in the preview; a recording with the webcam on (camera track timing vs. the screen, composite after stop, editing the layer); screenshot and recording of the editor window.
 
 ## M6 · Capture history ✅
 

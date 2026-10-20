@@ -41,7 +41,7 @@ struct TimelineView: View {
     static let audioLaneHeight: CGFloat = 34
 
     private var totalHeight: CGFloat {
-        let audio = CGFloat(model.audioTracks.count)
+        let audio = CGFloat(model.visibleAudioTracks.count)
         let lanes = Self.rulerHeight + Self.filmstripHeight + Self.zoomLaneHeight + audio * Self.audioLaneHeight
         return lanes + PK.Spacing.xs * (2 + audio)
     }
@@ -56,7 +56,7 @@ struct TimelineView: View {
                     .frame(height: Self.filmstripHeight)
                 ZoomLane(model: model, scale: scale)
                     .frame(height: Self.zoomLaneHeight)
-                ForEach(model.audioTracks) { track in
+                ForEach(model.visibleAudioTracks) { track in
                     WaveformLane(model: model, scale: scale, track: track)
                         .frame(height: Self.audioLaneHeight)
                 }

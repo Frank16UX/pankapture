@@ -13,6 +13,9 @@ struct InspectorView: View {
             BackgroundSection(model: model)
             ZoomSection(model: model)
             SpeedSection(model: model)
+            if model.media?.camera != nil {
+                CameraSection(model: model)
+            }
             AudioSection(model: model)
             if !model.project.cuts.isEmpty {
                 CutsSection(model: model)
@@ -393,6 +396,50 @@ private struct SpeedSection: View {
     }
 }
 
+// MARK: Camera
+
+/// The webcam layer (ADR-25): only for recordings with a camera track.
+private struct CameraSection: View {
+    @Bindable var model: VideoEditorModel
+
+    private var camera: CameraOverlay { model.project.camera ?? .standard }
+
+    private func set(_ change: @escaping (inout CameraOverlay) -> Void) {
+        model.edit { project in
+            var camera = project.camera ?? .standard
+            change(&camera)
+            project.camera = camera
+        }
+    }
+
+    var body: some View {
+        Section("Camera") {
+            Toggle("Show Camera", isOn: Binding(get: { camera.isVisible }, set: { value in set { $0.isVisible = value } }))
+            Group {
+                Picker("Shape", selection: Binding(get: { camera.shape }, set: { shape in set { $0.shape = shape } })) {
+                    ForEach(CameraOverlay.Shape.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                EditSlider(model: model, title: "Size", value: camera.size, range: CameraOverlay.sizeRange,
+                           format: { Format.percent($0) }) { project, size in
+                    var camera = project.camera ?? .standard
+                    camera.size = size
+                    project.camera = camera
+                }
+                Toggle("Mirror", isOn: Binding(get: { camera.isMirrored }, set: { value in set { $0.isMirrored = value } }))
+                Button("Reset Position", systemImage: "arrow.counterclockwise") {
+                    let recorded = model.sidecar?.camera.map(CameraOverlay.init) ?? .standard
+                    set { $0.center = recorded.center; $0.size = recorded.size }
+                }
+                Text("Drag the camera in the preview to move it, or its corner to resize it. Zooms leave it in place unless the zoom fills the frame.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .disabled(!camera.isVisible)
+        }
+    }
+}
+
 // MARK: Audio
 
 private struct AudioSection: View {
@@ -405,7 +452,7 @@ private struct AudioSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            ForEach(model.audioTracks) { track in
+            ForEach(model.visibleAudioTracks) { track in
                 let volume = model.project.trackVolumes[track.role]
                 HStack(spacing: PK.Spacing.s) {
                     Button {
@@ -423,6 +470,11 @@ private struct AudioSection: View {
                                format: { Format.percent($0) }) { $0.trackVolumes[track.role].volume = $1 }
                         .disabled(volume.isMuted)
                 }
+            }
+            if !model.silentAudioTracks.isEmpty {
+                Text("\(ListFormatter.localizedString(byJoining: model.silentAudioTracks.map(\.label))) recorded only silence and is hidden.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }

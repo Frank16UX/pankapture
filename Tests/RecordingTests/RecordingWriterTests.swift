@@ -129,6 +129,45 @@ struct RecordingWriterTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: directory.path) == ["out.mp4"])
     }
 
+    /// The webcam is its own disabled "Camera" track (ADR-25), and the
+    /// audio mixdown keeps it.
+    @Test func cameraIsRecordedAsADisabledTrack() async throws {
+        let directory = try tempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("out.mp4")
+        let writer = RecordingWriter(settings: .init(
+            url: url, codec: .h264, quality: .low, framesPerSecond: 30,
+            capturesSystemAudio: true, capturesMicrophone: true, cameraSize: CGSize(width: 640, height: 480)
+        ))
+        // Camera frames are interleaved with the screen and audio feed.
+        let audioStep = 1024.0 / 48_000
+        var nextVideo = 20.0, nextAudio = 20.0
+        while nextVideo < 22 || nextAudio < 22 {
+            if nextVideo <= nextAudio {
+                await writer.appendVideo(SyntheticMedia.videoFrame(at: t(nextVideo)))
+                await writer.appendCamera(SyntheticMedia.videoFrame(at: t(nextVideo + 0.001)))
+                nextVideo += 1.0 / 30
+                try await Task.sleep(for: .milliseconds(1))
+            } else {
+                await writer.appendAudio(SyntheticMedia.audio(at: t(nextAudio)), from: .system)
+                await writer.appendAudio(SyntheticMedia.audio(at: t(nextAudio), channels: 1, interleaved: true, value: 0.5), from: .microphone)
+                nextAudio += audioStep
+            }
+        }
+        _ = try await writer.finish(at: t(22))
+        #expect(await writer.hasCameraTrack)
+        #expect(try await AudioMixdown.addMixedTrack(to: url))
+
+        let video = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)
+        try #require(video.count == 2)
+        let camera = video[1]
+        let title = try await camera.load(.metadata).first { $0.commonKey == .commonKeyTitle }?.load(.stringValue)
+        #expect(title == RecordingWriter.TrackName.camera)
+        #expect(try await camera.load(.isEnabled) == false)
+        #expect(try await video[0].load(.isEnabled))
+        #expect(try await camera.load(.timeRange).duration.seconds > 1.5)
+    }
+
     /// Simulates a crash: snapshot the fragmented file mid-recording (as a power
     /// loss would leave it), then recover the snapshot.
     @Test func interruptedRecordingIsRecoverable() async throws {

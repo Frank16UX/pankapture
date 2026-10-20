@@ -10,7 +10,7 @@ import Foundation
 /// Quick Look) play only the **first** audio track, though, so the mic was
 /// missing everywhere but in apps that mix every track. The rewritten file is:
 ///
-/// 1. video (passthrough),
+/// 1. video (passthrough; a camera track too, if any),
 /// 2. **"Mix"**: system + mic mixed to stereo AAC, enabled, the default of the
 ///    audio alternate group,
 /// 3. "System" and 4. "Microphone" (passthrough), disabled, in the same group.
@@ -27,7 +27,8 @@ enum AudioMixdown {
 
         let asset = AVURLAsset(url: url, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
         let audio = try await asset.loadTracks(withMediaType: .audio)
-        guard audio.count >= 2, let video = try await asset.loadTracks(withMediaType: .video).first else { return false }
+        let video = try await asset.loadTracks(withMediaType: .video)
+        guard audio.count >= 2, !video.isEmpty else { return false }
 
         let temporary = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.deletingPathExtension().lastPathComponent)-mix-\(UUID().uuidString)")
@@ -60,16 +61,23 @@ private final class MixdownJob: @unchecked Sendable {
     private var passes: [Pass] = []
     private var continuation: CheckedContinuation<Void, any Error>?
 
-    init(asset: AVAsset, video: AVAssetTrack, audio: [AVAssetTrack], output: URL) async throws {
+    init(asset: AVAsset, video: [AVAssetTrack], audio: [AVAssetTrack], output: URL) async throws {
         reader = try AVAssetReader(asset: asset)
         writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
         writer.shouldOptimizeForNetworkUse = true
 
-        // Video, untouched.
-        let (videoFormats, transform) = try await video.load(.formatDescriptions, .preferredTransform)
-        let videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: videoFormats.first)
-        videoInput.transform = transform
-        try add(AVAssetReaderTrackOutput(track: video, outputSettings: nil), videoInput)
+        // Video tracks, untouched: the screen, and the camera (ADR-25) with its
+        // title and disabled state.
+        for track in video {
+            let (formats, transform, metadata, isEnabled) = try await track.load(
+                .formatDescriptions, .preferredTransform, .metadata, .isEnabled
+            )
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: nil, sourceFormatHint: formats.first)
+            input.transform = transform
+            input.metadata = metadata
+            input.marksOutputTrackAsEnabled = isEnabled
+            try add(AVAssetReaderTrackOutput(track: track, outputSettings: nil), input)
+        }
 
         // The mix: first audio track, so players that pick one play this.
         let mixOutput = AVAssetReaderAudioMixOutput(audioTracks: audio, audioSettings: [

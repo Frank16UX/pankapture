@@ -3,8 +3,9 @@ import AppKit
 import AVFoundation
 import QuartzCore
 
-/// Floating webcam bubble (REC-10). A Pankapture window that **is** recorded:
-/// pass `windowID` in `RecordingConfiguration.includedOverlayWindowIDs`.
+/// Floating webcam bubble (REC-10). On screen it's a live preview; the
+/// recording gets the camera as its own track (ADR-25) through
+/// `RecordingCameraSource`, so the editor can move, resize, or hide it.
 ///
 /// Drag to move; drag the bottom-right corner or ⌘-scroll to resize;
 /// right-click for shape, mirror, and camera.
@@ -39,6 +40,9 @@ public final class WebcamBubble {
     private var session: AVCaptureSession?
     private var sessionHandle: CaptureSessionHandle?
     private var currentDeviceID: String?
+    private var currentDevice: AVCaptureDevice?
+    private var frameOutput: AVCaptureVideoDataOutput?
+    private var frameDelegate: CameraFrameDelegate?
 
     public init(appearance: Appearance = Appearance()) {
         self.appearance = appearance
@@ -77,6 +81,7 @@ public final class WebcamBubble {
     }
 
     public func hide() {
+        stopDeliveringFrames()
         sessionHandle?.stopRunning()
         sessionHandle = nil
         session = nil
@@ -196,6 +201,107 @@ public final class WebcamBubble {
         self.session = session
         sessionHandle = handle
         currentDeviceID = wanted
+        currentDevice = device
+    }
+}
+
+// MARK: - Recording the camera as a track
+
+/// Supplies camera frames to the recording writer (ADR-25).
+@MainActor
+public protocol RecordingCameraSource: AnyObject {
+    /// Pixel size of the frames `startDeliveringFrames` will send, or `nil`
+    /// if no camera is running.
+    var frameSize: CGSize? { get }
+    /// Sends every camera frame, with host-clock timestamps, to `handler` on
+    /// `queue`. Returns `false` if the camera isn't running.
+    func startDeliveringFrames(on queue: DispatchSerialQueue, _ handler: @escaping @Sendable (CMSampleBuffer) -> Void) -> Bool
+    func stopDeliveringFrames()
+    /// The bubble's place relative to `recordedFrame` (AppKit global).
+    func layout(in recordedFrame: CGRect) -> RecordingSidecar.Camera?
+}
+
+extension WebcamBubble: RecordingCameraSource {
+    public var frameSize: CGSize? {
+        guard session != nil, let device = currentDevice else { return nil }
+        let dimensions = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
+        guard dimensions.width > 0, dimensions.height > 0 else { return nil }
+        return CGSize(width: Int(dimensions.width), height: Int(dimensions.height))
+    }
+
+    public func startDeliveringFrames(on queue: DispatchSerialQueue, _ handler: @escaping @Sendable (CMSampleBuffer) -> Void) -> Bool {
+        guard let session, frameOutput == nil else { return frameOutput != nil }
+        let output = AVCaptureVideoDataOutput()
+        output.alwaysDiscardsLateVideoFrames = true
+        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange]
+        let delegate = CameraFrameDelegate(clock: session.synchronizationClock, handler: handler)
+        output.setSampleBufferDelegate(delegate, queue: queue)
+        session.beginConfiguration()
+        guard session.canAddOutput(output) else {
+            session.commitConfiguration()
+            Log.recording.error("Camera frames can't be recorded: output rejected")
+            return false
+        }
+        session.addOutput(output)
+        // The track is never mirrored; the editor mirrors on request.
+        if let connection = output.connection(with: .video), connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = false
+        }
+        session.commitConfiguration()
+        frameOutput = output
+        frameDelegate = delegate
+        return true
+    }
+
+    public func stopDeliveringFrames() {
+        guard let output = frameOutput else { return }
+        output.setSampleBufferDelegate(nil, queue: nil)
+        if let session {
+            session.beginConfiguration()
+            session.removeOutput(output)
+            session.commitConfiguration()
+        }
+        frameOutput = nil
+        frameDelegate = nil
+    }
+
+    public func layout(in recordedFrame: CGRect) -> RecordingSidecar.Camera? {
+        guard let panel, recordedFrame.width > 0, recordedFrame.height > 0 else { return nil }
+        let frame = panel.frame // AppKit global, bottom-left origin
+        return RecordingSidecar.Camera(
+            center: CGPoint(
+                x: (frame.midX - recordedFrame.minX) / recordedFrame.width,
+                y: (recordedFrame.maxY - frame.midY) / recordedFrame.height
+            ),
+            size: frame.width / min(recordedFrame.width, recordedFrame.height),
+            isCircle: appearance.shape == .circle,
+            isMirrored: appearance.isMirrored
+        )
+    }
+}
+
+/// Forwards camera frames, converted to the host clock (the screen samples'
+/// clock), to the recording writer.
+///
+/// `@unchecked Sendable`: immutable after `init`; `CMClock` is a thread-safe
+/// CF type, and AVFoundation calls the delegate on the writer's serial queue.
+private final class CameraFrameDelegate: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
+    private let clock: CMClock?
+    private let handler: @Sendable (CMSampleBuffer) -> Void
+
+    init(clock: CMClock?, handler: @escaping @Sendable (CMSampleBuffer) -> Void) {
+        self.clock = clock
+        self.handler = handler
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        let host = CMClockGetHostTimeClock()
+        guard let clock, !CFEqual(clock, host) else { return handler(sampleBuffer) }
+        let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let hostTime = CMSyncConvertTime(time, from: clock, to: host)
+        guard hostTime.isValid, let converted = AudioBuffers.retimed(sampleBuffer, by: time - hostTime) else { return }
+        handler(converted)
     }
 }
 

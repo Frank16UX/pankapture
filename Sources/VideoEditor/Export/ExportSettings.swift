@@ -10,9 +10,13 @@ public enum ExportFormat: String, Codable, CaseIterable, Sendable, Identifiable 
     public var fileExtension: String { rawValue }
 }
 
-/// MP4 output size, as a cap on the shorter side (never upscales).
+/// MP4 output size: the shorter side of the frame. Presets scale up as well
+/// as down (a 4K export of a 1080p recording is 2160 px tall); `original`
+/// keeps the canvas size.
 public enum ExportResolution: String, Codable, CaseIterable, Sendable, Identifiable {
     case original
+    case uhd4K
+    case qhd1440
     case hd1080
     case hd720
 
@@ -21,14 +25,19 @@ public enum ExportResolution: String, Codable, CaseIterable, Sendable, Identifia
     public var title: String {
         switch self {
         case .original: "Original"
+        case .uhd4K: "4K"
+        case .qhd1440: "1440p"
         case .hd1080: "1080p"
         case .hd720: "720p"
         }
     }
 
-    public var shortSideCap: Double? {
+    /// Target shorter side in pixels, `nil` = canvas size.
+    public var shortSide: Double? {
         switch self {
         case .original: nil
+        case .uhd4K: 2160
+        case .qhd1440: 1440
         case .hd1080: 1080
         case .hd720: 720
         }

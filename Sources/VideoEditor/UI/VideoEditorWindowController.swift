@@ -35,7 +35,9 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
     /// Opens `url` in an editor window, or brings its existing window forward.
     /// Activates the app, since Pankapture is normally an accessory (menu bar) app.
     public func open(url: URL) {
-        let key = url.standardizedFileURL
+        // A recording with a webcam track is edited from its layered
+        // original; the save folder has the composited copy (ADR-25).
+        let key = AppPaths.editableRecording(for: url).standardizedFileURL
         if let entry = entries[key] {
             show(entry.window)
             return
@@ -74,7 +76,7 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
 
     /// The window and model editing `url` (internal: tests and diagnostics).
     func editor(for url: URL) -> (window: NSWindow, model: VideoEditorModel)? {
-        entries[url.standardizedFileURL].map { ($0.window, $0.model) }
+        entries[AppPaths.editableRecording(for: url).standardizedFileURL].map { ($0.window, $0.model) }
     }
 
     /// Closes every editor window. Unsaved edits stay in their drafts; call

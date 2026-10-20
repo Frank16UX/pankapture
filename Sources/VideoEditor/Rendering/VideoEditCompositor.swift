@@ -13,16 +13,25 @@ final class VideoEditInstruction: NSObject, AVVideoCompositionInstructionProtoco
     let sourceTrackID: CMPersistentTrackID
     /// The looped background movie's track, when the fill is a video.
     let backgroundTrackID: CMPersistentTrackID?
+    /// The webcam track, when its layer is drawn (ADR-25).
+    let cameraTrackID: CMPersistentTrackID?
     let renderer: FrameRenderer
 
     var requiredSourceTrackIDs: [NSValue]? {
-        [sourceTrackID, backgroundTrackID].compactMap { $0 }.map { NSNumber(value: $0) }
+        [sourceTrackID, backgroundTrackID, cameraTrackID].compactMap { $0 }.map { NSNumber(value: $0) }
     }
 
-    init(timeRange: CMTimeRange, sourceTrackID: CMPersistentTrackID, backgroundTrackID: CMPersistentTrackID?, renderer: FrameRenderer) {
+    init(
+        timeRange: CMTimeRange,
+        sourceTrackID: CMPersistentTrackID,
+        backgroundTrackID: CMPersistentTrackID?,
+        cameraTrackID: CMPersistentTrackID?,
+        renderer: FrameRenderer
+    ) {
         self.timeRange = timeRange
         self.sourceTrackID = sourceTrackID
         self.backgroundTrackID = backgroundTrackID
+        self.cameraTrackID = cameraTrackID
         self.renderer = renderer
     }
 }
@@ -77,13 +86,17 @@ final class VideoEditCompositor: NSObject, AVVideoCompositing, Sendable {
         let background = instruction.backgroundTrackID
             .flatMap { request.sourceFrame(byTrackID: $0) }
             .map { CIImage(cvPixelBuffer: $0) }
+        let camera = instruction.cameraTrackID
+            .flatMap { request.sourceFrame(byTrackID: $0) }
+            .map { CIImage(cvPixelBuffer: $0) }
         var image: CIImage
         if let sourceBuffer = request.sourceFrame(byTrackID: instruction.sourceTrackID) {
             image = renderer.render(
                 source: CIImage(cvPixelBuffer: sourceBuffer),
                 outputTime: request.compositionTime.seconds,
                 backdrop: backdrop,
-                background: background
+                background: background,
+                camera: camera
             )
         } else if let background {
             image = backdrop.composited(over: renderer.aspectFill(background, in: renderer.canvasRect))

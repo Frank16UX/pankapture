@@ -236,9 +236,16 @@ public final class RecordingController {
         // its display (`StreamSetup.windowWithOverlays`).
         var overlayIDs: [CGWindowID] = []
 
-        if options.showsCamera, await webcam.show(on: screen), let id = webcam.windowID {
-            if let recordedFrame { webcam.keepInside(recordedFrame) }
-            overlayIDs.append(id)
+        // The camera is its own track (ADR-25): the bubble stays on screen as
+        // a preview but out of the screen capture, so the editor can move it.
+        recorder.cameraSource = nil
+        recorder.cameraLayoutProvider = nil
+        if options.showsCamera, await webcam.show(on: screen) {
+            if let recordedFrame {
+                webcam.keepInside(recordedFrame)
+                recorder.cameraLayoutProvider = { [weak webcam] in webcam?.layout(in: recordedFrame) }
+            }
+            recorder.cameraSource = webcam
         }
         if options.highlightsClicks {
             clickHighlighter.style = .init(color: options.clickColor, diameter: options.clickSize)

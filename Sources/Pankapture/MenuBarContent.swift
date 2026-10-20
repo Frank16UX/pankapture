@@ -28,6 +28,9 @@ struct MenuBarContent: View {
         }
 
         Section("Recording") {
+            if coordinator.recordingsBeingPrepared > 0 {
+                Text("Adding the camera to your recording…")
+            }
             if coordinator.recording.isRecording {
                 let recorder = coordinator.recording.recorder
                 Button("Stop Recording (\(recorder.formattedElapsed))", systemImage: "stop.circle") {

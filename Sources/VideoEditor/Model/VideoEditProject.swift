@@ -1,3 +1,4 @@
+import AppCore
 import CoreGraphics
 import Foundation
 
@@ -133,6 +134,8 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
     /// Split points (source seconds), sorted (VE-3). They divide the kept
     /// footage into segments that can be selected and deleted (cut).
     public var splits: [Double]
+    /// The webcam layer, for recordings with a camera track (ADR-25).
+    public var camera: CameraOverlay?
 
     public init(
         sourceURL: URL,
@@ -144,7 +147,8 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         background: VideoBackground = VideoBackground(),
         trackVolumes: TrackVolumes = TrackVolumes(),
         zoomFillsFrame: Bool = false,
-        splits: [Double] = []
+        splits: [Double] = [],
+        camera: CameraOverlay? = nil
     ) {
         self.version = Self.currentVersion
         self.sourceURL = sourceURL
@@ -157,11 +161,12 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         self.trackVolumes = trackVolumes
         self.zoomFillsFrame = zoomFillsFrame
         self.splits = splits
+        self.camera = camera
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, sourceURL, sourceDuration, trim, cuts, zooms, speedSegments, background, trackVolumes
-        case zoomFillsFrame, splits
+        case zoomFillsFrame, splits, camera
     }
 
     /// Keys added after version 1 are optional, so older saved projects open.
@@ -178,13 +183,24 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         trackVolumes = try container.decode(TrackVolumes.self, forKey: .trackVolumes)
         zoomFillsFrame = try container.decodeIfPresent(Bool.self, forKey: .zoomFillsFrame) ?? false
         splits = try container.decodeIfPresent([Double].self, forKey: .splits) ?? []
+        camera = try container.decodeIfPresent(CameraOverlay.self, forKey: .camera)
     }
 
     public var fullRange: TimeRange { TimeRange(start: 0, end: sourceDuration) }
 
+    /// A fresh project for `source`, with the webcam layer where the bubble
+    /// was while recording (from the recording's sidecar).
+    public static func initial(for source: SourceMedia, sidecar: RecordingSidecar? = nil) -> VideoEditProject {
+        var project = VideoEditProject(sourceURL: source.url, sourceDuration: source.duration)
+        if source.camera != nil {
+            project.camera = (sidecar ?? RecordingSidecar.load(for: source.url))?.camera.map(CameraOverlay.init) ?? .standard
+        }
+        return project
+    }
+
     /// True when nothing was changed (export can be a straight copy).
     public var isUnedited: Bool {
-        cuts.isEmpty && zooms.isEmpty && speedSegments.isEmpty
+        cuts.isEmpty && zooms.isEmpty && speedSegments.isEmpty && camera?.isVisible != true
             && !background.altersFrame && trackVolumes == TrackVolumes()
             && abs(trim.start) < 1e-6 && abs(trim.end - sourceDuration) < 1e-6
     }

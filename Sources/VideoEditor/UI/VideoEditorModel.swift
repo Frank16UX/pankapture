@@ -93,6 +93,14 @@ final class VideoEditorModel {
     var timeline: Timeline { currentEdit?.timeline ?? project.timeline }
     var outputDuration: Double { project.timeline.outputDuration }
     var audioTracks: [AudioTrackInfo] { media?.audioTracks ?? [] }
+    /// Audio tracks worth showing: a silent one (system audio when no app
+    /// made a sound) is hidden. It stays in the mix; it's silent anyway.
+    var visibleAudioTracks: [AudioTrackInfo] {
+        audioTracks.filter { waveforms[$0.trackID]?.isSilent != true }
+    }
+    var silentAudioTracks: [AudioTrackInfo] {
+        audioTracks.filter { waveforms[$0.trackID]?.isSilent == true }
+    }
     var clickCount: Int { sidecar?.clicks.count ?? 0 }
     var selectedZoom: ZoomSegment? { project.zooms.first { $0.id == selectedZoomID } }
     var hasUnsavedChanges: Bool { media != nil && project != savedProject }
@@ -100,16 +108,21 @@ final class VideoEditorModel {
     /// Preview render plan (for overlay geometry: canvas and video rect).
     var previewPlan: RenderPlan? {
         guard let media else { return nil }
-        return RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, shortSideCap: 1080)
+        return RenderPlan(
+            project: project, sourceSize: media.size, orientation: media.orientation, shortSideCap: 1080,
+            hasCameraTrack: media.camera != nil, cameraOrientation: media.camera?.orientation ?? .up
+        )
     }
 
     func load() async {
         do {
             let media = try await SourceMedia.load(url: sourceURL)
             tracks = try await media.loadTracks()
+            let sidecar = RecordingSidecar.load(for: sourceURL)
             var saved = store.load(for: sourceURL, sourceDuration: media.duration)
-                ?? VideoEditProject(sourceURL: sourceURL, sourceDuration: media.duration)
+                ?? VideoEditProject.initial(for: media, sidecar: sidecar)
             saved.adapt(toSourceDuration: media.duration)
+            if media.camera != nil, saved.camera == nil { saved.camera = sidecar?.camera.map(CameraOverlay.init) ?? .standard }
             savedProject = saved
             // Edits left unsaved by a crash come back as unsaved changes.
             if var draft = store.loadDraft(for: sourceURL, sourceDuration: media.duration) {
@@ -120,7 +133,7 @@ final class VideoEditorModel {
             }
             self.media = media
             notifyUnsavedChanges()
-            sidecar = RecordingSidecar.load(for: sourceURL)
+            self.sidecar = sidecar
             if let url = project.background.fill.videoURL {
                 backgroundVideo = try? await BackgroundVideo.load(url: url)
             }
@@ -237,7 +250,7 @@ final class VideoEditorModel {
             // Rebuilding the player item on every drag tick is wasteful; the
             // timeline redraws immediately and the preview follows shortly.
             scheduleRebuild(delay: isContinuousEdit ? .milliseconds(200) : .zero)
-        } else if old.background != updated.background || old.zoomFillsFrame != updated.zoomFillsFrame
+        } else if old.background != updated.background || old.zoomFillsFrame != updated.zoomFillsFrame || old.camera != updated.camera
                     || (old.zooms != updated.zooms && selectedZoomID == nil) {
             // While a zoom is being edited the preview ignores zooms, so
             // dragging its rectangle doesn't need a new video composition.
@@ -482,7 +495,9 @@ final class VideoEditorModel {
 
     private func updatePreviewVideoComposition() {
         guard let media, let edit = currentEdit, let item = player.currentItem,
-              let videoTrack = edit.composition.tracks(withMediaType: .video).first else { return }
+              let videoTrack = edit.composition.tracks(withMediaType: .video).first(where: {
+                  $0.trackID != edit.cameraTrackID && $0.trackID != edit.backgroundTrackID
+              }) else { return }
         let options = previewOptions()
         let plan = RenderPlan(
             project: project,
@@ -490,13 +505,16 @@ final class VideoEditorModel {
             orientation: media.orientation,
             shortSideCap: options.shortSideCap,
             zoomEnabled: options.zoomEnabled,
-            backgroundOrientation: backgroundVideo?.orientation ?? .up
+            backgroundOrientation: backgroundVideo?.orientation ?? .up,
+            hasCameraTrack: edit.cameraTrackID != nil,
+            cameraOrientation: media.camera?.orientation ?? .up
         )
         item.videoComposition = CompositionBuilder.makeVideoComposition(
             plan: plan,
             source: media,
             videoTrackID: videoTrack.trackID,
             backgroundTrackID: edit.backgroundTrackID,
+            cameraTrackID: edit.cameraTrackID,
             duration: edit.composition.duration,
             frameRate: options.frameRate,
             force: false
@@ -589,7 +607,7 @@ final class VideoEditorModel {
     var exportRenderSize: CGSize {
         guard let media else { return .zero }
         let plan = switch exportSettings.format {
-        case .mp4: RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, shortSideCap: exportSettings.resolution.shortSideCap)
+        case .mp4: RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, shortSide: exportSettings.resolution.shortSide)
         case .gif: RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, width: exportSettings.gif.width)
         }
         return plan.renderSize
