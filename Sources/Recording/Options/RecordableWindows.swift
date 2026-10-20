@@ -1,3 +1,4 @@
+import AppCore
 import CoreGraphics
 import Foundation
 import ScreenCaptureKit
@@ -19,9 +20,10 @@ enum RecordableWindows {
             return []
         }
         let ownPID = ProcessInfo.processInfo.processIdentifier
+        let ownWindows = OwnWindows.capturableIDs() // the editors can be recorded too
         return content.windows.compactMap { window -> RecordableWindow? in
             guard window.windowLayer == 0,
-                  let app = window.owningApplication, app.processID != ownPID,
+                  let app = window.owningApplication, app.processID != ownPID || ownWindows.contains(window.windowID),
                   let title = window.title, !title.isEmpty,
                   window.frame.width >= 100, window.frame.height >= 100 else { return nil }
             return RecordableWindow(id: window.windowID, appName: app.applicationName, title: title)

@@ -35,9 +35,12 @@ public enum ScreenshotError: Error, Sendable {
 
 public enum ScreenshotService {
     /// Snapshots every connected display, excluding Pankapture's own windows
-    /// (toolbars, thumbnails, pinned images) so they never leak into captures.
+    /// (toolbars, thumbnails, pinned images) so they never leak into captures,
+    /// except `ownWindowIDs` (its editors and other standard windows, which
+    /// are content: see `OwnWindows`).
     public static func snapshotDisplays(
         excludingBundleID bundleID: String? = Bundle.main.bundleIdentifier,
+        ownWindowIDs: Set<CGWindowID> = [],
         showsCursor: Bool = false,
         hidesDesktopIcons: Bool = false
     ) async throws -> [DisplaySnapshot] {
@@ -53,6 +56,7 @@ public enum ScreenshotService {
         guard !content.displays.isEmpty else { throw ScreenshotError.noDisplays }
 
         let excludedApps = content.applications.filter { $0.bundleIdentifier == bundleID }
+        let keptOwnWindows = content.windows.filter { ownWindowIDs.contains($0.windowID) }
         let desktopIconLevel = Int(CGWindowLevelForKey(.desktopIconWindow))
         let excludedWindows = hidesDesktopIcons
             ? content.windows.filter { $0.windowLayer == desktopIconLevel && $0.owningApplication?.bundleIdentifier == "com.apple.finder" }
@@ -62,9 +66,11 @@ public enum ScreenshotService {
         for display in content.displays {
             let filter: SCContentFilter
             if excludedWindows.isEmpty {
-                filter = SCContentFilter(display: display, excludingApplications: excludedApps, exceptingWindows: [])
+                filter = SCContentFilter(display: display, excludingApplications: excludedApps, exceptingWindows: keptOwnWindows)
             } else {
-                let ownWindows = content.windows.filter { $0.owningApplication?.bundleIdentifier == bundleID }
+                let ownWindows = content.windows.filter {
+                    $0.owningApplication?.bundleIdentifier == bundleID && !ownWindowIDs.contains($0.windowID)
+                }
                 filter = SCContentFilter(display: display, excludingWindows: ownWindows + excludedWindows)
             }
             let scale = CGFloat(filter.pointPixelScale)

@@ -19,7 +19,8 @@ public final class AreaGrabber: @unchecked Sendable {
 
     /// - Parameter rect: display-local points, top-left origin.
     public static func make(displayID: CGDirectDisplayID, rect: CGRect,
-                            excludingBundleID bundleID: String? = Bundle.main.bundleIdentifier) async throws -> AreaGrabber {
+                            excludingBundleID bundleID: String? = Bundle.main.bundleIdentifier,
+                            ownWindowIDs: Set<CGWindowID> = []) async throws -> AreaGrabber {
         let content: SCShareableContent
         do {
             content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
@@ -30,7 +31,8 @@ public final class AreaGrabber: @unchecked Sendable {
             throw ScreenshotError.noDisplays
         }
         let excluded = content.applications.filter { $0.bundleIdentifier == bundleID }
-        let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: [])
+        let kept = content.windows.filter { ownWindowIDs.contains($0.windowID) }
+        let filter = SCContentFilter(display: display, excludingApplications: excluded, exceptingWindows: kept)
         let scale = CGFloat(filter.pointPixelScale)
         let config = SCStreamConfiguration()
         config.sourceRect = rect

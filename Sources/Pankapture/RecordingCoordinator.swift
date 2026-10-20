@@ -79,10 +79,10 @@ final class RecordingCoordinator {
     // MARK: Area picking
 
     private static func pickArea() async -> AreaSelection? {
-        let windows = WindowList.onScreenWindows()
+        let windows = WindowList.onScreenWindows(keeping: OwnWindows.capturableIDs())
         let snapshots: [DisplaySnapshot]
         do {
-            snapshots = try await ScreenshotService.snapshotDisplays()
+            snapshots = try await ScreenshotService.snapshotDisplays(ownWindowIDs: OwnWindows.capturableIDs())
         } catch {
             Log.recording.error("Area picking: display snapshot failed: \(error.localizedDescription, privacy: .public)")
             return nil

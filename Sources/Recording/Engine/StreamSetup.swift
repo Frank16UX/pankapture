@@ -143,7 +143,9 @@ struct StreamSetup {
     }
 
     /// Display filter that excludes every Pankapture window except the overlays
-    /// that belong in the video (ADR-5), and optionally Finder's desktop icons.
+    /// that belong in the video (ADR-5) and its standard windows such as the
+    /// editors (`OwnWindows`), and optionally Finder's desktop icons.
+    @MainActor
     private static func displayFilter(
         _ displayID: CGDirectDisplayID,
         config: RecordingConfiguration,
@@ -154,7 +156,7 @@ struct StreamSetup {
         }
         let ownPID = ProcessInfo.processInfo.processIdentifier
         var excludedApps = content.applications.filter { $0.processID == ownPID }
-        let included = Set(config.includedOverlayWindowIDs)
+        let included = Set(config.includedOverlayWindowIDs).union(OwnWindows.capturableIDs())
         var exceptions = content.windows.filter { included.contains($0.windowID) }
 
         if config.hidesDesktopIcons {

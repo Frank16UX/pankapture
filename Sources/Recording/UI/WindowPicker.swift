@@ -1,3 +1,4 @@
+import AppCore
 import AppKit
 import Carbon.HIToolbox
 import DesignSystem
@@ -151,16 +152,19 @@ struct WindowCandidate {
 
     var label: String { title.isEmpty ? appName : "\(appName) — \(title)" }
 
-    /// Front-to-back list, excluding our own windows, menus, and tiny windows.
+    /// Front-to-back list, excluding our own windows (except the editors and
+    /// other standard windows), menus, and tiny windows.
+    @MainActor
     static func onScreen() -> [WindowCandidate] {
         let ownPID = ProcessInfo.processInfo.processIdentifier
+        let ownWindows = OwnWindows.capturableIDs() // the editors can be recorded too
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                 as? [[String: Any]] else { return [] }
         return list.compactMap { info in
             guard (info[kCGWindowLayer as String] as? Int) == 0,
-                  (info[kCGWindowOwnerPID as String] as? pid_t) != ownPID,
                   (info[kCGWindowAlpha as String] as? Double ?? 1) > 0,
                   let number = info[kCGWindowNumber as String] as? Int,
+                  (info[kCGWindowOwnerPID as String] as? pid_t) != ownPID || ownWindows.contains(CGWindowID(number)),
                   let boundsInfo = info[kCGWindowBounds as String] as? [String: Any],
                   let bounds = CGRect(dictionaryRepresentation: boundsInfo as CFDictionary),
                   bounds.width >= 40, bounds.height >= 40 else { return nil }
