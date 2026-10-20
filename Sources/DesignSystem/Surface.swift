@@ -43,13 +43,7 @@ public struct PKToolButtonStyle: ButtonStyle {
     private struct ToolButtonBody: View {
         let configuration: Configuration
         let isSelected: Bool
-        // Explicit `State` instead of `@State`: the Command Line Tools ship without
-        // the SwiftUIMacros plugin. See docs/ARCHITECTURE.md → Toolchain.
-        private let hovering = State(initialValue: false)
-        private var isHovering: Bool {
-            get { hovering.wrappedValue }
-            nonmutating set { hovering.wrappedValue = newValue }
-        }
+        @State private var isHovering = false
 
         var body: some View {
             configuration.label

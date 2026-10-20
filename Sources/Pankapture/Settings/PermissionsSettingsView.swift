@@ -3,12 +3,7 @@ import DesignSystem
 import SwiftUI
 
 struct PermissionsSettingsView: View {
-    // Explicit `State` (not `@State`): see docs/ARCHITECTURE.md → Toolchain.
-    private let statusesState = State(initialValue: [PermissionKind: PermissionStatus]())
-    private var statuses: [PermissionKind: PermissionStatus] {
-        get { statusesState.wrappedValue }
-        nonmutating set { statusesState.wrappedValue = newValue }
-    }
+    @State private var statuses: [PermissionKind: PermissionStatus] = [:]
 
     var body: some View {
         Form {

@@ -13,7 +13,8 @@ Read first: `docs/PRD.md` (requirements with IDs), `docs/ARCHITECTURE.md` (decis
 ## Rules
 
 - **No product names of other apps in docs, code, or commits.** Describe features generically ("inline annotation", "quick-access thumbnail"), never by competitor or reference-app name.
-- **Toolchain:** until Xcode is installed, SwiftUI macros (`@State`, `@Entry`, `#Preview`) don't compile. Use the explicit `State(initialValue:)` pattern already in the code (grep "SwiftUIMacros"). Once `xcode-select -p` points at Xcode, convert them back to `@State`.
+- **Toolchain:** build with Xcode selected (`xcode-select -p` → `/Applications/Xcode.app/...`). SwiftUI/SwiftData macros (`@State`, `@Entry`, `@Model`, `#Preview`) need Xcode's plugins; the Command Line Tools alone can't build the app.
+- **No SwiftPM resources** (`resources:` in Package.swift): `Bundle.module` doesn't resolve inside the hand-assembled `.app`. Draw assets in code or use SF Symbols.
 - **Module boundaries** (ARCHITECTURE §3): the app target is a thin composition root; feature modules depend only on `AppCore`/`DesignSystem`/`Annotation`; `Annotation` stays pure. Add a module when its milestone starts, never as an empty placeholder.
 - **Theming:** chrome uses semantic colors and materials only (`.primary`, `.secondary`, `Color.accentColor`, `.separator`, `pkSurface()`). No hex colors in chrome. Annotation colors and overlay dimming are content and don't follow the theme.
 - **Tokens:** spacing, radii, metrics, and motion come from `PK.*` in `DesignSystem/Tokens.swift`.

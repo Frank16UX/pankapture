@@ -11,19 +11,8 @@ struct GeneralSettingsView: View {
     @AppStorage(PreferenceKey.copyToClipboardAfterCapture) private var copyAfterCapture = true
     @AppStorage(PreferenceKey.saveAfterCapture) private var saveAfterCapture = true
 
-    // Explicit `State` (not `@State`) so the Command Line Tools toolchain can
-    // build without the SwiftUIMacros plugin. See docs/ARCHITECTURE.md → Toolchain.
-    private let launchAtLoginState = State(initialValue: SMAppService.mainApp.status == .enabled)
-    private let launchAtLoginErrorState = State<String?>(initialValue: nil)
-
-    private var launchAtLogin: Bool {
-        get { launchAtLoginState.wrappedValue }
-        nonmutating set { launchAtLoginState.wrappedValue = newValue }
-    }
-    private var launchAtLoginError: String? {
-        get { launchAtLoginErrorState.wrappedValue }
-        nonmutating set { launchAtLoginErrorState.wrappedValue = newValue }
-    }
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
+    @State private var launchAtLoginError: String?
 
     var body: some View {
         Form {
@@ -40,7 +29,7 @@ struct GeneralSettingsView: View {
                     }
                 }
 
-                Toggle("Launch at login", isOn: launchAtLoginState.projectedValue)
+                Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, enabled in setLaunchAtLogin(enabled) }
                 if let launchAtLoginError {
                     Text(launchAtLoginError).font(.caption).foregroundStyle(.red)

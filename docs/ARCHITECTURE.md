@@ -158,9 +158,9 @@ make logs   # stream os_log for the app
 
 ### Toolchain notes (important)
 
-- **Xcode is strongly recommended from M1.** The macOS 27 SDK implements `@State`, `@Entry`, and `#Preview` as SwiftUI macros whose plugin ships **only with Xcode**, not with the Command Line Tools. Instruments (needed to verify the performance targets) and SwiftUI previews also need Xcode.
-- Until Xcode is installed, the code uses an explicit `State(initialValue:)` property instead of `@State` (search for "SwiftUIMacros"). After installing Xcode (`sudo xcode-select -s /Applications/Xcode.app`), switch those back to `@State` and drop the workaround.
-- With CLT, `swift test` intermittently fails to find the swift-testing macro plugin; `make test` passes `-plugin-path` explicitly when CLT is the active toolchain.
+- **Xcode is required** (selected with `sudo xcode-select -s /Applications/Xcode.app`). The macOS 27 SDK implements `@State`, `@Entry`, `@Model`, and `#Preview` as macros whose plugins ship only with Xcode. Instruments (for the performance targets) also needs Xcode.
+- With only the Command Line Tools selected, `make test` still passes the swift-testing `-plugin-path` so pure-logic tests run, but the app target won't compile.
+- **No SwiftPM resources.** The generated `Bundle.module` accessor looks next to the executable, not in `Contents/Resources`, so it breaks inside the hand-assembled `.app`. Assets are drawn in code or come from SF Symbols.
 
 ## 10. Performance strategy
 
