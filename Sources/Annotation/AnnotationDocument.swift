@@ -77,3 +77,28 @@ public struct AnnotationDocument: Sendable, Equatable {
         redoStack.removeAll()
     }
 }
+
+// MARK: - Persistence
+
+/// Persists only the annotations (plus a format version). Undo/redo history is
+/// session state and intentionally not saved: a re-opened capture starts with a
+/// clean undo stack, like any document.
+extension AnnotationDocument: Codable {
+    public static let currentFormatVersion = 1
+
+    private enum CodingKeys: String, CodingKey {
+        case version
+        case annotations
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(annotations: try container.decode([Annotation].self, forKey: .annotations))
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(Self.currentFormatVersion, forKey: .version)
+        try container.encode(annotations, forKey: .annotations)
+    }
+}

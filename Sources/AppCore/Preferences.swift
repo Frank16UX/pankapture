@@ -66,3 +66,16 @@ public enum Preferences {
         defaults.string(forKey: PreferenceKey.imageFormat).flatMap(ImageFormat.init(rawValue:)) ?? .png
     }
 }
+
+// MARK: Library
+
+public extension PreferenceKey {
+    /// Record captures in the history library (HI-1). Default: true.
+    static let historyEnabled = "history.enabled"
+    /// Keep captures that were closed without saving (OUT-8). Default: true.
+    static let historyKeepsUnsavedCaptures = "history.keepsUnsavedCaptures"
+    /// Retention raw value: "forever", "days30", or "days90" (HI-5). Default: "forever".
+    static let historyRetention = "history.retention"
+    /// Library storage cap in GB; 0 means no cap (HI-5). Default: 0.
+    static let historyStorageCapGB = "history.storageCapGB"
+}

@@ -51,6 +51,22 @@ struct AnnotationDocumentTests {
         #expect(document.nextCounterNumber == 3)
     }
 
+    @Test func codableRoundTripKeepsAnnotationsOnly() throws {
+        var document = AnnotationDocument()
+        document.add(rectangle())
+        document.add(Annotation(shape: .text(origin: CGPoint(x: 1, y: 2), string: "Hi", fontSize: 14), style: AnnotationStyle(color: .green, lineWidth: 2)))
+        document.add(Annotation(shape: .counter(center: CGPoint(x: 5, y: 5), number: 1)))
+
+        let data = try JSONEncoder().encode(document)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(json["version"] as? Int == AnnotationDocument.currentFormatVersion)
+
+        let decoded = try JSONDecoder().decode(AnnotationDocument.self, from: data)
+        #expect(decoded.annotations == document.annotations)
+        #expect(!decoded.canUndo)
+        #expect(decoded.nextCounterNumber == 2)
+    }
+
     @Test func undoLimitIsRespected() {
         var document = AnnotationDocument(undoLimit: 3)
         for _ in 0..<10 { document.add(rectangle()) }
