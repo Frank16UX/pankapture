@@ -154,6 +154,7 @@ struct ActionsBar: View {
         HStack(spacing: PK.Spacing.xxs) {
             switch style {
             case .output:
+                action("Open in Editor", "macwindow.badge.plus", .openEditor, shortcut: "⌘E")
                 action("Pin to Screen", "pin", .pin, shortcut: "⌥P")
                 action("Share", "square.and.arrow.up", .share, shortcut: nil)
                 action("Print", "printer", .print, shortcut: "⌘P")

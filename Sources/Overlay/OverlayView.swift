@@ -15,6 +15,8 @@ public enum OverlayMode: Equatable, Sendable {
     /// and confirms (recording, scrolling capture); without one, the area is
     /// returned as soon as the mouse is released (OCR).
     case pick(confirmTitle: String?, confirmSymbol: String = "checkmark")
+    /// Hover highlights windows; a click picks one (window capture, SC-6).
+    case pickWindow
 }
 
 /// One per display: shows the frozen frame, handles selection and drawing.
@@ -26,8 +28,9 @@ final class OverlayView: NSView {
     private unowned let controller: OverlayController
     private let state: EditorState
     private let mode: OverlayMode
-    /// Snappable windows in display-local points, front to back.
-    private let windowFrames: [CGRect]
+    /// Snappable windows and their display-local frames, front to back.
+    private let windowHits: [(info: WindowInfo, frame: CGRect)]
+    private var windowFrames: [CGRect] { windowHits.map(\.frame) }
 
     // Subviews, bottom to top.
     private let frozenView: FrozenFrameView
@@ -60,10 +63,10 @@ final class OverlayView: NSView {
         self.mode = mode
         self.controller = controller
         let displaySize = snapshot.frame.size
-        self.windowFrames = windows.compactMap { window in
+        self.windowHits = windows.compactMap { window in
             let local = window.frame.offsetBy(dx: -snapshot.frame.minX, dy: -snapshot.frame.minY)
             let clipped = local.intersection(CGRect(origin: .zero, size: displaySize))
-            return clipped.width >= 40 && clipped.height >= 40 ? clipped : nil
+            return clipped.width >= 40 && clipped.height >= 40 ? (window, clipped) : nil
         }
         frozenView = FrozenFrameView(image: snapshot.image)
         canvas = AnnotationCanvasView(state: state, snapshotImage: snapshot.image, scale: snapshot.scale, displaySize: displaySize)
@@ -172,7 +175,7 @@ final class OverlayView: NSView {
         }
         controller.activate(self)
 
-        guard let selection else {
+        guard mode != .pickWindow, let selection else {
             interaction = .pending(start: point)
             return
         }
@@ -217,7 +220,7 @@ final class OverlayView: NSView {
             return
 
         case let .pending(start):
-            guard hypot(point.x - start.x, point.y - start.y) > 3 else { return }
+            guard mode != .pickWindow, hypot(point.x - start.x, point.y - start.y) > 3 else { return }
             controller.activate(self)
             annotations.commitText()
             selection = nil
@@ -263,6 +266,14 @@ final class OverlayView: NSView {
             return
 
         case .pending:
+            if mode == .pickWindow {
+                if let hit = windowHits.first(where: { $0.frame.contains(point) }) {
+                    controller.pickWindow(hit.info)
+                } else {
+                    NSSound.beep()
+                }
+                return
+            }
             // A click without dragging selects the window under the cursor,
             // or the whole display (SC-4).
             controller.activate(self)
@@ -370,6 +381,7 @@ final class OverlayView: NSView {
             case "c": if selection != nil { perform(mode == .annotate ? .copy : .confirmPick) }
             case "s": if selection != nil, mode == .annotate { perform(flags.contains(.shift) ? .saveAs : .save) }
             case "p": if selection != nil, mode == .annotate { perform(.print) }
+            case "e": if selection != nil, mode == .annotate { perform(.openEditor) }
             case "a":
                 controller.activate(self)
                 selection = displayBounds
@@ -441,6 +453,7 @@ final class OverlayView: NSView {
             let style: ActionsBarStyle = switch mode {
             case .annotate: .output
             case let .pick(title, symbol): .confirm(title: title ?? "Done", symbol: symbol)
+            case .pickWindow: .confirm(title: "Capture", symbol: "macwindow")
             }
             let host = NSHostingView(rootView: ActionsBar(state: state, style: style))
             host.sizingOptions = [.intrinsicContentSize]

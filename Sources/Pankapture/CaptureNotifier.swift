@@ -63,6 +63,26 @@ final class CaptureNotifier: NSObject {
         }
     }
 
+    /// Confirms "Capture Text": nil means nothing was recognized.
+    func notifyText(_ text: String?) {
+        guard UserDefaults.standard.bool(forKey: PreferenceKey.showNotifications) else { return }
+        let content = UNMutableNotificationContent()
+        if let text {
+            let lines = text.split(separator: "\n").count
+            content.title = lines == 1 ? "Copied 1 line of text" : "Copied \(lines) lines of text"
+            content.body = String(text.prefix(160))
+        } else {
+            content.title = "No text found"
+            content.body = "Try selecting a larger area or higher-contrast text."
+        }
+        content.categoryIdentifier = ID.copiedCategory
+        let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        Task {
+            guard await authorize() else { return }
+            try? await center.add(request)
+        }
+    }
+
     private func authorize() async -> Bool {
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {

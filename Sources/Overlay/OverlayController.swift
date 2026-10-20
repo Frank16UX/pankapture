@@ -19,6 +19,8 @@ public struct CaptureResult: @unchecked Sendable {
     public let displayID: CGDirectDisplayID
     /// Selection in display-local points.
     public let rect: CGRect
+    /// Selection in AppKit global coordinates (for pinning in place).
+    public let screenRect: CGRect
 }
 
 /// An area chosen in `.pick` mode (recording, OCR, scrolling capture).
@@ -35,13 +37,16 @@ public struct PickedArea: Sendable {
 }
 
 public enum OutputAction: Sendable, Equatable {
-    case copy, save, saveAs, print, pin, done, shared
+    case copy, save, saveAs, print, pin, done, shared, openEditor
 }
 
 public enum OverlayOutcome: Sendable {
-    case cancelled
+    /// Closed without output. Carries the selection if there was one, so the
+    /// app can keep it in history (OUT-8).
+    case cancelled(CaptureResult?)
     case output(OutputAction, CaptureResult)
     case picked(PickedArea)
+    case pickedWindow(WindowInfo)
 }
 
 /// Presents the frozen-frame selection overlay on every display and turns the
@@ -135,7 +140,8 @@ public final class OverlayController: NSObject {
     }
 
     public func cancel() {
-        finish(.cancelled, reactivatePrevious: true)
+        let discarded = mode == .annotate ? activeView.flatMap(render) : nil
+        finish(.cancelled(discarded), reactivatePrevious: true)
     }
 
     // MARK: Called by OverlayView
@@ -152,6 +158,10 @@ public final class OverlayController: NSObject {
         activeView = view
         state.resetDocument()
         view.window?.makeKey()
+    }
+
+    func pickWindow(_ window: WindowInfo) {
+        finish(.pickedWindow(window), reactivatePrevious: true)
     }
 
     func selectionDidChange(_ view: OverlayView, rect: CGRect) {
@@ -180,12 +190,13 @@ public final class OverlayController: NSObject {
         case .print: output(.print, view)
         case .pin: output(.pin, view)
         case .done: output(.done, view)
+        case .openEditor: output(.openEditor, view)
         }
     }
 
     private func output(_ action: OutputAction, _ view: OverlayView) {
         guard let result = render(view) else { return }
-        let keepsFocus = action == .saveAs || action == .print
+        let keepsFocus = action == .saveAs || action == .print || action == .openEditor
         finish(.output(action, result), reactivatePrevious: !keepsFocus)
     }
 
@@ -209,8 +220,16 @@ public final class OverlayController: NSObject {
             annotations: document.translated(by: CGVector(dx: -rect.minX, dy: -rect.minY)),
             scale: snapshot.scale,
             displayID: snapshot.displayID,
-            rect: rect
+            rect: rect,
+            screenRect: Self.appKitRect(forLocal: rect, on: snapshot)
         )
+    }
+
+    /// Display-local (top-left) → AppKit global (bottom-left of the primary display).
+    static func appKitRect(forLocal rect: CGRect, on snapshot: DisplaySnapshot) -> CGRect {
+        let primaryHeight = NSScreen.screens.first?.frame.height ?? snapshot.frame.height
+        let quartz = rect.offsetBy(dx: snapshot.frame.minX, dy: snapshot.frame.minY)
+        return CGRect(x: quartz.minX, y: primaryHeight - quartz.maxY, width: quartz.width, height: quartz.height)
     }
 
     // MARK: Share (OUT-4)

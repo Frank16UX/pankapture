@@ -14,7 +14,7 @@ let package = Package(
         // App shell: lifecycle, menu bar, settings, coordinators. Thin by design.
         .executableTarget(
             name: "Pankapture",
-            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem", "Overlay", "Library"]
+            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem", "Overlay", "Library", "QuickAccess"]
         ),
 
         // Settings, hot keys, permissions, file naming, logging. No UI.
@@ -31,6 +31,9 @@ let package = Package(
 
         // Frozen-frame selection overlay, loupe, inline + full annotation editor (M1–M2).
         .target(name: "Overlay", dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem"]),
+
+        // Floating windows: quick-access thumbnails and pinned images (M2).
+        .target(name: "QuickAccess", dependencies: ["AppCore", "Capture", "DesignSystem"]),
 
         // Capture history (M6): SwiftData index, re-editable originals, OCR, library window.
         .target(name: "Library", dependencies: ["AppCore", "Annotation", "DesignSystem"]),

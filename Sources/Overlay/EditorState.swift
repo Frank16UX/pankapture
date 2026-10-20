@@ -5,7 +5,7 @@ import Observation
 
 /// What the floating toolbars can ask the overlay to do.
 public enum EditorCommand: Sendable {
-    case copy, save, saveAs, print, share, pin, done, close
+    case copy, save, saveAs, print, share, pin, done, close, openEditor
     case undo, redo
     case confirmPick
 }

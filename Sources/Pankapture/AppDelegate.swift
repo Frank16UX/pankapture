@@ -16,7 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let stored = UserDefaults.standard.string(forKey: PreferenceKey.appearance)
         (stored.flatMap(AppearanceMode.init(rawValue:)) ?? .system).apply()
 
-        coordinator.registerShortcuts()
+        coordinator.start()
         CaptureNotifier.shared.configure()
 
         if Permissions.status(.screenRecording) != .granted {

@@ -21,6 +21,24 @@ public enum PreferenceKey {
     public static let editorSize = "editor.size"
     /// Last background/beautify options used in the editor window (JSON).
     public static let editorBeautify = "editor.beautify"
+    // MARK: Quick-access thumbnail (QA-1…QA-4) and after-capture behavior (GL-9)
+    /// Show the floating thumbnail after captures that don't open the inline editor.
+    public static let showThumbnail = "quickAccess.showThumbnail"
+    /// "left" or "right" screen corner.
+    public static let thumbnailPosition = "quickAccess.position"
+    /// Seconds before an untouched thumbnail hides itself; 0 = never.
+    public static let thumbnailAutoDismissSeconds = "quickAccess.autoDismissSeconds"
+    /// Open the full editor window after window/fullscreen captures.
+    public static let openEditorAfterCapture = "output.openEditor"
+
+    // MARK: Screenshot options (SC-6, SC-7, SC-10)
+    /// Include the window's drop shadow in window captures.
+    public static let windowCaptureShadow = "capture.windowShadow"
+    /// Fullscreen captures every display (one file each) instead of the one under the cursor.
+    public static let fullscreenAllDisplays = "capture.fullscreenAllDisplays"
+    public static let captureShowsCursor = "capture.showsCursor"
+    public static let captureHidesDesktopIcons = "capture.hidesDesktopIcons"
+
     /// Last area selection, for "Capture Previous Area" (SC-8). JSON `{displayID, rect}`.
     public static let lastSelection = "capture.lastSelection"
 }
@@ -54,6 +72,14 @@ public enum Preferences {
             PreferenceKey.playSounds: true,
             PreferenceKey.showNotifications: true,
             PreferenceKey.allowsURLAutomation: false,
+            PreferenceKey.showThumbnail: true,
+            PreferenceKey.thumbnailPosition: "right",
+            PreferenceKey.thumbnailAutoDismissSeconds: 10.0,
+            PreferenceKey.openEditorAfterCapture: false,
+            PreferenceKey.windowCaptureShadow: true,
+            PreferenceKey.fullscreenAllDisplays: false,
+            PreferenceKey.captureShowsCursor: false,
+            PreferenceKey.captureHidesDesktopIcons: false,
         ])
     }
 

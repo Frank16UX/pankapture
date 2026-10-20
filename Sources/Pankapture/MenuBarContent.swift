@@ -1,5 +1,7 @@
 import AppCore
 import AppKit
+import Library
+import QuickAccess
 import SwiftUI
 
 /// The menu shown from the menu bar icon.
@@ -11,10 +13,18 @@ struct MenuBarContent: View {
     var body: some View {
         Section("Screenshot") {
             actionButton(.captureArea, symbol: "rectangle.dashed")
-            actionButton(.captureWindow, symbol: "macwindow", enabled: false)
+            actionButton(.capturePreviousArea, symbol: "rectangle.dashed.badge.record")
+            actionButton(.captureWindow, symbol: "macwindow")
             actionButton(.captureFullscreen, symbol: "display")
             actionButton(.scrollingCapture, symbol: "arrow.up.and.down.text.horizontal", enabled: false)
-            actionButton(.captureText, symbol: "text.viewfinder", enabled: false)
+            actionButton(.captureText, symbol: "text.viewfinder")
+            Menu {
+                ForEach([3, 5, 10], id: \.self) { seconds in
+                    Button("Capture Area in \(seconds) Seconds") { coordinator.captureAreaAfterDelay(seconds) }
+                }
+            } label: {
+                Label("Self-Timer", systemImage: "timer")
+            }
         }
 
         Section("Recording") {
@@ -23,12 +33,35 @@ struct MenuBarContent: View {
 
         Divider()
 
-        actionButton(.openHistory, symbol: "clock.arrow.circlepath", enabled: false)
+        actionButton(.openHistory, symbol: "clock.arrow.circlepath", enabled: coordinator.library != nil)
+        if let library = coordinator.library, !library.recentCaptures.isEmpty {
+            Menu {
+                ForEach(library.recentCaptures) { recent in
+                    Button {
+                        coordinator.open(recent)
+                    } label: {
+                        Label(recent.title, systemImage: recent.kind == .screenshot ? "photo" : "film")
+                    }
+                    .disabled(recent.isUnavailable)
+                }
+            } label: {
+                Label("Recent Captures", systemImage: "clock")
+            }
+        }
 
         if let url = coordinator.lastCaptureURL {
             Button("Show Last Capture in Finder", systemImage: "folder") {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             }
+        }
+
+        Menu {
+            Button("Unlock Click-Through Pins") { PinController.shared.unlockAll() }
+            Button("Close All Pins") { PinController.shared.closeAll() }
+            Divider()
+            Button("Dismiss Thumbnails") { QuickAccessController.shared.dismissAll() }
+        } label: {
+            Label("Floating Windows", systemImage: "pin")
         }
 
         Divider()
