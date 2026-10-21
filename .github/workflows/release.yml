@@ -1,9 +1,12 @@
-# Every merge to main publishes a release (ADR-28): tests, then a DMG signed
-# with the "Pankapture Development" identity, tagged with the next version
-# (scripts/next-version.sh). Pull requests run the tests and build the DMG
-# without publishing. Docs-only changes don't release.
+# Every merge to main publishes a release (ADR-28): the check job tests, then
+# the release job builds a DMG signed with the "Pankapture Development"
+# identity and tags it with the next version (scripts/next-version.sh). Pull
+# requests run the check job only: tests and a DMG build, no secrets, nothing
+# published. Docs-only changes don't release, and on pull requests the check
+# job passes without building so it can stay a required check (ADR-29).
 #
-# Secrets (set once with `make ci-secrets` on the Mac that has the identity):
+# Secrets live in the "release" environment, which only main can use
+# (set once with `make ci-secrets` on the Mac that has the identity):
 #   PK_SIGNING_P12_BASE64    the identity as a base64 .p12
 #   PK_SIGNING_P12_PASSWORD  its password
 name: Release
@@ -13,11 +16,10 @@ on:
     branches: [main]
     paths-ignore: ["docs/**", "**/*.md"]
   pull_request:
-    paths-ignore: ["docs/**", "**/*.md"]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   # Releases run one at a time, in merge order; PR runs replace older runs.
@@ -25,13 +27,57 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  release:
+  check:
     runs-on: macos-26
     timeout-minutes: 45
     env:
-      PUBLISH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/main' }}
+      EVENT: ${{ github.event_name }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0 # tags, for the version
+
+      - name: Detect code changes
+        id: changes
+        run: |
+          CODE=true
+          if [[ "$EVENT" == "pull_request" ]]; then
+            # HEAD is the PR merged into its base; the first parent is the base.
+            CODE=false
+            while IFS= read -r FILE; do
+              [[ "$FILE" == docs/* || "$FILE" == *.md ]] || CODE=true
+            done < <(git diff --name-only HEAD^1 HEAD)
+          fi
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          [[ "$CODE" == true ]] || echo "Docs-only change; skipping the build."
+
+      - name: Select the newest Xcode
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          XCODE="$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+
+      - name: Test
+        if: steps.changes.outputs.code == 'true'
+        run: swift test
+
+      - name: Build the disk image (dry run)
+        if: steps.changes.outputs.code == 'true' && env.EVENT == 'pull_request'
+        run: |
+          PK_VERSION="$(bash scripts/next-version.sh)" bash scripts/package-dmg.sh
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Pankapture.app/Contents/Info.plist
+
+  release:
+    needs: check
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: macos-26
+    timeout-minutes: 45
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0 # tags, for the version
 
@@ -41,11 +87,7 @@ jobs:
           sudo xcode-select -s "$XCODE"
           xcodebuild -version
 
-      - name: Test
-        run: swift test
-
       - name: Import the signing identity
-        if: env.PUBLISH == 'true'
         env:
           P12_BASE64: ${{ secrets.PK_SIGNING_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.PK_SIGNING_P12_PASSWORD }}
@@ -67,16 +109,9 @@ jobs:
           security find-identity -p codesigning "$KEYCHAIN"
 
       - name: Publish the release
-        if: env.PUBLISH == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/release.sh
-
-      - name: Build the disk image (dry run)
-        if: env.PUBLISH != 'true'
-        run: |
-          PK_VERSION="$(bash scripts/next-version.sh)" bash scripts/package-dmg.sh
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/Pankapture.app/Contents/Info.plist
 
       - name: Remove the signing keychain
         if: always()

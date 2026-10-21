@@ -61,7 +61,7 @@ Video editor (after a recording: the thumbnail, the notification, or **Edit Last
 | `make run` | Build + (re)launch |
 | `make dmg` | Release `.app` packaged as `build/Pankapture.dmg` |
 | `make release` | Test, build the DMG, and publish a release now (merges to `main` do this automatically) |
-| `make ci-secrets` | Once: give the release workflow the signing identity, as encrypted repo secrets |
+| `make ci-secrets` | Once: give the release workflow the signing identity, as encrypted secrets in the `release` environment |
 | `make cert` | Create the "Pankapture Development" signing identity |
 | `make icon` | Regenerate the app icon |
 | `make logs` | Stream the app's logs |
@@ -100,6 +100,10 @@ docs/                    PRD, architecture, design, roadmap
 - [Design](docs/DESIGN.md)
 - [Roadmap](docs/ROADMAP.md)
 
+## Contributing
+
+Issues and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Report security problems privately ([SECURITY.md](SECURITY.md)).
+
 ## Troubleshooting
 
 - **macOS keeps asking for Screen Recording permission after rebuilds.** You're on ad-hoc signing; run `make cert`, then `make run`. If it still prompts once, remove the old "Pankapture" entry in System Settings → Privacy & Security → Screen & System Audio Recording and grant it again.
@@ -107,3 +111,7 @@ docs/                    PRD, architecture, design, roadmap
 - **⇧⌘X does nothing.** Another app owns the shortcut; Settings → Shortcuts shows a ⚠︎ next to conflicting actions.
 - **`@State` / macro errors when building.** The Command Line Tools are selected; select Xcode (ARCHITECTURE §9).
 - **`make cert` says "MAC verification failed".** Fixed in the script (it now uses the system LibreSSL); pull and rerun.
+
+## License
+
+[MIT](LICENSE)

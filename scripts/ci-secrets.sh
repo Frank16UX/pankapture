@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Gives the release workflow (.github/workflows/release.yml) the signing
-# identity, as two encrypted repository secrets. Run once, on the Mac that has
-# "Pankapture Development" in its login keychain (see scripts/create-dev-cert.sh).
+# identity, as two encrypted secrets in the "release" environment, which only
+# main can use (ADR-29). Run once, on the Mac that has "Pankapture Development"
+# in its login keychain (see scripts/create-dev-cert.sh). Repository-level
+# copies from before the environment existed are deleted.
 #
 #   make ci-secrets
 #
@@ -13,6 +15,7 @@ set -euo pipefail
 
 NAME="${PK_SIGN_IDENTITY:-Pankapture Development}"
 REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+ENVIRONMENT="release"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -56,8 +59,15 @@ SWIFT
 echo "▸ Exporting \"$NAME\" (macOS will ask to allow it)"
 swift "$TMP/export.swift" "$NAME" "$PASSWORD" "$TMP/identity.p12"
 
-echo "▸ Setting secrets on $REPO"
-base64 -i "$TMP/identity.p12" | gh secret set PK_SIGNING_P12_BASE64 --repo "$REPO"
-printf '%s' "$PASSWORD" | gh secret set PK_SIGNING_P12_PASSWORD --repo "$REPO"
+echo "▸ Setting secrets on $REPO (environment \"$ENVIRONMENT\")"
+base64 -i "$TMP/identity.p12" | gh secret set PK_SIGNING_P12_BASE64 --repo "$REPO" --env "$ENVIRONMENT"
+printf '%s' "$PASSWORD" | gh secret set PK_SIGNING_P12_PASSWORD --repo "$REPO" --env "$ENVIRONMENT"
+
+for SECRET in PK_SIGNING_P12_BASE64 PK_SIGNING_P12_PASSWORD; do
+  if gh secret list --repo "$REPO" --json name --jq '.[].name' | grep -qx "$SECRET"; then
+    echo "▸ Removing the repository-wide $SECRET"
+    gh secret delete "$SECRET" --repo "$REPO"
+  fi
+done
 
 echo "✓ The release workflow can now sign with \"$NAME\"."
