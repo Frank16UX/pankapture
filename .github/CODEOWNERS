@@ -1,0 +1,3 @@
+# Every change needs the maintainer's review (ADR-29), including the release
+# workflow and scripts that sign and publish what users install.
+*   @Frank16UX

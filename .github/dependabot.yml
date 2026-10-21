@@ -1,0 +1,8 @@
+# The app has no package dependencies; this keeps the pinned workflow actions
+# current (ADR-29).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
