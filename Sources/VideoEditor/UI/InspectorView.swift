@@ -99,10 +99,9 @@ private struct BackgroundSection: View {
 
     var body: some View {
         Section("Background") {
-            Picker("Style", selection: style) {
+            FittingSegmentedPicker("Style", selection: style) {
                 ForEach(Style.allCases) { Text($0.title).tag($0) }
             }
-            .pickerStyle(.segmented)
 
             switch background.fill {
             case let .solid(current):
@@ -416,10 +415,9 @@ private struct CameraSection: View {
         Section("Camera") {
             Toggle("Show Camera", isOn: Binding(get: { camera.isVisible }, set: { value in set { $0.isVisible = value } }))
             Group {
-                Picker("Shape", selection: Binding(get: { camera.shape }, set: { shape in set { $0.shape = shape } })) {
+                FittingSegmentedPicker("Shape", selection: Binding(get: { camera.shape }, set: { shape in set { $0.shape = shape } })) {
                     ForEach(CameraOverlay.Shape.allCases) { Text($0.title).tag($0) }
                 }
-                .pickerStyle(.segmented)
                 if camera.shape.hasCorners {
                     EditSlider(model: model, title: "Roundness", value: camera.roundness, range: CameraOverlay.roundnessRange,
                                format: { Format.percent($0 / CameraOverlay.roundnessRange.upperBound) }) { project, roundness in

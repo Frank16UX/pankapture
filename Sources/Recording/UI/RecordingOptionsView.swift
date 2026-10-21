@@ -246,23 +246,21 @@ private struct CameraSection: View {
                             Text(device.name).tag(String?.some(device.id))
                         }
                     }
-                    Picker("Shape", selection: $model.options.cameraShape) {
+                    FittingSegmentedPicker("Shape", selection: $model.options.cameraShape) {
                         ForEach(RecordingOptions.CameraShape.allCases) { shape in
                             Label(shape.title, systemImage: shape.symbolName).tag(shape)
                         }
                     }
-                    .pickerStyle(.segmented)
                     LabeledContent("Size") {
                         Slider(value: $model.options.cameraSize, in: RecordingOptions.cameraSizeRange)
                             .frame(maxWidth: 160)
                             .accessibilityLabel("Camera size")
                     }
                     Toggle("Mirror", isOn: $model.options.cameraMirrored)
-                    Picker("Save camera", selection: $model.options.cameraAsLayer) {
+                    FittingSegmentedPicker("Save camera", selection: $model.options.cameraAsLayer) {
                         Text("As a layer").tag(true)
                         Text("In the video").tag(false)
                     }
-                    .pickerStyle(.segmented)
                     Text(model.options.cameraAsLayer
                          ? "Move, resize, or hide the camera in the editor. The saved video takes a moment after you stop while the camera is added."
                          : "The camera is recorded as you see it, in one video file that's saved as soon as you stop. It can't be moved later.")
@@ -292,10 +290,9 @@ private struct VideoSection: View {
                 ForEach(RecordingOptions.frameRates, id: \.self) { Text("\($0) fps").tag($0) }
             }
             .pickerStyle(.segmented)
-            Picker("Quality", selection: $options.quality) {
+            FittingSegmentedPicker("Quality", selection: $options.quality) {
                 ForEach(RecordingConfiguration.Quality.allCases) { Text($0.title).tag($0) }
             }
-            .pickerStyle(.segmented)
             Picker("Codec", selection: $options.codec) {
                 ForEach(RecordingConfiguration.Codec.allCases) { Text($0.title).tag($0) }
             }

@@ -107,12 +107,11 @@ private struct StylePicker: View {
             // Label above the control: inline, the full-width segments squeeze it to one letter per line.
             VStack(alignment: .leading, spacing: PK.Spacing.xs) {
                 Text("Size")
-                Picker("Size", selection: sizeBinding) {
+                FittingSegmentedPicker("Size", selection: sizeBinding) {
                     ForEach(StrokeSize.allCases) { size in
                         Text(size.title).tag(size)
                     }
                 }
-                .pickerStyle(.segmented)
                 .labelsHidden()
             }
         }

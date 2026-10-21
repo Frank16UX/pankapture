@@ -59,6 +59,8 @@ SF Symbols only, hierarchical rendering, medium weight, 15 pt in toolbars (`PK.M
 
 All rounded shapes use `.continuous` corners (squircles), like the system.
 
+Segmented pickers in fixed-width panels (inspector, recording options, toolbar popovers) use `FittingSegmentedPicker`, which falls back to a menu when the segments don't fit. A segmented control never shrinks below its natural size, and the system draws segments larger on newer releases, so one that fits today can overflow and clip on the next.
+
 ## 6. Motion
 
 | Token | Spec | Use |
