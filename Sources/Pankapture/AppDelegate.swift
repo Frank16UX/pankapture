@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // Stops playback and work; anything still unsaved stays in its draft.
         coordinator.videoEditor.closeAll()
+        UpdateController.shared.installOnQuit()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

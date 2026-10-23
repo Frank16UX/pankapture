@@ -4,29 +4,31 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(CaptureCoordinator.self) private var coordinator
 
+    @Bindable private var window = SettingsWindow.shared
+
     var body: some View {
-        TabView {
-            Tab("General", systemImage: "gearshape") {
+        TabView(selection: $window.tab) {
+            Tab("General", systemImage: "gearshape", value: .general) {
                 GeneralSettingsView()
             }
-            Tab("Screenshots", systemImage: "camera.viewfinder") {
+            Tab("Screenshots", systemImage: "camera.viewfinder", value: .screenshots) {
                 ScreenshotSettingsView()
             }
-            Tab("Recording", systemImage: "record.circle") {
+            Tab("Recording", systemImage: "record.circle", value: .recording) {
                 RecordingSettingsView()
             }
-            Tab("Shortcuts", systemImage: "command") {
+            Tab("Shortcuts", systemImage: "command", value: .shortcuts) {
                 ShortcutsSettingsView()
             }
             if let library = coordinator.library {
-                Tab("History", systemImage: "clock.arrow.circlepath") {
+                Tab("History", systemImage: "clock.arrow.circlepath", value: .history) {
                     HistorySettingsView(library: library) { coordinator.showLibrary() }
                 }
             }
-            Tab("Permissions", systemImage: "lock.shield") {
+            Tab("Permissions", systemImage: "lock.shield", value: .permissions) {
                 PermissionsSettingsView()
             }
-            Tab("Updates", systemImage: "arrow.down.circle") {
+            Tab("Updates", systemImage: "arrow.down.circle", value: .updates) {
                 UpdatesSettingsView()
             }
         }

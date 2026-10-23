@@ -26,7 +26,7 @@ struct UpdatesSettingsView: View {
                 status
             } footer: {
                 if !updates.canInstall {
-                    Text("This is a development build (make app). Updates install into apps from the release disk image; here they open the release page.")
+                    Text("This is a development build (make app). Release builds download updates in the background and install them on restart; here they open the release page.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -60,17 +60,9 @@ struct UpdatesSettingsView: View {
                 Label("Pankapture \(update.version.description) is available", systemImage: "arrow.down.circle.fill")
                     .font(.headline)
                     .foregroundStyle(Color.accentColor)
-                if !update.notes.isEmpty {
-                    ScrollView {
-                        Text(LocalizedStringKey(update.notes))
-                            .font(.callout)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
-                    .frame(maxHeight: 140)
-                }
+                notes(update)
                 HStack {
-                    Button(updates.canInstall ? "Install and Relaunch" : "Open Release Page") { updates.install(update) }
+                    Button(updates.canInstall ? "Download Update" : "Open Release Page") { updates.install(update) }
                         .buttonStyle(.borderedProminent)
                     Button("Release Notes") { NSWorkspace.shared.open(update.pageURL) }
                     Spacer()
@@ -84,14 +76,47 @@ struct UpdatesSettingsView: View {
             VStack(alignment: .leading, spacing: PK.Spacing.s) {
                 Text("Downloading Pankapture \(update.version.description)…")
                 ProgressView(value: progress)
+                Text("You can keep working. Pankapture asks before restarting.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-        case let .installing(update):
+        case let .preparing(update):
             HStack(spacing: PK.Spacing.s) {
                 ProgressView().controlSize(.small)
-                Text("Installing Pankapture \(update.version.description)…")
+                Text("Preparing Pankapture \(update.version.description)…")
             }
-        case let .waitingToQuit(update):
+        case let .ready(update):
+            VStack(alignment: .leading, spacing: PK.Spacing.s) {
+                Label("Pankapture \(update.version.description) is ready to install", systemImage: "checkmark.circle.fill")
+                    .font(.headline)
+                    .foregroundStyle(Color.accentColor)
+                notes(update)
+                HStack {
+                    Button("Restart Now") { updates.restart() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!updates.canRestartNow)
+                    Button("Release Notes") { NSWorkspace.shared.open(update.pageURL) }
+                }
+                Text(updates.canRestartNow
+                    ? "Or keep working: it installs the next time you quit Pankapture."
+                    : "Stop the recording to restart. It also installs the next time you quit Pankapture.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case let .restarting(update):
             Text("Pankapture \(update.version.description) installs when Pankapture quits.")
+        }
+    }
+
+    @ViewBuilder private func notes(_ update: AvailableUpdate) -> some View {
+        if !update.notes.isEmpty {
+            ScrollView {
+                Text(LocalizedStringKey(update.notes))
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .frame(maxHeight: 140)
         }
     }
 

@@ -165,6 +165,8 @@ struct MenuBarLabel: View {
                 Label(recorder.formattedElapsed, systemImage: recorder.state == .paused ? "pause.circle.fill" : "record.circle.fill")
                     .labelStyle(.titleAndIcon)
                     .monospacedDigit()
+            } else if case .ready = UpdateController.shared.state {
+                Image(nsImage: Self.badgedIcon)
             } else {
                 Image(systemName: "viewfinder")
             }
@@ -173,4 +175,27 @@ struct MenuBarLabel: View {
         // action to AppKit code (menu, reopen, second-instance hand-off).
         .onAppear { SettingsWindow.register(openSettings) }
     }
+
+    /// The menu bar icon with a dot in its top-right corner: an update is
+    /// ready to install. A template image, so it follows the menu bar's color.
+    private static let badgedIcon: NSImage = {
+        let configuration = NSImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+        guard let symbol = NSImage(systemSymbolName: "viewfinder", accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration) else { return NSImage() }
+        let size = symbol.size
+        let dot = NSRect(x: size.width - 6.5, y: size.height - 6.5, width: 6.5, height: 6.5)
+        let image = NSImage(size: size, flipped: false) { rect in
+            symbol.draw(in: rect)
+            // Clear a ring around the dot so it reads apart from the symbol.
+            NSGraphicsContext.current?.compositingOperation = .clear
+            NSBezierPath(ovalIn: dot.insetBy(dx: -1.5, dy: -1.5)).fill()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            NSColor.black.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Pankapture, update ready"
+        return image
+    }()
 }

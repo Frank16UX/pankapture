@@ -13,6 +13,8 @@ final class CaptureNotifier: NSObject {
         static let savedCategory = "capture.saved"
         static let copiedCategory = "capture.copied"
         static let recordingCategory = "recording.saved"
+        static let updateCategory = "update.ready"
+        static let restart = "update.restart"
         static let open = "capture.open"
         static let reveal = "capture.reveal"
         static let edit = "recording.edit"
@@ -35,10 +37,12 @@ final class CaptureNotifier: NSObject {
         let open = UNNotificationAction(identifier: ID.open, title: "Open", options: [.foreground])
         let reveal = UNNotificationAction(identifier: ID.reveal, title: "Show in Finder", options: [.foreground])
         let edit = UNNotificationAction(identifier: ID.edit, title: "Edit", options: [.foreground])
+        let restart = UNNotificationAction(identifier: ID.restart, title: "Restart", options: [])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: ID.savedCategory, actions: [open, reveal], intentIdentifiers: []),
             UNNotificationCategory(identifier: ID.recordingCategory, actions: [edit, reveal], intentIdentifiers: []),
             UNNotificationCategory(identifier: ID.copiedCategory, actions: [], intentIdentifiers: []),
+            UNNotificationCategory(identifier: ID.updateCategory, actions: [restart], intentIdentifiers: []),
         ])
     }
 
@@ -112,6 +116,20 @@ final class CaptureNotifier: NSObject {
         }
     }
 
+    /// Asks for a restart once a downloaded update is ready (UP-1). Not tied
+    /// to the capture-notification setting: it's about the app, not a capture.
+    func notifyUpdateReady(version: String) {
+        let content = UNMutableNotificationContent()
+        content.title = "Pankapture \(version) is ready"
+        content.body = "Restart Pankapture to finish updating."
+        content.categoryIdentifier = ID.updateCategory
+        let request = UNNotificationRequest(identifier: ID.updateCategory, content: content, trigger: nil)
+        Task {
+            guard await authorize() else { return }
+            try? await center.add(request)
+        }
+    }
+
     private func authorize() async -> Bool {
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {
@@ -148,6 +166,14 @@ extension CaptureNotifier: UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             didReceive response: UNNotificationResponse) async {
+        if response.notification.request.content.categoryIdentifier == ID.updateCategory {
+            let action = response.actionIdentifier
+            await MainActor.run {
+                // Restart installs right away; clicking the banner shows the details.
+                if action == ID.restart { UpdateController.shared.restart() } else { SettingsWindow.show(tab: .updates) }
+            }
+            return
+        }
         guard let path = response.notification.request.content.userInfo[ID.fileKey] as? String else { return }
         let url = URL(fileURLWithPath: path)
         let action = response.actionIdentifier
