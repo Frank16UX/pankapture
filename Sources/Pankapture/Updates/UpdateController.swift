@@ -4,8 +4,9 @@ import Observation
 import Security
 
 /// Checks GitHub Releases for a newer Pankapture and installs it (UP-1,
-/// ADR-28): download the DMG, verify the app inside is signed by the same
-/// identity as this one, swap the bundle after quitting, and relaunch.
+/// ADR-28): download the DMG in the background, verify the app inside is
+/// signed by the same identity as this one, and stage it next to the app.
+/// The swap happens when the user restarts, or on the next quit.
 @MainActor
 @Observable
 final class UpdateController {
@@ -17,9 +18,12 @@ final class UpdateController {
         case upToDate
         case available(AvailableUpdate)
         case downloading(AvailableUpdate, progress: Double)
-        case installing(AvailableUpdate)
-        /// Staged; installs as soon as the app quits (quitting was cancelled).
-        case waitingToQuit(AvailableUpdate)
+        /// Verifying the download and copying it next to the app.
+        case preparing(AvailableUpdate)
+        /// Staged: installs on restart, or the next time the app quits.
+        case ready(AvailableUpdate)
+        /// Restarting; if quitting was cancelled, installs whenever it quits.
+        case restarting(AvailableUpdate)
         case failed(String)
     }
 
@@ -35,18 +39,18 @@ final class UpdateController {
     @ObservationIgnored var isSafeToQuit: () -> Bool = { true }
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var task: Task<Void, Never>?
-
-    var availableUpdate: AvailableUpdate? {
-        if case let .available(update) = state { return update }
-        return nil
-    }
+    /// The verified copy of the new version, once `ready`.
+    @ObservationIgnored private var staged: URL?
 
     var isBusy: Bool {
         switch state {
-        case .checking, .downloading, .installing, .waitingToQuit: true
+        case .checking, .downloading, .preparing, .ready, .restarting: true
         default: false
         }
     }
+
+    /// Restarting now would interrupt work (a recording).
+    var canRestartNow: Bool { isSafeToQuit() }
 
     private init() {}
 
@@ -98,8 +102,12 @@ final class UpdateController {
                 UserDefaults.standard.set(lastCheck, forKey: PreferenceKey.updatesLastCheck)
                 let skipped = UserDefaults.standard.string(forKey: PreferenceKey.updatesSkippedVersion)
                 if let update, userInitiated || update.version.description != skipped {
-                    state = .available(update)
                     Log.updates.info("Update available: \(update.version.description, privacy: .public)")
+                    if canInstall, Self.canReplaceApp {
+                        prepare(update, userInitiated: userInitiated)
+                    } else {
+                        state = .available(update)
+                    }
                 } else {
                     state = .upToDate
                 }
@@ -118,37 +126,75 @@ final class UpdateController {
 
     // MARK: Installing
 
+    /// The app's folder is writable, so the new version can replace it in place.
+    private static var canReplaceApp: Bool {
+        FileManager.default.isWritableFile(atPath: Bundle.main.bundleURL.deletingLastPathComponent().path)
+    }
+
+    /// Downloads and stages `update` in the background, then waits for a
+    /// restart. A failed automatic attempt goes back to offering the update.
+    private func prepare(_ update: AvailableUpdate, userInitiated: Bool) {
+        state = .downloading(update, progress: 0)
+        task = Task {
+            do {
+                let dmg = try await download(update)
+                state = .preparing(update)
+                defer { try? FileManager.default.removeItem(at: dmg) }
+                staged = try await Self.stage(dmg: dmg, version: update.version)
+                state = .ready(update)
+                Log.updates.info("Update \(update.version.description, privacy: .public) is ready")
+                CaptureNotifier.shared.notifyUpdateReady(version: update.version.description)
+            } catch {
+                let message = (error as? InstallError)?.message ?? error.localizedDescription
+                Log.updates.error("Update failed: \(message, privacy: .public)")
+                state = userInitiated ? .failed("The update couldn't be downloaded: \(message)") : .available(update)
+            }
+        }
+    }
+
+    /// Acts on an offered update: release builds download it in the
+    /// background; development builds open the release page; an app in a
+    /// read-only folder gets the disk image to install by hand.
     func install(_ update: AvailableUpdate) {
         guard canInstall else {
             NSWorkspace.shared.open(update.pageURL)
             return
         }
-        guard isSafeToQuit() else {
-            state = .failed("Stop the recording first; installing restarts Pankapture.")
+        guard Self.canReplaceApp else {
+            state = .downloading(update, progress: 0)
+            task = Task {
+                do {
+                    NSWorkspace.shared.open(try await download(update))
+                    state = .available(update)
+                } catch {
+                    state = .failed("The update couldn't be downloaded: \(error.localizedDescription)")
+                }
+            }
             return
         }
-        state = .downloading(update, progress: 0)
-        task = Task {
-            do {
-                let dmg = try await download(update)
-                state = .installing(update)
-                let staged = try await Self.stage(dmg: dmg, version: update.version)
-                try? FileManager.default.removeItem(at: dmg)
-                try relaunch(installing: staged)
-                state = .waitingToQuit(update)
-                NSApp.terminate(nil)
-            } catch let error as InstallError {
-                if case let .notWritable(dmg) = error {
-                    // Can't replace the app in place: hand over the disk image.
-                    NSWorkspace.shared.open(dmg)
-                    state = .available(update)
-                } else {
-                    state = .failed(error.message)
-                }
-            } catch {
-                Log.updates.error("Update failed: \(error.localizedDescription, privacy: .public)")
-                state = .failed("The update couldn't be installed: \(error.localizedDescription)")
-            }
+        prepare(update, userInitiated: true)
+    }
+
+    /// Quits, swaps in the staged version, and relaunches it.
+    func restart() {
+        guard case let .ready(update) = state, let staged, canRestartNow else { return }
+        do {
+            try swap(installing: staged, relaunch: true)
+            state = .restarting(update)
+            NSApp.terminate(nil)
+        } catch {
+            Log.updates.error("Couldn't start the update: \(error.localizedDescription, privacy: .public)")
+            state = .failed("The update couldn't be installed: \(error.localizedDescription)")
+        }
+    }
+
+    /// Quitting with an update ready installs it without relaunching.
+    func installOnQuit() {
+        guard case .ready = state, let staged else { return }
+        do {
+            try swap(installing: staged, relaunch: false)
+        } catch {
+            Log.updates.error("Couldn't install the update on quit: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -234,11 +280,12 @@ final class UpdateController {
         }
     }
 
-    /// A small shell script waits for this process to exit, swaps the
-    /// bundles (renames only; nothing is deleted), and opens the new one,
-    /// which moves the old bundle to the Trash (`cleanUpAfterUpdate`). If
+    /// A small shell script waits for this process to exit and swaps the
+    /// bundles (renames only; nothing is deleted). With `relaunch` it opens
+    /// the new one, which moves the old bundle to the Trash
+    /// (`cleanUpAfterUpdate`); otherwise that happens on the next launch. If
     /// quitting is cancelled (unsaved edits), it runs whenever the app quits.
-    private func relaunch(installing staged: URL) throws {
+    private func swap(installing staged: URL, relaunch: Bool) throws {
         let destination = Bundle.main.bundleURL
         let old = destination.deletingLastPathComponent()
             .appendingPathComponent("\(Self.leftoverPrefix)old-\(UUID().uuidString).app")
@@ -247,14 +294,14 @@ final class UpdateController {
         if /bin/mv "$2" "$4"; then
           /bin/mv "$3" "$2" || /bin/mv "$4" "$2"
         fi
-        /usr/bin/open "$2"
+        [ "$5" = relaunch ] && /usr/bin/open "$2"
         """
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
         process.arguments = ["-c", script, "pankapture-update", String(ProcessInfo.processInfo.processIdentifier),
-                             destination.path, staged.path, old.path]
+                             destination.path, staged.path, old.path, relaunch ? "relaunch" : "stay"]
         try process.run()
-        Log.updates.info("Update staged; relaunching")
+        Log.updates.info("Update installs when Pankapture quits (relaunch: \(relaunch))")
     }
 
     @discardableResult

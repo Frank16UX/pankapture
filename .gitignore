@@ -23,3 +23,6 @@ DerivedData/
 
 # Agent worktrees
 .claude/worktrees/
+
+# Generated mockups and images
+/output/

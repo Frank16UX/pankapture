@@ -11,6 +11,8 @@ struct MenuBarContent: View {
     private let store = ShortcutStore()
 
     var body: some View {
+        updateItems
+
         Section("Screenshot") {
             actionButton(.captureArea, symbol: "rectangle.dashed")
             actionButton(.capturePreviousArea, symbol: "rectangle.dashed.badge.record")
@@ -107,15 +109,44 @@ struct MenuBarContent: View {
         }
         .keyboardShortcut(",")
 
-        if let update = UpdateController.shared.availableUpdate {
-            Button("Install Pankapture \(update.version.description) and Relaunch", systemImage: "arrow.down.circle") {
-                UpdateController.shared.install(update)
-            }
-        }
         Button("Quit Pankapture", systemImage: "power") {
             NSApp.terminate(nil)
         }
         .keyboardShortcut("q")
+    }
+
+    /// A downloaded update sits at the top of the menu until the restart.
+    @ViewBuilder private var updateItems: some View {
+        let updates = UpdateController.shared
+        switch updates.state {
+        case let .available(update):
+            Button("Update to Pankapture \(update.version.description)…", systemImage: "arrow.down.circle") {
+                updates.install(update)
+            }
+            Divider()
+        case let .downloading(update, progress):
+            Button("Downloading Pankapture \(update.version.description)… \(progress, format: .percent.precision(.fractionLength(0)))",
+                   systemImage: "arrow.down.circle") {
+                SettingsWindow.show(tab: .updates)
+            }
+            Divider()
+        case let .preparing(update):
+            Button("Preparing Pankapture \(update.version.description)…", systemImage: "arrow.down.circle") {
+                SettingsWindow.show(tab: .updates)
+            }
+            Divider()
+        case let .ready(update):
+            Button("Restart to Update to \(update.version.description)", systemImage: "arrow.clockwise.circle.fill") {
+                updates.restart()
+            }
+            .disabled(!updates.canRestartNow)
+            if !updates.canRestartNow {
+                Text("Stop the recording to restart.")
+            }
+            Divider()
+        default:
+            EmptyView()
+        }
     }
 
     private func actionButton(_ action: ShortcutAction, symbol: String, enabled: Bool = true) -> some View {

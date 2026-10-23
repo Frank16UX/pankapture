@@ -51,16 +51,28 @@ final class DockPresence {
 /// Opens the SwiftUI Settings scene from anywhere, including AppKit code.
 /// The action is captured from the always-present menu bar label.
 @MainActor
-enum SettingsWindow {
-    private static var openSettings: OpenSettingsAction?
-
-    static func register(_ action: OpenSettingsAction) {
-        openSettings = action
+@Observable
+final class SettingsWindow {
+    enum Tab: Hashable {
+        case general, screenshots, recording, shortcuts, history, permissions, updates
     }
 
-    static func show() {
+    static let shared = SettingsWindow()
+
+    /// The selected tab; `show(tab:)` switches it.
+    var tab: Tab = .general
+    @ObservationIgnored private var openSettings: OpenSettingsAction?
+
+    private init() {}
+
+    static func register(_ action: OpenSettingsAction) {
+        shared.openSettings = action
+    }
+
+    static func show(tab: Tab? = nil) {
+        if let tab { shared.tab = tab }
         DockPresence.shared.becomeRegular()
         NSApp.activate()
-        openSettings?()
+        shared.openSettings?()
     }
 }

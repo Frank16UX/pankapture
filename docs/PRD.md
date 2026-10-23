@@ -79,7 +79,7 @@ Priority: **Must** = v1 blocker · **Should** = v1 target · **Could** = if time
 | GL-7 | First-run onboarding: explain and request Screen Recording; optional permissions are requested only when a feature first needs them. | Should | M7 ✅ |
 | GL-8 | Output settings: save folder (default `~/Pictures/Pankapture`), file name pattern, image format (PNG/JPEG/HEIC), Retina-scale toggle (save at 1×), sounds on/off. | Must | M0 / M2 ✅ |
 | GL-9 | After-capture behavior is configurable: any combination of *copy to clipboard*, *save to folder*, *show quick-access thumbnail*, *open full editor*. | Must | M1–M2 ✅ |
-| UP-1 | **Software updates:** Settings ▸ Updates shows the version, checks GitHub Releases (automatically once a day, can be turned off, or Check Now), and installs a newer release in place (download, signature check, relaunch). Every merge to `main` publishes a release. | Must | M7 ✅ |
+| UP-1 | **Software updates:** Settings ▸ Updates shows the version, checks GitHub Releases (automatically once a day, can be turned off, or Check Now), and installs a newer release in place: it downloads and verifies it in the background, shows progress, then asks to restart (menu bar dot, menu item, notification), or installs on the next quit. Every merge to `main` publishes a release. | Must | M7 ✅ |
 
 ### 5.2 Screenshot capture
 
