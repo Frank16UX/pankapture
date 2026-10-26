@@ -9,7 +9,7 @@ import Speech
 /// shared with other apps.
 @available(macOS 26, *)
 public enum OnDeviceTranscriber {
-    public static let engineName = "SpeechTranscriber"
+    public static let engineName = Transcript.onDeviceEngine
 
     public enum Failure: LocalizedError {
         case languageUnavailable(TranscriptLanguage)

@@ -77,6 +77,44 @@ struct AutoEditViewTests {
         model.close()
     }
 
+    @Test func transcriptEditing() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let movie = try await TestMovie.make(TestMovie.Spec(duration: 10), in: directory)
+        let model = VideoEditorModel(url: movie, store: ProjectStore(directory: directory.appendingPathComponent("Edits")))
+        await model.load()
+        let words = ["Hello", "everyone.", "The", "numbers", "for", "April.", "Wait,", "sorry,", "I", "meant", "May."]
+            .enumerated().map { TranscriptWord(text: $1, start: Double($0) * 0.6 + 0.5, end: Double($0) * 0.6 + 0.9) }
+        model.edit { $0.transcript = Transcript(language: .english, localeIdentifier: "en-US", engine: Transcript.onDeviceEngine, words: words) }
+
+        #expect(model.wordIndex(atSource: 0.2) == nil)
+        #expect(model.wordIndex(atSource: 3.6) == 5)
+        #expect(model.wordStates().allSatisfy { $0 == .kept })
+
+        // Cutting "April. … meant" removes them; cutting again restores them.
+        model.cutWords(5...9)
+        #expect(model.project.cuts.count == 1)
+        #expect(model.wordStates()[5...9].allSatisfy { $0 == .cut })
+        #expect(model.wordStates()[10] == .kept)
+        model.cutWords(5...9)
+        #expect(model.project.cuts.isEmpty)
+
+        // Corrections keep the span and share it out by length.
+        model.correctWords(0...1, to: "Hi there, everybody.")
+        let corrected = try #require(model.transcript?.words)
+        #expect(corrected.prefix(3).map(\.text) == ["Hi", "there,", "everybody."])
+        #expect(corrected.count == words.count + 1)
+        #expect(corrected[0].start == words[0].start)
+        #expect(abs(corrected[2].end - words[1].end) < 1e-9)
+        model.undo()
+        #expect(model.transcript?.words == words)
+
+        model.transcriptSelection = 2...3
+        let panel = try render(TranscriptPanel(model: model), size: CGSize(width: 340, height: 420), appearance: .aqua, name: "transcript")
+        #expect(Self.distinctColors(panel) > 3)
+        model.close()
+    }
+
     private func render(_ view: some View, size: CGSize, appearance: NSAppearance.Name, name: String) throws -> NSBitmapImageRep {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         host.frame = CGRect(origin: .zero, size: size)

@@ -221,12 +221,12 @@ Everything runs on the Mac unless the user configured an AI provider (§5.12). E
 | AE-2 | **Pauses:** every pause of 0.3 s or more on the microphone track is detected and judged by **intent**:<br>• *hesitation* (mid-thought)<br>• *sentence break*<br>• *section break* (deliberate separation between parts)<br>• *emphasis* (deliberate dramatic pause)<br>• *screen action* (silent while the screen changes or the user clicks)<br>With a provider configured (§5.12), the model judges intent from the transcript and the screen activity; otherwise rules do. | Must | M8 ✅ |
 | AE-3 | **Pacing:** each pause is shortened to a target length for its kind, set by a pacing preset: **Tight / Natural / Relaxed** (default Natural). Deliberate breaks keep their breathing room, so the result doesn't run everything together. Pauses are never lengthened. Screen-action pauses are never cut; speeding them up (2× or 4×) is an option. | Must | M8 ✅ |
 | AE-4 | **Filler words:** "um", "uh", "er", "ah", "hmm" (English) and "eh", "em", "mmm", "este", "o sea", "pues" (Spanish). Ambiguous ones ("like", "you know", "bueno", "este" before a noun) count only when set apart by pauses, and are off by default. | Must | M8 ✅ |
-| AE-5 | **Repeats and stutters:** for repeated words and phrases ("let me, let me"), the last one is kept. Stutters the transcript merges into one word are found from the audio and offered as lower-confidence suggestions. | Should | M8 |
+| AE-5 | **Repeats and stutters:** for repeated words and phrases ("let me, let me"), the last one is kept. Stutters the transcript merges into one word are found from the audio and offered as lower-confidence suggestions. | Should | M8 ✅ |
 | AE-6 | **Mistakes and retakes:** for false starts, corrections ("April. Wait, sorry, I meant May") and sentences said twice, the last take is kept. Rules catch correction phrases and repeated sentence openings; a configured provider catches the rest. | Must | M8 ✅ |
 | AE-7 | **Review:** automatic edits sit on their own layer, struck through in the transcript and shown on a separate timeline lane, colored by kind. They can be toggled by kind (Pauses, Fillers, Repeats, Mistakes) or one at a time, and each says why it was suggested. Re-running the analysis replaces only automatic edits the user hasn't adjusted. | Must | M8 ✅ |
 | AE-8 | **Adjust any segment:** drag either edge of any cut or kept clip, automatic or manual, to extend or shorten it (timeline handles, plus nudge keys at the playhead). The user can restore a removed part or mark a pause "keep as is". An automatic edit the user adjusts becomes theirs and survives re-runs. | Must | M8 ✅ |
 | AE-9 | **Clean joins:** cut points snap to the quietest moment within ±80 ms, and every join gets a short audio fade (5–10 ms), so cuts don't click or clip words. | Must | M8 ✅ |
-| AE-10 | **Edit by transcript:** a transcript panel next to the preview. Click a word to jump there; select words and press ⌫ to cut them; add a zoom over the selection. | Must | M8 |
+| AE-10 | **Edit by transcript:** a transcript panel next to the preview. Click a word to jump there; select words and press ⌫ to cut them; add a zoom over the selection. | Must | M8 ✅ |
 
 **Captions**
 
@@ -269,7 +269,7 @@ Everything else works without one.
 | AI-2 | **Any provider, not one vendor:** presets for Anthropic, OpenAI, Google Gemini, Groq, OpenRouter, LM Studio and Ollama, plus any OpenAI-compatible endpoint (base URL + model). The model name is always editable. | Must | M8 ✅ |
 | AI-3 | API keys live in the **Keychain** only, never in settings files, projects or logs. Settings ▸ AI has **Test connection**. | Must | M8 ✅ |
 | AI-4 | For auto-edit, only **transcript text and pause timings** are sent, never audio or video, and only when the user starts the action. The button says what will be sent. | Must | M8 ✅ |
-| AI-5 | **Cloud transcription (optional):** send the microphone audio to a configured speech-to-text provider (e.g. ElevenLabs Scribe, AssemblyAI) for a verbatim transcript that keeps fillers and stutters. Off by default, and marked as sending audio. | Should | M8 |
+| AI-5 | **Cloud transcription (optional):** send the microphone audio to a configured speech-to-text provider (e.g. ElevenLabs Scribe, AssemblyAI) for a verbatim transcript that keeps fillers and stutters. Off by default, and marked as sending audio. | Should | M8 ✅ |
 | AI-6 | Model answers are **checked** before they become suggestions: schema, word ranges, and a cap on how much may be removed. If any check fails, the rules' suggestions stand and a notice says why. | Must | M8 ✅ |
 | AI-7 | **Evaluation harness:** `make eval` scores providers and prompts against the maintainer's labeled sample recordings (§11). It's a developer tool, not part of the app. | Must | M8 ✅ |
 
@@ -545,6 +545,7 @@ make eval EVAL_DIR=~/PankaptureEval \
 - Keys come from `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY` and `OPENROUTER_API_KEY`.
 - `SPLIT=all` scores both splits.
 - `ONLY=en-01` runs only the samples whose folder name contains `en-01`.
+- `TRANSCRIBER=elevenLabs` (or `openAI`, `groq`) transcribes in the cloud instead of on device, to measure whether a verbatim transcript catches more fillers and stutters. It sends the recordings' audio; the key comes from `ELEVENLABS_API_KEY`, `OPENAI_API_KEY` or `GROQ_API_KEY`. Each engine's transcripts are cached separately.
 - If LM Studio or Ollama isn't answering, that provider is skipped with a note instead of failing every sample.
 
 For each sample, the harness:

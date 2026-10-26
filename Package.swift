@@ -15,7 +15,7 @@ let package = Package(
         // App shell: lifecycle, menu bar, settings, coordinators. Thin by design.
         .executableTarget(
             name: "Pankapture",
-            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem", "Overlay", "Library", "QuickAccess", "Recording", "VideoEditor", "AIProviders"]
+            dependencies: ["AppCore", "Capture", "Annotation", "DesignSystem", "Overlay", "Library", "QuickAccess", "Recording", "VideoEditor", "AIProviders", "AutoEdit", "Transcription"]
         ),
 
         // Settings, hot keys, permissions, file naming, logging. No UI.

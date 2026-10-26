@@ -69,8 +69,10 @@ struct Sample: Sendable {
         var transcript: Transcript
     }
 
-    private var cacheURL: URL {
-        directory.appendingPathComponent(".cache/transcript-\(language.rawValue).json")
+    /// One cache per transcription engine ("" = on device).
+    private func cacheURL(engine: String) -> URL {
+        let suffix = engine.isEmpty ? "" : "-\(engine)"
+        return directory.appendingPathComponent(".cache/transcript-\(language.rawValue)\(suffix).json")
     }
 
     /// Size and modification date: a re-exported recording invalidates the cache.
@@ -81,14 +83,15 @@ struct Sample: Sendable {
         return "\(values?.fileSize ?? 0)-\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)"
     }
 
-    func cachedTranscript() -> Transcript? {
-        guard let data = try? Data(contentsOf: cacheURL),
+    func cachedTranscript(engine: String = "") -> Transcript? {
+        guard let data = try? Data(contentsOf: cacheURL(engine: engine)),
               let cached = try? JSONDecoder().decode(CachedTranscript.self, from: data),
               cached.fingerprint == fingerprint else { return nil }
         return cached.transcript
     }
 
-    func saveTranscript(_ transcript: Transcript) throws {
+    func saveTranscript(_ transcript: Transcript, engine: String = "") throws {
+        let cacheURL = cacheURL(engine: engine)
         try FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

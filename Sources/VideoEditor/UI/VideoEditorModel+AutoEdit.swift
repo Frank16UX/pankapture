@@ -25,14 +25,18 @@ extension VideoEditorModel {
 
     // MARK: Analysis
 
-    func runAutoEdit() {
+    /// Analyzes the recording. Reuses the project's transcript (with the
+    /// user's corrections) or the cached one unless `retranscribe` is set.
+    func runAutoEdit(retranscribe: Bool = false) {
         guard #available(macOS 26, *) else { return }
         guard media != nil, !isAutoEditRunning else { return }
         let url = sourceURL
         let language = autoEditLanguage
         UserDefaults.standard.set(language.rawValue, forKey: PreferenceKey.autoEditLanguage)
         let provider = ProviderSettings.active()
-        let cached = TranscriptStore.load(for: url, language: language)
+        let cloud = CloudTranscriptionSettings.active()
+        let corrected = project.transcript?.language == language ? project.transcript : nil
+        let cached = retranscribe ? nil : (corrected ?? TranscriptStore.load(for: url, language: language))
         autoEditGeneration += 1
         let generation = autoEditGeneration
         autoEditNotice = nil
@@ -40,7 +44,7 @@ extension VideoEditorModel {
 
         // Detached: reading and analyzing audio blocks its thread.
         let work = Task.detached(priority: .userInitiated) { [weak self] () async throws -> AutoEditResult in
-            let prepared = try await AutoEditAnalyzer.prepare(recordingAt: url, language: language, transcript: cached) { progress in
+            let prepared = try await AutoEditAnalyzer.prepare(recordingAt: url, language: language, transcript: cached, cloud: cloud) { progress in
                 Task { @MainActor in self?.showAutoEditProgress(progress, language: language, generation: generation) }
             }
             if cached == nil {
@@ -76,7 +80,9 @@ extension VideoEditorModel {
                 self.edit {
                     $0.autoEdit = AutoEditLayer(analysis: result.analysis, envelope: result.envelope, language: language,
                                                 judgedBy: result.judgedBy, keeping: $0.autoEdit)
+                    $0.transcript = result.analysis.transcript
                 }
+                self.transcriptSelection = nil
                 self.autoEditNotice = result.notice
                 self.autoEditState = .idle
                 let count = result.analysis.suggestions.count
@@ -106,7 +112,7 @@ extension VideoEditorModel {
         let stage = switch progress.stage {
         case .readingAudio: "Reading the microphone…"
         case .downloadingSpeechModel: "Downloading the \(language.englishName) speech model…"
-        case .transcribing: "Transcribing on this Mac…"
+        case .transcribing: CloudTranscriptionSettings.active().map { "Transcribing with \($0.service.name)…" } ?? "Transcribing on this Mac…"
         case .analyzing: "Finding pauses and mistakes…"
         case .askingModel: "Asking the AI provider…"
         }

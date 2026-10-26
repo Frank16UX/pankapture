@@ -117,6 +117,15 @@ Answers are checked: schema, word ranges, overlaps, and a cap of 35% removed. An
 - **Re-running the analysis** replaces only items the user hasn't changed.
 - **Rebuilds:** the editor decides whether to rebuild the preview by comparing `Timeline`s, since the layer's derived cuts and speeds aren't stored.
 
+**ADR-35: The transcript is part of the project; the panel is a read-only text view.**
+- **Where it lives:** the working transcript (recognized words plus the user's corrections, CAP-2) is stored in `VideoEditProject.transcript`. Corrections therefore follow Save, drafts and undo (ADR-24). Arrays are copy-on-write, so undo snapshots share the words.
+- **Re-runs:** auto-edit reuses the project's transcript, so a re-run keeps corrections. "Transcribe again" ignores it.
+- **Corrections:** a corrected phrase keeps its time span. Each new word gets a share of the span in proportion to its length, so captions stay in sync.
+- **The panel:** an `NSTextView` with TextKit 1, not a SwiftUI flow of thousands of views. Selection and hit-testing come for free; word ranges map characters to words; the playing word is a temporary attribute, so playback never rebuilds the text.
+- **Keys:** the editor's key monitor treats the read-only text view as not editing text, so space, ⌫ and undo keep working; ⌫ on selected words cuts them, or restores them if they're already removed.
+- **Cloud transcription (AI-5):** `CloudTranscriber` compresses the microphone track to 16 kHz AAC and posts it to ElevenLabs (`scribe_v2`, verbatim by default) or an OpenAI-compatible Whisper endpoint. Whisper's word list lacks punctuation, so punctuation is aligned back from its full text.
+- **Stutters from audio (AE-5):** short words the recognizer stretched far beyond the speaker's pace, with a silence inside, are offered (switched off) as possible merged repeats.
+
 **ADR-33: Prompts and the default provider are chosen by an offline evaluation.** `pankapture-eval` (`make eval`) is a separate executable target, not part of the app bundle. It runs the app's analysis and prompt over labeled recordings kept outside the repo (PRD §11), caching each sample's transcript. It scores mistakes (by overlap, ±0.3 s), content lost, false positives on controls, and pause intent against a pass bar. The report carries a fingerprint of the prompt and schema, so runs can be compared.
 
 ## 3. Module map

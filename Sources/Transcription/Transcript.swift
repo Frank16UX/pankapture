@@ -89,6 +89,8 @@ public struct TranscriptWord: Codable, Hashable, Sendable {
 /// for auto-edit and captions.
 public struct Transcript: Codable, Hashable, Sendable {
     public static let currentVersion = 1
+    /// `engine` of transcripts made on this Mac (`OnDeviceTranscriber`).
+    public static let onDeviceEngine = "SpeechTranscriber"
 
     public var version: Int
     public var language: TranscriptLanguage

@@ -242,7 +242,8 @@ public enum ModelPass {
             pause.kindSource = .model
             return pause
         }
-        let kept = input.ruleSuggestions.filter { !$0.kind.isMistake || $0.confidence >= keptRuleConfidence }
+        // Stutters stay too: the model never hears the audio they come from.
+        let kept = input.ruleSuggestions.filter { !$0.kind.isMistake || $0.kind == .stutter || $0.confidence >= keptRuleConfidence }
         let suggestions = RuleBasedEditor.resolveOverlaps(interpretation.suggestions + kept)
         return AutoEditAnalysis(transcript: input.transcript, pauses: pauses, suggestions: suggestions, modelReport: report)
     }

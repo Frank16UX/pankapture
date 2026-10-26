@@ -155,8 +155,10 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
     private func installKeyMonitor(window: NSWindow, model: VideoEditorModel) -> Any? {
         // Local monitors run on the main thread, inside the app's event loop.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak window, weak model] event in
+            // Text being edited keeps its keys; the read-only transcript doesn't.
+            let isEditingText = (window?.firstResponder as? NSTextView)?.isEditable ?? (window?.firstResponder is NSText)
             guard let window, let model, event.window === window, window.attachedSheet == nil,
-                  !(window.firstResponder is NSText) else { return event }
+                  !isEditingText else { return event }
             return Self.handle(event, model: model, window: window) ? nil : event
         }
     }

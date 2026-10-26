@@ -28,6 +28,8 @@ struct Options {
     var split: String
     /// Only samples whose name contains this.
     var only: String?
+    /// A cloud speech-to-text service instead of the on-device one (PRD AI-5).
+    var transcriber: (service: CloudTranscriptionService, apiKey: String)?
 
     struct UsageError: LocalizedError {
         var message: String
@@ -44,6 +46,8 @@ struct Options {
       --runs       Model calls per sample (default 3; answers vary between runs)
       --split      dev (default), test, or all
       --only       Only samples whose folder name contains this
+      --transcriber  elevenLabs, openAI, or groq: transcribe in the cloud instead of on device
+                   (sends the recordings' audio; key from ELEVENLABS_API_KEY, OPENAI_API_KEY, or GROQ_API_KEY)
     """
 
     /// `nil` when only help was asked for.
@@ -70,7 +74,17 @@ struct Options {
         let split = values["split"] ?? "dev"
         guard ["dev", "test", "all"].contains(split) else { throw UsageError(message: "--split must be dev, test, or all.") }
         let only = values["only"].flatMap { $0.isEmpty ? nil : $0 }
-        return Options(directory: directory, providers: providers, runs: runs, split: split, only: only)
+        var transcriber: (service: CloudTranscriptionService, apiKey: String)?
+        if let name = values["transcriber"], !name.isEmpty {
+            guard let service = CloudTranscriptionService.allCases.first(where: { $0.rawValue.lowercased() == name.lowercased() }) else {
+                throw UsageError(message: "--transcriber must be elevenLabs, openAI, or groq.")
+            }
+            guard let key = environment[service.keyEnvironmentVariable], !key.isEmpty else {
+                throw UsageError(message: "\(service.name) needs a key: export \(service.keyEnvironmentVariable) first.")
+            }
+            transcriber = (service, key)
+        }
+        return Options(directory: directory, providers: providers, runs: runs, split: split, only: only, transcriber: transcriber)
     }
 }
 
@@ -90,11 +104,15 @@ struct Evaluation {
 
         // Transcribe and analyze each sample once; providers reuse the result.
         var inputs: [String: AutoEditInput] = [:]
+        let engine = options.transcriber?.service.rawValue ?? ""
         for sample in samples {
-            let cached = sample.cachedTranscript()
-            print("• \(sample.name): \(cached == nil ? "transcribing on device…" : "analyzing (cached transcript)…")")
-            let prepared = try await AutoEditAnalyzer.prepare(recordingAt: sample.recording, language: sample.language, transcript: cached)
-            if cached == nil { try sample.saveTranscript(prepared.input.transcript) }
+            let cached = sample.cachedTranscript(engine: engine)
+            let how = options.transcriber.map { "transcribing with \($0.service.name)…" } ?? "transcribing on device…"
+            print("• \(sample.name): \(cached == nil ? how : "analyzing (cached transcript)…")")
+            let prepared = try await AutoEditAnalyzer.prepare(
+                recordingAt: sample.recording, language: sample.language, transcript: cached, cloud: options.transcriber
+            )
+            if cached == nil { try sample.saveTranscript(prepared.input.transcript, engine: engine) }
             inputs[sample.name] = prepared.input
             let judged = ModelPass.judgedPauses(prepared.input).count
             print("  \(prepared.input.transcript.words.count) words, \(prepared.input.pauses.count) pauses (\(judged) judged by models), \(prepared.input.ruleSuggestions.count) rule suggestions")

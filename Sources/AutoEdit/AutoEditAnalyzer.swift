@@ -37,11 +37,14 @@ public enum AutoEditAnalyzer {
     ///   - transcript: an earlier transcript (cached, or corrected by the
     ///     user); skips transcription.
     ///   - clicks: click times in source seconds; defaults to the recording's sidecar.
+    ///   - cloud: a speech-to-text service to use instead of the on-device
+    ///     one (PRD AI-5; it receives the microphone audio).
     public static func prepare(
         recordingAt url: URL,
         language: TranscriptLanguage,
         transcript cached: Transcript? = nil,
         clicks: [Double]? = nil,
+        cloud: (service: CloudTranscriptionService, apiKey: String)? = nil,
         progress: @escaping @Sendable (Progress) -> Void = { _ in }
     ) async throws -> Prepared {
         let signpostID = Log.signposter.makeSignpostID()
@@ -57,6 +60,11 @@ public enum AutoEditAnalyzer {
         let transcript: Transcript
         if let cached, cached.language == language {
             transcript = cached
+        } else if let cloud {
+            progress(Progress(stage: .transcribing, fraction: 0))
+            transcript = try await CloudTranscriber.transcribe(
+                audioFileAt: audio.url, language: language, service: cloud.service, apiKey: cloud.apiKey, timeOffset: audio.startTime
+            )
         } else {
             guard let locale = await OnDeviceTranscriber.locale(for: language) else {
                 throw OnDeviceTranscriber.Failure.languageUnavailable(language)
@@ -80,7 +88,7 @@ public enum AutoEditAnalyzer {
         var pauses = detection.pauses
         for index in pauses.indices { pauses[index].activity = activity[index] }
         pauses = RuleBasedEditor.classify(pauses, transcript: transcript)
-        let suggestions = RuleBasedEditor.suggestions(for: transcript, voicedGaps: detection.voicedGaps)
+        let suggestions = RuleBasedEditor.suggestions(for: transcript, voicedGaps: detection.voicedGaps, envelope: audio.envelope)
         progress(Progress(stage: .analyzing, fraction: 1))
 
         let input = AutoEditInput(

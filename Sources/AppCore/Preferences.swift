@@ -229,4 +229,7 @@ public extension PreferenceKey {
     static let autoEditPacing = "autoEdit.pacing"
     /// Last language analyzed: "en" or "es". Missing = the system language.
     static let autoEditLanguage = "autoEdit.language"
+    /// Cloud transcription service (PRD AI-5): "elevenLabs", "openAI", or
+    /// "groq". Missing = on-device transcription only (the default).
+    static let cloudTranscriptionService = "ai.cloudTranscriptionService"
 }

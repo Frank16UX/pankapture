@@ -1,7 +1,9 @@
 import AIProviders
 import AppCore
+import AutoEdit
 import DesignSystem
 import SwiftUI
+import Transcription
 
 /// Settings ▸ AI (PRD §5.12): an optional provider for auto-edit's judgments,
 /// with the user's own key or a model on this Mac. Off by default (AI-1).
@@ -15,6 +17,9 @@ struct AISettingsView: View {
     @State private var keyInput = ""
     @State private var hasStoredKey = false
     @State private var test: TestState = .idle
+    @State private var cloudService = CloudTranscriptionSettings.service
+    @State private var cloudKeyInput = ""
+    @State private var hasCloudKey = false
 
     private enum TestState: Equatable {
         case idle
@@ -74,6 +79,35 @@ struct AISettingsView: View {
             .onChange(of: effort) { _, _ in persist() }
 
             Section {
+                Picker("Service", selection: $cloudService) {
+                    Text("Off: transcribe on this Mac").tag(CloudTranscriptionService?.none)
+                    ForEach(CloudTranscriptionService.allCases) { Text($0.name).tag(Optional($0)) }
+                }
+                .onChange(of: cloudService) { _, service in
+                    CloudTranscriptionSettings.service = service
+                    cloudKeyInput = ""
+                    hasCloudKey = service.map { APIKeyStore.key(for: $0.keyAccount) != nil } ?? false
+                }
+                if let service = cloudService {
+                    HStack {
+                        SecureField(hasCloudKey ? "Saved in your Keychain" : "\(service.name) API key", text: $cloudKeyInput)
+                        Button(hasCloudKey && cloudKeyInput.isEmpty ? "Remove" : "Save") {
+                            try? APIKeyStore.setKey(cloudKeyInput, for: service.keyAccount)
+                            cloudKeyInput = ""
+                            hasCloudKey = APIKeyStore.key(for: service.keyAccount) != nil
+                        }
+                        .disabled(cloudKeyInput.isEmpty && !hasCloudKey)
+                    }
+                }
+            } header: {
+                Text("Cloud Transcription")
+            } footer: {
+                Text(cloudNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 HStack {
                     testStatus
                     Spacer()
@@ -89,8 +123,19 @@ struct AISettingsView: View {
         .formStyle(.grouped)
         .onAppear {
             hasStoredKey = APIKeyStore.key(for: presetID) != nil
+            hasCloudKey = cloudService.map { APIKeyStore.key(for: $0.keyAccount) != nil } ?? false
             persist()
         }
+    }
+
+    private var cloudNote: String {
+        guard let service = cloudService else {
+            return "Transcription runs on this Mac and nothing is sent. A cloud service can catch filler words and stutters the on-device one drops; it receives the recording's microphone audio."
+        }
+        let fillers = service.isVerbatim
+            ? "It keeps filler words and stutters, so auto-edit finds more of them."
+            : "It's inexpensive but drops most filler words."
+        return "When you analyze a recording, its microphone audio is sent to \(service.name). \(fillers) The key is stored in your Keychain."
     }
 
     private var effortOptions: [String] {

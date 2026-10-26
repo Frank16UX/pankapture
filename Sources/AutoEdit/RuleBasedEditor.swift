@@ -13,10 +13,12 @@ public enum RuleBasedEditor {
     /// Everything the rules suggest removing, overlaps resolved.
     public static func suggestions(
         for transcript: Transcript,
-        voicedGaps: [(range: TimeRange, afterWord: Int)] = []
+        voicedGaps: [(range: TimeRange, afterWord: Int)] = [],
+        envelope: LoudnessEnvelope? = nil
     ) -> [Suggestion] {
         let context = Context(transcript)
         var all = fillers(context) + repeats(context) + retakes(context)
+        if let envelope { all += stretchedWords(context, envelope: envelope) }
         all += voicedGaps.map { gap in
             Suggestion(kind: .filler, range: gap.range, words: nil, confidence: 0.4,
                        reason: "Sound between words with no words on it (a dropped filler?)", source: .rules)
@@ -110,6 +112,35 @@ public enum RuleBasedEditor {
                                            reason: "“\(c.bare[index])” said twice", throughNext: true))
             }
             index += 1
+        }
+        return result
+    }
+
+    /// Stutters the recognizer merged into one word (AE-5): "the the" comes
+    /// back as one "the" stretched over both, "vamos a, vamos a" as one long
+    /// "vamos". Flags short words that run far longer than the speaker's
+    /// usual pace *and* have a break inside, keeping the last burst. Only a
+    /// suggestion, off by default: the audio can't say what was repeated.
+    static func stretchedWords(_ c: Context, envelope: LoudnessEnvelope) -> [Suggestion] {
+        let durations = c.words.compactMap { word -> Double? in
+            let letters = word.bare.count
+            return letters > 0 ? (word.end - word.start) / Double(letters) : nil
+        }.sorted()
+        guard durations.count >= 10 else { return [] }
+        let perLetter = durations[durations.count / 2]
+        let thresholds = envelope.thresholds()
+        var result: [Suggestion] = []
+        for (index, word) in c.words.enumerated() where (1...6).contains(word.bare.count) {
+            let duration = word.end - word.start
+            guard duration >= max(0.7, 2.5 * perLetter * Double(word.bare.count)) else { continue }
+            // Breaks inside the word, away from its edges.
+            let breaks = envelope.silentRuns(in: word.range, minimum: 0.08, thresholds: thresholds)
+                .filter { $0.start - word.start > 0.08 && word.end - $0.end > 0.08 }
+            guard let last = breaks.last else { continue }
+            result.append(Suggestion(
+                kind: .stutter, range: TimeRange(start: word.start, end: last.end), words: index...index, confidence: 0.4,
+                reason: "“\(word.bare)” runs long with a break inside: a repeat the transcript merged?", source: .rules
+            ))
         }
         return result
     }

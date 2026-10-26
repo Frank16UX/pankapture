@@ -124,10 +124,10 @@ Auto-edit, captions, voice cleanup, and camera backgrounds (PRD §5.11–5.12), 
    - [x] Automatic-edit layer, review by kind and one at a time (AE-7)
    - [x] Pacing presets (AE-3); adjustable segments (AE-8); clean joins (AE-9)
    - [x] Settings ▸ AI: presets, Keychain keys, Test connection (AI-1, AI-3, AI-4)
-3. **Transcript**
-   - [ ] Transcript panel: seek, select to cut, zoom from selection (AE-10)
-   - [ ] Stutters found from the audio (AE-5)
-   - [ ] Optional cloud transcription (AI-5)
+3. **Transcript** ✅ (ADR-35) (needs QA: selecting and correcting words with a real mouse; a cloud transcription run with a real key)
+   - [x] Transcript panel: seek, select to cut, zoom from selection (AE-10)
+   - [x] Stutters found from the audio (AE-5)
+   - [x] Optional cloud transcription (AI-5)
 4. **Captions**
    - [ ] Cues, corrections, burned-in styles (CAP-1–CAP-3); .srt / .vtt (CAP-4)
 5. **Audio**

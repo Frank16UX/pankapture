@@ -2,6 +2,7 @@ import AppCore
 import AutoEdit
 import CoreGraphics
 import Foundation
+import Transcription
 
 /// A zoom & pan segment (VE-4). Times are **source** seconds so edits to cuts
 /// or trim never shift a zoom off the content it was made for.
@@ -134,6 +135,9 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
     /// Auto-edit's suggestions (PRD §5.11), on their own layer: the
     /// timeline removes what's enabled there on top of `cuts`.
     public var autoEdit: AutoEditLayer?
+    /// The recording's transcript with the user's corrections (PRD CAP-2),
+    /// saved with the edits so corrections follow Save and undo.
+    public var transcript: Transcript?
 
     public init(
         sourceURL: URL,
@@ -147,7 +151,8 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         zoomFillsFrame: Bool = false,
         splits: [Double] = [],
         camera: CameraOverlay? = nil,
-        autoEdit: AutoEditLayer? = nil
+        autoEdit: AutoEditLayer? = nil,
+        transcript: Transcript? = nil
     ) {
         self.version = Self.currentVersion
         self.sourceURL = sourceURL
@@ -162,11 +167,12 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         self.splits = splits
         self.camera = camera
         self.autoEdit = autoEdit
+        self.transcript = transcript
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, sourceURL, sourceDuration, trim, cuts, zooms, speedSegments, background, trackVolumes
-        case zoomFillsFrame, splits, camera, autoEdit
+        case zoomFillsFrame, splits, camera, autoEdit, transcript
     }
 
     /// Keys added after version 1 are optional, so older saved projects open.
@@ -185,6 +191,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         splits = try container.decodeIfPresent([Double].self, forKey: .splits) ?? []
         camera = try container.decodeIfPresent(CameraOverlay.self, forKey: .camera)
         autoEdit = try container.decodeIfPresent(AutoEditLayer.self, forKey: .autoEdit)
+        transcript = try container.decodeIfPresent(Transcript.self, forKey: .transcript)
     }
 
     /// The user's cuts plus auto-edit's enabled ones: what the timeline

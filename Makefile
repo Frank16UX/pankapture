@@ -13,6 +13,7 @@ PROVIDERS ?=
 RUNS ?= 3
 SPLIT ?= dev
 ONLY ?=
+TRANSCRIBER ?=
 
 .PHONY: help build test eval app debug-app run dmg release ci-secrets cert icon logs clean
 
@@ -27,7 +28,7 @@ test: ## Run unit tests
 
 eval: ## Score auto-edit on labeled recordings: make eval PROVIDERS="lmstudio:qwen3.5-9b openai:gpt-6-luna@low"
 	swift build -c release --product pankapture-eval
-	"$$(swift build -c release --show-bin-path)/pankapture-eval" --dir "$(EVAL_DIR)" --providers "$(PROVIDERS)" --runs $(RUNS) --split $(SPLIT) --only "$(ONLY)"
+	"$$(swift build -c release --show-bin-path)/pankapture-eval" --dir "$(EVAL_DIR)" --providers "$(PROVIDERS)" --runs $(RUNS) --split $(SPLIT) --only "$(ONLY)" --transcriber "$(TRANSCRIBER)"
 
 app: ## Build release .app into build/
 	bash scripts/bundle.sh

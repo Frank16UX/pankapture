@@ -81,6 +81,8 @@ final class VideoEditorModel {
     var autoEditLanguage: TranscriptLanguage
     /// The auto-edit pause or removal selected on the timeline or in the review list.
     var selectedAutoItem: AutoEditItem?
+    /// Words selected in the transcript panel (PRD AE-10).
+    var transcriptSelection: ClosedRange<Int>?
     @ObservationIgnored var autoEditTask: Task<Void, Never>?
     /// Each analysis run gets a generation; a cancelled run that is still
     /// winding down must not touch the state of a newer one.
@@ -405,7 +407,9 @@ final class VideoEditorModel {
     /// Deletes whatever is selected (zoom, cut, or the selection as a cut).
     /// For an auto-edit item, ⌫ restores what it removed (AE-8).
     func deleteSelected() {
-        if let item = selectedAutoItem {
+        if let words = transcriptSelection {
+            cutWords(words)
+        } else if let item = selectedAutoItem {
             restoreAutoItem(item)
         } else if selectedZoomID != nil {
             removeSelectedZoom()

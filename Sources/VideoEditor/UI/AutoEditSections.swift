@@ -46,8 +46,12 @@ struct AutoEditSection: View {
                     }
                 }
             case .idle, .failed:
-                Button(layer == nil ? "Analyze Recording" : "Analyze Again", systemImage: "wand.and.sparkles", action: model.runAutoEdit)
-                    .help("Transcribe the microphone on this Mac and suggest what to remove")
+                Button(layer == nil ? "Analyze Recording" : "Analyze Again", systemImage: "wand.and.sparkles") { model.runAutoEdit() }
+                    .help("Transcribe the microphone and suggest what to remove. Keeps your transcript corrections.")
+                if model.transcript != nil {
+                    Button("Transcribe Again", systemImage: "arrow.clockwise") { model.runAutoEdit(retranscribe: true) }
+                        .help("Transcribe from scratch (for example with a different transcription service). Discards transcript corrections.")
+                }
             }
 
             if case let .failed(message) = model.autoEditState {
@@ -110,6 +114,18 @@ struct AutoEditSection: View {
     }
 
     @ViewBuilder private var providerNote: some View {
+        if let cloud = CloudTranscriptionSettings.active() {
+            Label {
+                VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
+                    Text("Transcribed by \(cloud.service.name)")
+                    Text("Sends the microphone audio when you analyze. Change it in Settings ▸ AI.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: "waveform.badge.mic").foregroundStyle(.orange)
+            }
+        }
         if let provider = model.autoEditProvider {
             Label {
                 VStack(alignment: .leading, spacing: PK.Spacing.xxs) {

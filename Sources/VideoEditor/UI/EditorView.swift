@@ -6,6 +6,13 @@ import SwiftUI
 struct EditorView: View {
     @Bindable var model: VideoEditorModel
 
+    private enum TrailingPanel: String, CaseIterable {
+        case inspector = "Inspector"
+        case transcript = "Transcript"
+    }
+
+    @State private var trailing = TrailingPanel.inspector
+
     var body: some View {
         HStack(spacing: 0) {
             VStack(spacing: PK.Spacing.m) {
@@ -19,8 +26,22 @@ struct EditorView: View {
 
             Divider()
 
-            InspectorView(model: model)
-                .frame(width: 300)
+            VStack(spacing: 0) {
+                if model.isAutoEditAvailable {
+                    Picker("Panel", selection: $trailing) {
+                        ForEach(TrailingPanel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .padding(PK.Spacing.s)
+                    Divider()
+                }
+                switch trailing {
+                case .inspector: InspectorView(model: model)
+                case .transcript: TranscriptPanel(model: model)
+                }
+            }
+            .frame(width: trailing == .transcript ? 340 : 300)
         }
         .frame(minWidth: 900, minHeight: 600)
         .navigationTitle(model.sourceURL.deletingPathExtension().lastPathComponent)
