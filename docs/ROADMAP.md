@@ -132,9 +132,9 @@ Auto-edit, captions, voice cleanup, and camera backgrounds (PRD §5.11–5.12), 
    - [x] Cues, corrections, burned-in styles (CAP-1–CAP-3); .srt / .vtt (CAP-4)
 5. **Audio** ✅ (ADR-37) (needs QA: the presets by ear on a noisy real recording; a 15 min recording's processing time)
    - [x] Noise removal presets and normalization (AU-1–AU-3)
-6. **Camera**
-   - [ ] Blur, replace, remove; green screen (CAM-1, CAM-2)
-   - [ ] Default background; Video Effects button (CAM-3, CAM-4)
+6. **Camera** ✅ (ADR-38) (needs QA: a real person on camera in the preview and an export; edge flicker; preview speed on the M1)
+   - [x] Blur, replace, remove; green screen (CAM-1, CAM-2)
+   - [x] Default background; Video Effects button (CAM-3, CAM-4)
 7. **Decide**
    - [ ] Pick the default provider from the test split (PRD §11.7); record it as an ADR
 

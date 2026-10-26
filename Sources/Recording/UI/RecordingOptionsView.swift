@@ -1,5 +1,6 @@
 import AppCore
 import AppKit
+import AVFoundation
 import DesignSystem
 import SwiftUI
 
@@ -264,6 +265,14 @@ private struct CameraSection: View {
                     Text(model.options.cameraAsLayer
                          ? "Move, resize, or hide the camera in the editor. The saved video takes a moment after you stop while the camera is added."
                          : "The camera is recorded as you see it, in one video file that's saved as soon as you stop. It can't be moved later.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    LabeledContent("Effects") {
+                        Button("Video Effects…") { AVCaptureDevice.showSystemUserInterface(.videoEffects) }
+                    }
+                    Text(model.options.cameraAsLayer
+                         ? "macOS effects, like portrait blur, are recorded into the camera and can't be undone. A background set in the editor can."
+                         : "macOS effects, like portrait blur or a replaced background, are the only way to change the camera's background when it's saved in the video.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text("Drag the bubble to move it. Drag its corner or ⌘-scroll to resize.")

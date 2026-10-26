@@ -147,6 +147,16 @@ Answers are checked: schema, word ranges, overlaps, and a cap of 35% removed. An
 - **Use:** the editor processes in the background on load and on every change, then swaps the file in for the microphone (`LoadedTracks.processedVoice`, offset by the start time) and redraws its waveform. The original plays until the processed copy is ready. MP4 export builds through `CompositionBuilder.build(source:project:options:)`, which processes first (or reuses the cache). GIFs have no audio.
 - **Not processed:** system audio. Auto-edit keeps analyzing the original microphone.
 
+**ADR-38: Camera backgrounds are drawn by the compositor, per frame.**
+- **Settings:** `CameraOverlay.background` (`CameraBackground`): None, Blur, Replace (a color or a picture) or Remove, and how the person is separated (person detection or a green screen).
+- **Where:** `FrameRenderer.cameraLayer` hands the upright, mirrored camera frame to `CameraMatte` before cropping it to the shape, so a replacement picture is never turned or mirrored. The preview, MP4 and GIF all go through it, so the background stays editable after recording.
+- **Person detection:** Vision person segmentation, a new request per frame. The compositor is called from several queues and out of order while scrubbing, so nothing carries over between frames; Vision loads the model once. The preview uses the fast level, exports the balanced one: about 5 ms and 9 ms per 720p frame on the development Mac. The mask is scaled to the frame and softened slightly.
+- **Green screen:** a color-difference key in a 64³ `CIColorCubeWithColorSpace` (sRGB), cached per key setting. Transparency comes from how far the key color's channel rises above the other two, relative to the picked color; spill removal pulls that channel back toward the others.
+- **Remove:** shows only the person, with a shadow from their outline, unless "Keep the Shape" is on.
+- **Default (CAM-3):** `PreferenceKey.recordingCameraBackground` holds a JSON `CameraBackground`. `VideoEditProject.initial` seeds the camera with it, so the automatic camera composite (ADR-25) gets it too.
+- **Camera saved in the video:** post effects are impossible. The recording options open the system's Video Effects menu instead (CAM-4).
+- **Fallback if it's too slow on the M1:** precompute a time-smoothed matte track once, cached like the processed voice, and have the compositor only read it.
+
 **ADR-33: Prompts and the default provider are chosen by an offline evaluation.** `pankapture-eval` (`make eval`) is a separate executable target, not part of the app bundle. It runs the app's analysis and prompt over labeled recordings kept outside the repo (PRD §11), caching each sample's transcript. It scores mistakes (by overlap, ±0.3 s), content lost, false positives on controls, and pause intent against a pass bar. The report carries a fingerprint of the prompt and schema, so runs can be compared.
 
 ## 3. Module map

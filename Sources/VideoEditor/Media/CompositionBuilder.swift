@@ -44,6 +44,8 @@ public enum CompositionBuilder {
         public var forceVideoComposition: Bool
         /// The preview keeps muted tracks so volume changes don't need a rebuild.
         public var includeMutedAudio: Bool
+        /// The preview separates the camera background faster and coarser.
+        public var cameraMatteQuality: CameraMatte.Quality
 
         public init(
             shortSideCap: Double? = nil,
@@ -52,7 +54,8 @@ public enum CompositionBuilder {
             frameRate: Int = 30,
             zoomEnabled: Bool = true,
             forceVideoComposition: Bool = true,
-            includeMutedAudio: Bool = false
+            includeMutedAudio: Bool = false,
+            cameraMatteQuality: CameraMatte.Quality = .balanced
         ) {
             self.shortSideCap = shortSideCap
             self.shortSide = shortSide
@@ -61,6 +64,7 @@ public enum CompositionBuilder {
             self.zoomEnabled = zoomEnabled
             self.forceVideoComposition = forceVideoComposition
             self.includeMutedAudio = includeMutedAudio
+            self.cameraMatteQuality = cameraMatteQuality
         }
 
         public static func preview(frameRate: Double, zoomEnabled: Bool = true) -> Options {
@@ -71,7 +75,8 @@ public enum CompositionBuilder {
                 frameRate: Int(frameRate.rounded()).clamped(to: 24...60),
                 zoomEnabled: zoomEnabled,
                 forceVideoComposition: false,
-                includeMutedAudio: true
+                includeMutedAudio: true,
+                cameraMatteQuality: .fast
             )
         }
     }
@@ -200,7 +205,8 @@ public enum CompositionBuilder {
             zoomEnabled: options.zoomEnabled,
             backgroundOrientation: background?.orientation ?? .up,
             hasCameraTrack: cameraTrack != nil,
-            cameraOrientation: source.camera?.orientation ?? .up
+            cameraOrientation: source.camera?.orientation ?? .up,
+            cameraMatteQuality: options.cameraMatteQuality
         )
         let videoComposition = makeVideoComposition(
             plan: plan,

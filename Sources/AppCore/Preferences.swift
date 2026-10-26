@@ -69,6 +69,9 @@ public enum PreferenceKey {
     public static let recordingCameraMirrored = "recording.cameraMirrored"
     /// Webcam bubble width in points.
     public static let recordingCameraSize = "recording.cameraSize"
+    /// The camera background new recordings start with: a JSON
+    /// `CameraBackground` (PRD CAM-3). Absent means none.
+    public static let recordingCameraBackground = "recording.cameraBackground"
     /// 30 or 60.
     public static let recordingFrameRate = "recording.frameRate"
     /// `h264` or `hevc`.

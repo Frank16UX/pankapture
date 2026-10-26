@@ -633,7 +633,8 @@ final class VideoEditorModel {
             zoomEnabled: options.zoomEnabled,
             backgroundOrientation: backgroundVideo?.orientation ?? .up,
             hasCameraTrack: edit.cameraTrackID != nil,
-            cameraOrientation: media.camera?.orientation ?? .up
+            cameraOrientation: media.camera?.orientation ?? .up,
+            cameraMatteQuality: options.cameraMatteQuality
         )
         item.videoComposition = CompositionBuilder.makeVideoComposition(
             plan: plan,

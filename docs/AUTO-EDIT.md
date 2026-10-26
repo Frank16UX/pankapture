@@ -262,15 +262,16 @@ Microphone track ─┬─▶ loudness envelope (10 ms frames) ──▶ pauses 
     | accurate | 32–39 ms | — |
 
   - The mask is scaled up and feathered, then the result is built with `CIBlendWithMask` from the camera frame plus a blurred copy, the replacement image, or a clear background.
+  - Measured after building it (ADR-38): fast about 5 ms and balanced about 9 ms per 720p frame on the development Mac, a mask on every frame.
   - Apple has no public video-matting API; `CIFilter.personSegmentation` just wraps Vision.
 - **Where it runs:** inside `FrameRenderer`, on the camera frame, before the shape mask is applied.
-  - The compositor is called from several queues and out of order while scrubbing, so the requests stay stateless: a small pool, guarded like the backdrop cache.
+  - The compositor is called from several queues and out of order while scrubbing, so the requests stay stateless: a new request per frame (Vision keeps the model loaded).
   - The preview uses fast; export uses balanced.
 - **Risk on the slowest machine:**
   - Flicker at the person's edges is unmeasured.
   - An M1 is probably 2–3× slower (an estimate). At 60 fps that leaves little headroom.
   - If preview or export misses the budget, precompute a matte track once (offline, smoothed over time, cached like the processed audio) and have the compositor only read it.
-- **Chroma key:** an alpha `CIColorCube` over a hue range, plus spill suppression.
+- **Chroma key:** a color-difference key (how far the key channel rises above the other two) in an alpha `CIColorCube`, plus spill suppression.
 - **Model:** `CameraOverlay.background`, decoded with `decodeIfPresent`.
 - **Default effect:** Settings ▸ Recording ▸ Camera gets a default background. `VideoEditProject.initial` seeds it, so the automatic camera composite (ADR-25) applies it with no extra work.
 - **"Save camera: In the video" mode:** the bubble is part of the screen capture, so post effects are impossible there.

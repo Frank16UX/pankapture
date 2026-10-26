@@ -440,6 +440,18 @@ private struct CameraSection: View {
                     project.camera = camera
                 }
                 Toggle("Mirror", isOn: Binding(get: { camera.isMirrored }, set: { value in set { $0.isMirrored = value } }))
+                if model.isAutoEditAvailable {
+                    CameraBackgroundControls(
+                        background: Binding(get: { camera.background }, set: { value in
+                            model.edit(coalescingKey: "cameraBackground") { project in
+                                var camera = project.camera ?? .standard
+                                camera.background = value
+                                project.camera = camera
+                            }
+                        }),
+                        onEditingChanged: { began in began ? model.beginContinuousEdit() : model.endContinuousEdit() }
+                    )
+                }
                 Button("Reset Position", systemImage: "arrow.counterclockwise") {
                     let recorded = model.sidecar?.camera.map(CameraOverlay.init) ?? .standard
                     set { $0.center = recorded.center; $0.size = recorded.size }

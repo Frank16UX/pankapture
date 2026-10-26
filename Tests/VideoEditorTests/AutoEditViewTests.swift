@@ -115,6 +115,23 @@ struct AutoEditViewTests {
         model.close()
     }
 
+    @Test func cameraBackgroundControlsRender() throws {
+        let states: [(String, CameraBackground)] = [
+            ("camera-background-blur", CameraBackground(effect: .blur)),
+            ("camera-background-green-screen", CameraBackground(effect: .replace, matte: .greenScreen)),
+            ("camera-background-picture", CameraBackground(effect: .replace, imageURL: URL(fileURLWithPath: "/tmp/Office backdrop.jpg"))),
+            ("camera-background-remove", CameraBackground(effect: .remove)),
+        ]
+        for (name, background) in states {
+            for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+                let form = Form { Section("Camera") { CameraBackgroundControls(background: .constant(background)) } }
+                    .formStyle(.grouped)
+                let rep = try render(form, size: CGSize(width: 320, height: 380), appearance: appearance, name: name)
+                #expect(Self.distinctColors(rep) > 8)
+            }
+        }
+    }
+
     private func render(_ view: some View, size: CGSize, appearance: NSAppearance.Name, name: String) throws -> NSBitmapImageRep {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         host.frame = CGRect(origin: .zero, size: size)

@@ -226,10 +226,18 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
 
     /// A fresh project for `source`, with the webcam layer where the bubble
     /// was while recording (from the recording's sidecar).
-    public static func initial(for source: SourceMedia, sidecar: RecordingSidecar? = nil) -> VideoEditProject {
+    /// - Parameter cameraBackground: the default from Settings ▸ Recording
+    ///   (PRD CAM-3), so the automatic camera composite gets it too.
+    public static func initial(
+        for source: SourceMedia,
+        sidecar: RecordingSidecar? = nil,
+        cameraBackground: CameraBackground = .savedDefault()
+    ) -> VideoEditProject {
         var project = VideoEditProject(sourceURL: source.url, sourceDuration: source.duration)
         if source.camera != nil {
-            project.camera = (sidecar ?? RecordingSidecar.load(for: source.url))?.camera.map(CameraOverlay.init) ?? .standard
+            var camera = (sidecar ?? RecordingSidecar.load(for: source.url))?.camera.map(CameraOverlay.init) ?? .standard
+            camera.background = cameraBackground
+            project.camera = camera
         }
         return project
     }

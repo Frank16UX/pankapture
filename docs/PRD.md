@@ -250,10 +250,10 @@ Everything runs on the Mac unless the user configured an AI provider (§5.12). E
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| CAM-1 | **Camera background:** none, blur (adjustable strength), replace (color or picture), or remove (the person cut out over the screen). Editable after recording. | Must | M8 |
-| CAM-2 | **Green screen** key: pick the color, set the tolerance, remove spill. | Should | M8 |
-| CAM-3 | A **default camera background** in Settings ▸ Recording, also applied to the automatic camera composite (REC-10). | Should | M8 |
-| CAM-4 | A **Video Effects…** button in the recording options opens the system camera effects (portrait blur, background replacement). That's the only option when the camera is saved in the video. | Could | M8 |
+| CAM-1 | **Camera background:** none, blur (adjustable strength), replace (color or picture), or remove (the person cut out over the screen). Editable after recording. | Must | M8 ✅ |
+| CAM-2 | **Green screen** key: pick the color, set the tolerance, remove spill. | Should | M8 ✅ |
+| CAM-3 | A **default camera background** in Settings ▸ Recording, also applied to the automatic camera composite (REC-10). | Should | M8 ✅ |
+| CAM-4 | A **Video Effects…** button in the recording options opens the system camera effects (portrait blur, background replacement). That's the only option when the camera is saved in the video. | Could | M8 ✅ |
 
 ### 5.12 AI providers (bring your own key)
 

@@ -29,6 +29,8 @@ public struct RenderPlan: Sendable, Equatable {
     public var camera: CameraOverlay?
     /// Rotation that turns camera frames upright.
     public var cameraOrientation: CGImagePropertyOrientation
+    /// How finely the camera background is separated (PRD CAM-1).
+    public var cameraMatteQuality: CameraMatte.Quality
     public var timeline: Timeline
     /// Burned-in captions (PRD CAP-3), when on and there's a transcript.
     public var captions: CaptionTrack?
@@ -50,7 +52,8 @@ public struct RenderPlan: Sendable, Equatable {
         zoomEnabled: Bool = true,
         backgroundOrientation: CGImagePropertyOrientation = .up,
         hasCameraTrack: Bool = false,
-        cameraOrientation: CGImagePropertyOrientation = .up
+        cameraOrientation: CGImagePropertyOrientation = .up,
+        cameraMatteQuality: CameraMatte.Quality = .balanced
     ) {
         let background = project.background
         let canvas = CanvasLayout.canvasSize(source: sourceSize, aspect: background.aspect)
@@ -73,6 +76,7 @@ public struct RenderPlan: Sendable, Equatable {
         let camera = hasCameraTrack ? (project.camera ?? .standard) : nil
         self.camera = camera?.isVisible == true ? camera : nil
         self.cameraOrientation = cameraOrientation
+        self.cameraMatteQuality = cameraMatteQuality
         self.timeline = Timeline(project: project)
         self.captions = project.captionTrack(timeline: self.timeline, portrait: renderSize.height > renderSize.width)
         self.zoomEnabled = zoomEnabled
@@ -241,6 +245,11 @@ public struct FrameRenderer: Sendable {
         if overlay.isMirrored {
             image = image.transformed(by: CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -image.extent.width, y: 0))
         }
+        // Blur, replace, or remove the background on the upright frame, so
+        // a replacement picture is never turned or mirrored.
+        if let processed = CameraMatte.apply(overlay.background, to: image, quality: plan.cameraMatteQuality) {
+            image = processed
+        }
         // Center-crop to the shape's aspect, then fill the layer.
         let size = image.extent.size
         guard size.width > 0, size.height > 0 else { return nil }
@@ -257,6 +266,27 @@ public struct FrameRenderer: Sendable {
                 .concatenating(CGAffineTransform(translationX: rect.minX, y: rect.minY)))
             .cropped(to: rect)
 
+        let sigma = Double(rect.height) * 0.04
+        let reach = CGFloat(sigma * 4)
+        let padded = rect.insetBy(dx: -reach, dy: -reach)
+        let offset = CGAffineTransform(translationX: 0, y: -rect.height * 0.02)
+
+        // A removed background shows only the person, shadowed by their outline.
+        guard overlay.background.drawsShape else {
+            let silhouette = placed.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.35),
+            ])
+            let shadow = silhouette
+                .composited(over: CIImage(color: .clear).cropped(to: padded))
+                .applyingGaussianBlur(sigma: sigma * 0.5)
+                .cropped(to: padded)
+                .transformed(by: offset)
+            return placed.composited(over: shadow)
+        }
+
         let radius = overlay.cornerRadius(for: rect.size)
         let blend = CIFilter.blendWithAlphaMask()
         blend.inputImage = placed
@@ -264,14 +294,11 @@ public struct FrameRenderer: Sendable {
         blend.maskImage = roundedRect(rect, radius: radius, color: CIColor(red: 1, green: 1, blue: 1))
         let masked = blend.outputImage ?? placed
 
-        let sigma = Double(rect.height) * 0.04
-        let reach = CGFloat(sigma * 4)
-        let padded = rect.insetBy(dx: -reach, dy: -reach)
         let shadow = roundedRect(rect, radius: radius, color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.35))
             .composited(over: CIImage(color: .clear).cropped(to: padded))
             .applyingGaussianBlur(sigma: sigma)
             .cropped(to: padded)
-            .transformed(by: CGAffineTransform(translationX: 0, y: -rect.height * 0.02))
+            .transformed(by: offset)
         return masked.composited(over: shadow)
     }
 
