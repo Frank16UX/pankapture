@@ -83,6 +83,42 @@ Short ADRs. If a decision changes, update it here; don't delete it.
 
 **ADR-26: Pankapture's standard windows are capturable.** Captures exclude the app so its capture UI never leaks in, which also hid the editors, history, and Settings, so the app couldn't be shown in its own screenshots or recordings. `OwnWindows.capturableIDs()` (visible, titled, non-panel windows) are excepted from that exclusion in screenshots, window snapping and picking, and recordings. Display and area recordings re-check the set every 2 s and update the stream filter when it changes, so an editor opened mid-recording appears.
 
+**ADR-30: Smart editing transcribes on device with `SpeechTranscriber`, on macOS 26+.** The microphone track (ADR-16) is decoded once to 16 kHz mono (`MicrophoneAudio`) and transcribed by `SpeechAnalyzer` + `SpeechTranscriber` with a time range and confidence per word. It needs no permission prompt and no network, and runs at about 50× real time. Language models download on first use through `AssetInventory` and are shared with other apps. The user picks English or Spanish (there's no language detection). There is no macOS 15 fallback: the older recognizer drops every filler and needs the Speech Recognition permission. So smart editing is gated with `#available(macOS 26, *)` while the app keeps its macOS 15 minimum. The recognizer merges stutters ("the the" becomes one stretched word) and drops Spanish "eh". The rules treat untranscribed sound between words as a possible filler, and verbatim cloud transcription is an option (PRD AI-5). `TimeRange` and the recorder's track conventions (`RecordingTracks`, `AudioRole`) moved to AppCore so the new modules don't depend on the editor.
+
+**ADR-31: AI is bring-your-own-key, works with any provider, and is off by default.** The project never pays for inference. `AIProviders` speaks two wire protocols over plain HTTPS, without SDKs (ADR-10):
+- Anthropic Messages: `anthropic-version: 2026-10-21`, structured output through `output_config.format`.
+- OpenAI-compatible Chat Completions: a strict `response_format` JSON schema. This covers OpenAI, Gemini's compatibility endpoint, Groq, OpenRouter, LM Studio and Ollama.
+
+Presets are data, and the model name is always editable. Keys live in the Keychain (`APIKeyStore`), never in UserDefaults or project files. A request goes out only when the user starts an action, and for auto-edit it carries transcript text and pause timings, never audio or video. Schemas are built with an order-preserving `JSONValue`, because constrained decoding generates fields in schema order (`reason` before `from`/`to`).
+
+**ADR-32: Auto-edit runs the rules first, then one checked model call.** `AutoEditAnalyzer`:
+1. Finds pauses: silence on the mic between words, including the tail of a word the recognizer stretched over the silence after it.
+2. Measures screen activity per pause: sidecar clicks, plus pixel change between a few small frames (`ScreenActivityProbe`).
+3. Runs `RuleBasedEditor`:
+   - fillers from word lists;
+   - repeats and stutters;
+   - cue-based retakes ("I meant", "digo", "let me start over") and sentence restarts;
+   - pause intent from punctuation, length, transition words and activity.
+
+The rules are tuned for precision, and they're the result when no provider is configured (AI-1).
+
+`ModelPass` then sends one prompt: numbered words, with markers like `⟨p3 2.4s screen: still⟩` for pauses of 0.6 s or more. It gets back cuts and a kind for each pause. The model judges intent and the app decides lengths (pacing, AE-3), so changing pacing needs no new call.
+
+Answers are checked: schema, word ranges, overlaps, and a cap of 35% removed. An unusable answer is retried once; after that, the rules' results stand. Rule mistakes with confidence 0.7 or more (explicit cues) stay next to the model's: a model leaving one out isn't evidence against it.
+
+**ADR-34: Auto-edit's suggestions are a layer of the project, applied on top of the user's cuts.**
+- **Where they live:** `VideoEditProject.autoEdit` (`AutoEditLayer`) holds:
+  - each pause with its kind and the user's overrides ("keep as is", dragged edges, their own kind);
+  - each removal with its enabled state;
+  - the pacing preset, the group toggles, and an optional speed for silent screen actions.
+- **How the timeline uses them:** `Timeline` subtracts `effectiveCuts` (the user's cuts plus the layer's enabled ones) and adds `effectiveSpeedSegments`. Auto-edit is ignored if it would leave almost nothing, and nothing in `cuts` changes.
+- **How a pause is shortened:** its cut is the middle of the pause, keeping half of the pacing target next to each word, so both join points sit in silence.
+- **Clean joins:** removal edges snap to the quietest 10 ms within ±80 ms when the layer is built. Every join where footage was removed gets an 8 ms fade out and in on each audio track (`CompositionBuilder.mixParameters`), in the preview and in exports (AE-9).
+- **Re-running the analysis** replaces only items the user hasn't changed.
+- **Rebuilds:** the editor decides whether to rebuild the preview by comparing `Timeline`s, since the layer's derived cuts and speeds aren't stored.
+
+**ADR-33: Prompts and the default provider are chosen by an offline evaluation.** `pankapture-eval` (`make eval`) is a separate executable target, not part of the app bundle. It runs the app's analysis and prompt over labeled recordings kept outside the repo (PRD §11), caching each sample's transcript. It scores mistakes (by overlap, ±0.3 s), content lost, false positives on controls, and pause intent against a pass bar. The report carries a fingerprint of the prompt and schema, so runs can be compared.
+
 ## 3. Module map
 
 ```
@@ -96,11 +132,19 @@ Pankapture (executable, app shell)
  ├── Overlay        selection overlay, loupe, inline editor canvas + toolbars (M1)  → Capture, Annotation, DesignSystem
  ├── Recording      SCStream → AVAssetWriter, HUD, webcam/clicks/keys overlays (M3–M4)
  ├── VideoEditor    timeline, composition, zoom compositor, export (M5)
- └── Library        SwiftData history, OCR index, library window (M6)
+ ├── Library        SwiftData history, OCR index, library window (M6)
+ │
+ │  smart editing (M8, macOS 26+), service modules
+ ├── Transcription  on-device speech-to-text, transcript model                      → AppCore
+ ├── AIProviders    BYOK clients (Anthropic, OpenAI-compatible), Keychain keys      → AppCore
+ └── AutoEdit       mic extraction, pauses, screen activity, rules, model pass     → AppCore, Transcription, AIProviders
+
+pankapture-eval (executable, developer tool, not bundled)                           → AutoEdit, Transcription, AIProviders
 ```
 
 **Rules**
 - Dependencies point **down**: app → feature modules → `AppCore`/`DesignSystem`. Feature modules never import the app target or each other's internals. Shared types move down a layer.
+- Service modules (`Capture`, `Transcription`, `AIProviders`, `AutoEdit`) have no UI and sit between features and `AppCore`; features may depend on them, never the reverse.
 - `Annotation` stays pure (CoreGraphics/CoreImage only, no AppKit windows) so it's fully unit-testable and reused by the inline editor, full editor, and history re-edit.
 - The app target is a thin composition root: `AppDelegate` wires services; `CaptureCoordinator` routes intents (shortcuts, menu items) to flows.
 - New modules are added when their milestone starts, not before (no empty placeholder targets).
@@ -176,6 +220,9 @@ Three spaces exist and bugs live at their borders. Convert in one place per boun
 | Video edits | `~/Library/Application Support/Pankapture/Edits/<video>.json`, unsaved edits in `<video>.draft.json` | `VideoEditProject` (ADR-24) |
 | Layered recordings | `~/Library/Application Support/Pankapture/Recordings/Sources/<video>.mp4` | MP4 with the "Camera" track; the save folder has the composite (ADR-25) |
 | Video backgrounds | `~/Library/Application Support/Pankapture/Backgrounds/<uuid>.<ext>` | copies of pictures/movies used as editor backgrounds |
+| Transcripts | `~/Library/Application Support/Pankapture/Transcripts/<video>.<language>.json` | `Transcript` (words with times), cached by auto-edit (ADR-30) |
+| Auto-edit suggestions | inside the video's project (`Edits/<video>.json`, key `autoEdit`) | `AutoEditLayer`: pauses, removals, pacing, user overrides (ADR-34) |
+| AI provider | `UserDefaults["ai.providerConfiguration"]`; the key in the Keychain (service `com.franklinperez.Pankapture.ai-provider`) | `ProviderConfiguration` JSON, no secrets (ADR-31) |
 
 File names use `CaptureFileNamer`: `Pankapture 2026-10-19 at 14.27.05.png`, with ` (2)`, ` (3)` on collision.
 
@@ -188,7 +235,7 @@ File names use `CaptureFileNamer`: `Pankapture 2026-10-19 at 14.27.05.png`, with
 | Camera | REC-10 | `AVCaptureDevice.requestAccess(.video)` | first time webcam is enabled |
 | Accessibility | REC-12 keystrokes | `AXIsProcessTrustedWithOptions` | first time keystroke display is enabled |
 
-Global hot keys and click highlighting (mouse-down global monitor) need no permission.
+Global hot keys and click highlighting (mouse-down global monitor) need no permission. Neither does on-device transcription: `SpeechTranscriber` runs without the Speech Recognition permission (ADR-30).
 
 ## 9. Build, signing, toolchain
 

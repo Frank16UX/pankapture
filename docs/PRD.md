@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Status** | v1 feature-complete (M0–M6, M7 partly); manual QA and performance pass pending |
+| **Status** | v1 feature-complete (M0–M6, M7 partly); manual QA and performance pass pending. M8 (smart editing) planned |
 | **Owner** | Franklin Perez |
-| **Last updated** | 2026-10-19 |
+| **Last updated** | 2026-10-26 |
 | **Platform** | macOS 15 Sequoia or later, Apple Silicon only |
-| **Distribution** | Personal use: GitHub release DMG + one-line Terminal installer, self-signed (not notarized), no App Store, no accounts, no network |
+| **Distribution** | Personal use: GitHub release DMG + one-line Terminal installer, self-signed (not notarized), no App Store, no accounts, no network except the update check and AI providers the user configures (§5.12) |
 
 ---
 
@@ -29,10 +29,12 @@ It replaces three separate tools in one daily workflow:
 - **G4: Edit just enough.** Trim, cut, zoom, add a background, and export MP4/GIF without opening a pro video editor.
 - **G5: Find anything later.** Every capture is in a searchable history, including text inside screenshots (OCR).
 - **G6: Feel native.** It follows the system's look and feel, light / dark / system appearance, accessibility settings, and keyboard-first workflows.
-- **G7: Private by default.** Everything is local. Nothing leaves the Mac unless the user explicitly shares it.
+- **G7: Private by default.** Everything is local. Nothing leaves the Mac unless the user explicitly shares it, or sends it to an AI provider they configured themselves (§5.12).
+- **G8: Edit by speech.** A rough recording becomes a tight, captioned video in minutes: dead air, filler words, and retakes are suggested for removal and stay one click away from undo.
 
 ### Non-goals (v1)
 - Cloud upload, share links, team workspaces, accounts, payments.
+- Paying for, proxying, or metering anyone's AI inference. AI features use the user's own key or a local model (§5.12).
 - Windows/Linux/Intel builds.
 - Mac App Store distribution (the sandbox would constrain global hotkeys and capture).
 - Live streaming, multi-camera production, or timeline editing beyond the features below.
@@ -53,6 +55,7 @@ It replaces three separate tools in one daily workflow:
 | U7 | Record a 2–15 min walkthrough with voice and system sounds, webcam optional | Several per week |
 | U8 | Trim the start/end, cut mistakes, zoom into details, export MP4 or GIF | Several per week |
 | U9 | Find "that screenshot from last Tuesday with the error message" | Weekly |
+| U10 | Clean up a walkthrough without scrubbing through it: drop dead air, "um"s, and retakes, keep the deliberate pauses, add captions in English or Spanish, make the voice clear | Several per week |
 
 ## 4. Experience principles
 
@@ -204,6 +207,72 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 | HI-5 | Retention: keep forever / 30 / 90 days; optional storage cap. | Should | M6 ✅ |
 | HI-6 | Recent captures submenu in the menu bar (last 5–10). | Should | M6 ✅ |
 
+### 5.11 Smart editing
+
+Requires **macOS 26 or later**, because it relies on the on-device speech recognizer introduced there. On macOS 15 the editor doesn't offer these tools.
+
+Everything runs on the Mac unless the user configured an AI provider (§5.12). Every automatic edit is a **suggestion**: it can be reviewed, switched off one at a time or by kind, and never touches the user's own cuts. The technical design is in [AUTO-EDIT.md](AUTO-EDIT.md).
+
+**Auto-edit**
+
+| ID | Requirement | Priority | Milestone |
+|---|---|---|---|
+| AE-1 | **Transcript:** on-device transcription of the microphone track with word timings, in **English or Spanish**. The language is chosen per recording and defaults to the system language. Speech models download on first use, with progress. | Must | M8 ✅ |
+| AE-2 | **Pauses:** every pause of 0.3 s or more on the microphone track is detected and judged by **intent**:<br>• *hesitation* (mid-thought)<br>• *sentence break*<br>• *section break* (deliberate separation between parts)<br>• *emphasis* (deliberate dramatic pause)<br>• *screen action* (silent while the screen changes or the user clicks)<br>With a provider configured (§5.12), the model judges intent from the transcript and the screen activity; otherwise rules do. | Must | M8 ✅ |
+| AE-3 | **Pacing:** each pause is shortened to a target length for its kind, set by a pacing preset: **Tight / Natural / Relaxed** (default Natural). Deliberate breaks keep their breathing room, so the result doesn't run everything together. Pauses are never lengthened. Screen-action pauses are never cut; speeding them up (2× or 4×) is an option. | Must | M8 ✅ |
+| AE-4 | **Filler words:** "um", "uh", "er", "ah", "hmm" (English) and "eh", "em", "mmm", "este", "o sea", "pues" (Spanish). Ambiguous ones ("like", "you know", "bueno", "este" before a noun) count only when set apart by pauses, and are off by default. | Must | M8 ✅ |
+| AE-5 | **Repeats and stutters:** for repeated words and phrases ("let me, let me"), the last one is kept. Stutters the transcript merges into one word are found from the audio and offered as lower-confidence suggestions. | Should | M8 |
+| AE-6 | **Mistakes and retakes:** for false starts, corrections ("April. Wait, sorry, I meant May") and sentences said twice, the last take is kept. Rules catch correction phrases and repeated sentence openings; a configured provider catches the rest. | Must | M8 ✅ |
+| AE-7 | **Review:** automatic edits sit on their own layer, struck through in the transcript and shown on a separate timeline lane, colored by kind. They can be toggled by kind (Pauses, Fillers, Repeats, Mistakes) or one at a time, and each says why it was suggested. Re-running the analysis replaces only automatic edits the user hasn't adjusted. | Must | M8 ✅ |
+| AE-8 | **Adjust any segment:** drag either edge of any cut or kept clip, automatic or manual, to extend or shorten it (timeline handles, plus nudge keys at the playhead). The user can restore a removed part or mark a pause "keep as is". An automatic edit the user adjusts becomes theirs and survives re-runs. | Must | M8 ✅ |
+| AE-9 | **Clean joins:** cut points snap to the quietest moment within ±80 ms, and every join gets a short audio fade (5–10 ms), so cuts don't click or clip words. | Must | M8 ✅ |
+| AE-10 | **Edit by transcript:** a transcript panel next to the preview. Click a word to jump there; select words and press ⌫ to cut them; add a zoom over the selection. | Must | M8 |
+
+**Captions**
+
+| ID | Requirement | Priority | Milestone |
+|---|---|---|---|
+| CAP-1 | **Captions** from the transcript (English or Spanish), grouped into readable cues (at most 2 lines of about 42 characters, 0.8–6 s each). They follow cuts and speed changes. | Must | M8 |
+| CAP-2 | **Correct the transcript** in place. Captions use the corrected text and keep their timing; corrections are saved with the project (VE-12). | Must | M8 |
+| CAP-3 | **Burn captions** into MP4 and GIF exports, with a few style presets (position, size, background). | Must | M8 |
+| CAP-4 | Save an **.srt / .vtt** file next to the exported video. | Should | M8 |
+| CAP-5 | Embedded, switchable subtitle track in the MP4. | Could | later |
+
+**Audio**
+
+| ID | Requirement | Priority | Milestone |
+|---|---|---|---|
+| AU-1 | **Noise removal** on the microphone track: Off / Min / Medium / Max. It's non-destructive (a processed copy is cached), and system audio is never processed. | Must | M8 |
+| AU-2 | **Normalize** the voice to a consistent loudness (−16 LUFS, peaks at or below −1 dBFS). | Must | M8 |
+| AU-3 | The preview and the waveform use the processed audio. Processing runs in the background and shows progress. | Must | M8 |
+
+**Camera**
+
+| ID | Requirement | Priority | Milestone |
+|---|---|---|---|
+| CAM-1 | **Camera background:** none, blur (adjustable strength), replace (color or picture), or remove (the person cut out over the screen). Editable after recording. | Must | M8 |
+| CAM-2 | **Green screen** key: pick the color, set the tolerance, remove spill. | Should | M8 |
+| CAM-3 | A **default camera background** in Settings ▸ Recording, also applied to the automatic camera composite (REC-10). | Should | M8 |
+| CAM-4 | A **Video Effects…** button in the recording options opens the system camera effects (portrait blur, background replacement). That's the only option when the camera is saved in the video. | Could | M8 |
+
+### 5.12 AI providers (bring your own key)
+
+Pankapture never pays for, proxies, or meters AI inference. A provider is optional:
+- It improves pause judgment (AE-2) and mistake detection (AE-6).
+- It enables verbatim cloud transcription (AI-5).
+
+Everything else works without one.
+
+| ID | Requirement | Priority | Milestone |
+|---|---|---|---|
+| AI-1 | **Off by default.** Without a provider, every smart-editing feature still works; pause judgment and mistake detection use rules. | Must | M8 ✅ |
+| AI-2 | **Any provider, not one vendor:** presets for Anthropic, OpenAI, Google Gemini, Groq, OpenRouter, LM Studio and Ollama, plus any OpenAI-compatible endpoint (base URL + model). The model name is always editable. | Must | M8 ✅ |
+| AI-3 | API keys live in the **Keychain** only, never in settings files, projects or logs. Settings ▸ AI has **Test connection**. | Must | M8 ✅ |
+| AI-4 | For auto-edit, only **transcript text and pause timings** are sent, never audio or video, and only when the user starts the action. The button says what will be sent. | Must | M8 ✅ |
+| AI-5 | **Cloud transcription (optional):** send the microphone audio to a configured speech-to-text provider (e.g. ElevenLabs Scribe, AssemblyAI) for a verbatim transcript that keeps fillers and stutters. Off by default, and marked as sending audio. | Should | M8 |
+| AI-6 | Model answers are **checked** before they become suggestions: schema, word ranges, and a cap on how much may be removed. If any check fails, the rules' suggestions stand and a notice says why. | Must | M8 ✅ |
+| AI-7 | **Evaluation harness:** `make eval` scores providers and prompts against the maintainer's labeled sample recordings (§11). It's a developer tool, not part of the app. | Must | M8 ✅ |
+
 ## 6. Non-functional requirements
 
 ### 6.1 Performance (measured on the slowest supported machine, M1 with 8 GB)
@@ -219,6 +288,10 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 | 4K60 recording | 0 dropped frames on M1 Pro or newer |
 | App launch to ready | ≤ 1 s |
 | Export of 1 min 1080p MP4 | ≤ 30 s |
+| On-device transcription of a 15 min recording | ≤ 90 s |
+| Auto-edit analysis of a 15 min recording, excluding the AI provider's response time | ≤ 15 s |
+| Noise removal + normalization of a 15 min microphone track | ≤ 45 s |
+| Preview with a camera background effect | 30 fps, no dropped frames |
 
 ### 6.2 Reliability
 - Recordings are written incrementally (fragmented) so a crash loses at most ~2 s.
@@ -226,15 +299,19 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 - Graceful handling of display connect/disconnect, sleep, and permission revocation mid-session.
 
 ### 6.3 Privacy and security
-- No telemetry or crash uploads. The only network request is the update check (UP-1): an anonymous request for the latest GitHub release (once a day, can be turned off), plus the download when you install it.
+- No telemetry or crash uploads. Network requests are limited to:
+  - the update check (UP-1): an anonymous request for the latest GitHub release (once a day, can be turned off), plus the download when you install it;
+  - requests to an AI provider, only when the user configured one and starts an action that uses it (§5.12). These carry transcript text, or microphone audio for cloud transcription (AI-5).
+- AI provider keys are stored in the Keychain.
 - Pankapture's own windows are excluded from every capture.
-- OCR and all processing run on device.
+- OCR, transcription and all media processing run on device, except optional cloud transcription (AI-5).
 
 ### 6.4 Accessibility
 - All controls are VoiceOver-labelled; full keyboard operation; respects Reduce Motion, Reduce Transparency, Increase Contrast, and the user's accent color.
 
 ### 6.5 Compatibility
 - macOS 15.0+ on Apple Silicon. Some visuals (e.g. glass materials) are richer on macOS 26+ and gracefully fall back on 15.
+- Smart editing (§5.11–5.12) needs macOS 26 or later. It isn't offered on macOS 15, and there is no fallback; everything else works there.
 
 ## 7. Success criteria
 
@@ -253,6 +330,10 @@ v1 is done when, for two consecutive weeks, it has fully replaced the three exis
 | Audio drift between mic and system tracks on long recordings | Out-of-sync videos | Single capture clock (ScreenCaptureKit timestamps for both), and long-recording tests. |
 | Global shortcut conflicts with other apps | Hotkey not firing | Conflict detection in the shortcut recorder; few default shortcuts. |
 | Scope: v1 includes every feature group | Long time-to-useful | M1 is a usable daily driver on its own; later milestones ship incrementally. |
+| On-device transcripts drop stutters and Spanish "eh" | Missed suggestions | Audio-based detection offered as suggestions; optional verbatim cloud transcription (AI-5). |
+| A model suggests cutting real content | Lost content, lost trust | Suggestions only, checked answers, a cap on removal (AI-6), and a "content lost" bar in the evaluation (§11). |
+| Hundreds of cuts make the preview stutter | Choppy editing | Performance test at 400 cuts on a 15 min recording; merge near-adjacent cuts. |
+| AI model names and prices change every few months | Stale presets | Presets are data and the model field is editable; re-run the evaluation before changing the default. |
 
 ## 9. Open questions
 
@@ -262,7 +343,239 @@ v1 is done when, for two consecutive weeks, it has fully replaced the three exis
 4. Video editor: open automatically after every recording, or only from the thumbnail?
 5. Keystroke display default: modifier combos only (more private), or all keys?
 6. App icon and visual identity: any brand direction?
+7. Default AI provider preset: decided by the evaluation (§11).
+8. Default pause lengths for each pacing preset (AE-3): tuned on the evaluation recordings.
 
 ## 10. Appendix: reference
 
 The inline editor follows the classic "annotate on the selection" layout: a dashed selection with a size badge at top-left, a vertical tool bar on the right edge (pen, line, arrow, rectangle, marker, text, color, undo), and a horizontal action bar under the bottom-right corner (upload, share, search, print, copy, save, close). Pankapture keeps that spatial model and modernizes the visuals; see [DESIGN.md](DESIGN.md).
+
+## 11. Appendix: auto-edit evaluation
+
+This is a small, repeatable test. It decides whether a model is worth using over the rules alone, and which AI provider and prompt the app recommends. It scores the two judgments a model makes:
+- **mistakes** (AE-6);
+- **pause intent** (AE-2).
+
+The harness (`make eval`, AI-7) is ready. Prepare the samples and set up the providers, then run it (§11.5).
+
+### 11.1 Questions it answers
+
+1. Does a model beat the rules alone, without cutting real content?
+2. Which provider and model should be the default preset? Quality comes first, then cost and speed.
+3. Is the free local model (Qwen3.5 9B in LM Studio) good enough to recommend?
+4. Did a prompt change help or hurt? Re-run after every prompt change.
+
+### 11.2 Your part: the sample set
+
+**Where.** Keep the samples outside the repository: it's public, and these are recordings of your voice.
+
+```
+~/PankaptureEval/
+├── samples/
+│   ├── dev/                      ← used while tuning prompts
+│   │   ├── en-01-settings-tour/
+│   │   │   ├── recording.mp4     ← the file Pankapture saved, untouched
+│   │   │   └── labels.tsv
+│   │   └── es-01-…/
+│   └── test/                     ← held out: scored once, at the end
+└── results/                      ← written by the harness
+```
+
+- Each sample folder's name starts with its language: `en-` or `es-`.
+- Record with the **microphone on** and the camera off. The camera doesn't matter for this test, and a camera recording's saved copy is a composite.
+- System audio can be on. Use your usual mic and room.
+
+**How many.** 16 recordings: 8 in English and 8 in Spanish, 2–8 minutes each, about 60–90 minutes in total. Put 12 in `dev/`. Put 4 in `test/`: 2 per language, one of which is a control.
+
+**What to record, per language:**
+
+| Count | Kind | What to do |
+|---|---|---|
+| 3 | Natural | Real walkthroughs, recorded the way you normally would. Don't stage mistakes, and don't redo the ones that happen. |
+| 2 | Staged mistakes | At least 4 mistakes each, of different types:<br>• a correction with a cue ("wait, sorry, I meant…", "perdón, digo…")<br>• a false start you abandon mid-sentence<br>• a sentence repeated whole, with no cue<br>• a stutter ("the the", "vamos a, vamos a") |
+| 1 | Pacing | Clear sections separated by deliberate 2–3 s pauses, one dramatic pause for emphasis, a silent stretch where you click around without talking, and some natural hesitations mid-sentence. |
+| 2 | Controls | Clean takes with **no mistakes**. Include lines that look like mistakes but aren't:<br>• emphasis ("very, very important", "no, no, no lo hagas así")<br>• quoted corrections ("people say April, but it's May")<br>• a deliberate repeat for teaching<br>These catch false positives. |
+
+Ask your friend to record 2–4 of them, so the set has a second voice.
+
+### 11.3 Your part: labeling
+
+Each sample gets a `labels.tsv`: tab-separated values, one header row, times written as `m:ss.s`. To find the times, open the recording in Pankapture's editor; the playhead time shows tenths of a second. Within ±0.3 s is accurate enough, because the harness scores by overlap.
+
+```
+start	end	kind	note
+0:12.4	0:15.1	retake	"April. Wait, sorry, I meant" → keeps "May"
+1:02.0	1:04.8	false_start	"So what we're going to—"
+1:30.2	1:33.9	repeat	first of two identical sentences
+2:10.5	2:13.0	section_pause	intro → settings
+2:41.0	2:42.6	emphasis_pause	before the reveal
+3:40.0	3:52.0	action_pause	clicking through the menu without talking
+```
+
+| Kind | What it marks | Expected outcome |
+|---|---|---|
+| `retake` | The abandoned part of a correction, including the cue words | Removed |
+| `false_start` | A sentence started and abandoned | Removed |
+| `repeat` | The earlier copy of something said twice, or a stutter | Removed |
+| `section_pause` | A deliberate break between parts | Kept; shortened at most to the section length |
+| `emphasis_pause` | A deliberate dramatic pause | Kept; shortened at most to the emphasis length |
+| `action_pause` | Silence while you do something on screen | Not cut |
+
+- Label what should **disappear**, not what stays. For "the numbers for April. Wait, sorry, I meant May", label from the start of "April" to the end of "meant".
+- When two takes are both fine, the last one is the keeper.
+- Pauses you don't label count as hesitations or sentence breaks, which are fine to shorten.
+- Filler words don't need labels: rules handle them, and they aren't scored here.
+- A control gets a `labels.tsv` with only the header row, plus any deliberate pauses.
+- If you're unsure about a spot, put `?` in its note. The harness lists those separately instead of scoring them.
+
+### 11.4 Setting up the providers
+
+Start with two providers:
+- **Qwen3.5 9B in LM Studio:** local, free and private.
+- **OpenAI gpt-6-luna:** cloud, about $0.001 per recording.
+
+The harness always scores the **rules alone** too, as the baseline.
+
+**LM Studio + Qwen3.5 9B.** You need a 16 GB Mac; the model needs about 7 GB of memory. The `lms` command-line tool comes with LM Studio, in `~/.lmstudio/bin`.
+
+1. Download the model in MLX format, picking the 4-bit variant when asked (about 6 GB):
+   ```
+   lms get qwen/qwen3.5-9b --mlx -a
+   ```
+2. **Turn thinking off.** Qwen3.5 reasons before answering by default, which is slow and gets in the way of strict JSON. LM Studio's OpenAI-compatible endpoint has no per-request switch for it, so set it on the model: open its settings (My Models → Qwen3.5 9B → ⚙︎) and turn **Enable Thinking** off. The smoke test below shows whether it worked.
+3. Load the model with room for long transcripts. A 15-minute transcript plus instructions is about 6–8K tokens.
+   ```
+   lms load qwen/qwen3.5-9b --context-length 32768 --identifier qwen3.5-9b
+   ```
+4. Start the server. It listens on `http://localhost:1234/v1`, on this Mac only, and keeps running until you run `lms server stop` or quit LM Studio. Don't add `--bind 0.0.0.0` or `--cors`.
+   ```
+   lms server start
+   ```
+
+**OpenAI gpt-6-luna.**
+
+1. Create an API key in the OpenAI dashboard (platform.openai.com → API keys). Prefer a project key used only for this.
+2. Set a monthly budget limit for that project, e.g. $5. The whole evaluation costs cents.
+3. Put the key in your shell for the session only. Never put it in a file inside the repository. (The app stores keys in the Keychain, per AI-3; the harness reads environment variables.)
+   ```
+   export OPENAI_API_KEY="sk-…"
+   ```
+4. Request settings the harness uses:
+   - model `gpt-6-luna`;
+   - strict JSON-schema output;
+   - no temperature;
+   - `reasoning_effort` at both `none` and `low`, to see whether thinking helps. The model's default is `medium`, which bills more thinking tokens.
+
+**Smoke test, for both providers, today.** It checks that each endpoint returns valid JSON for a tiny transcript. Save the request once:
+
+```
+mkdir -p ~/PankaptureEval
+cat > ~/PankaptureEval/smoke.json <<'EOF'
+{
+  "messages": [
+    {"role": "system", "content": "You edit screen recordings. Given numbered words, list the word ranges to cut: retakes, false starts, repeats. Keep the last take."},
+    {"role": "user", "content": "[0]The [1]numbers [2]for [3]April. [4]Wait, [5]sorry, [6]I [7]meant [8]May [9]are [10]on [11]target."}
+  ],
+  "response_format": {
+    "type": "json_schema",
+    "json_schema": {
+      "name": "cuts",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "cuts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "from": {"type": "integer"},
+                "to": {"type": "integer"},
+                "kind": {"type": "string", "enum": ["retake", "false_start", "repeat"]}
+              },
+              "required": ["from", "to", "kind"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["cuts"],
+        "additionalProperties": false
+      }
+    }
+  }
+}
+EOF
+```
+
+LM Studio:
+
+```
+jq '. + {model: "qwen3.5-9b"}' ~/PankaptureEval/smoke.json \
+  | curl -s http://localhost:1234/v1/chat/completions \
+      -H "Content-Type: application/json" -d @- \
+  | jq -r '.choices[0].message.content'
+```
+
+OpenAI:
+
+```
+jq '. + {model: "gpt-6-luna", reasoning_effort: "none"}' ~/PankaptureEval/smoke.json \
+  | curl -s https://api.openai.com/v1/chat/completions \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer $OPENAI_API_KEY" -d @- \
+  | jq -r '.choices[0].message.content'
+```
+
+Both should print something like `{"cuts":[{"from":3,"to":7,"kind":"retake"}]}`.
+- If it prints `null`, run the command without the last `| jq …` to see the error.
+- If LM Studio shows reasoning text, or takes more than a few seconds, thinking is still on.
+
+### 11.5 Running it
+
+```
+export OPENAI_API_KEY="sk-…"
+make eval EVAL_DIR=~/PankaptureEval \
+  PROVIDERS="lmstudio:qwen3.5-9b openai:gpt-6-luna@none openai:gpt-6-luna@low" \
+  RUNS=3
+```
+
+- `EVAL_DIR` defaults to `~/PankaptureEval`.
+- Leave `PROVIDERS` out to score the rules alone. That's a quick way to check your labels before spending anything.
+- Each provider is `preset[:model][@effort]`. The presets are `anthropic`, `openai`, `gemini`, `groq`, `openrouter`, `lmstudio`, `ollama` and `custom` (set `CUSTOM_BASE_URL`).
+- Keys come from `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY` and `OPENROUTER_API_KEY`.
+- `SPLIT=all` scores both splits.
+- `ONLY=en-01` runs only the samples whose folder name contains `en-01`.
+- If LM Studio or Ollama isn't answering, that provider is skipped with a note instead of failing every sample.
+
+For each sample, the harness:
+1. Transcribes the microphone track on device and detects pauses, with the same code the app uses. The transcript is cached, so later runs skip this step.
+2. Sends each provider the same prompt the app sends, `RUNS` times, because model answers vary between runs.
+3. Turns the answers into time ranges and scores them against `labels.tsv`, next to the rules-only baseline.
+4. Writes `results/<date-time>/report.md` (scores, plus each disagreement with its timestamp) and the raw answers as JSON.
+
+It scores `dev/` by default. `SPLIT=test` scores the held-out set; run that once, when choosing the default. A full run over the whole set costs well under $1 on OpenAI, and nothing on LM Studio.
+
+### 11.6 Scores and pass bar
+
+| Metric | How it's measured | Bar |
+|---|---|---|
+| Mistake recall | Share of labeled `retake` / `false_start` / `repeat` ranges that suggested cuts cover by at least 70% | ≥ 80% |
+| Mistake precision | Share of suggested mistake-cut time that falls inside labeled ranges | ≥ 90% |
+| Content lost | Seconds of suggested cuts over words outside any removal label, per 10 min of audio | ≤ 1 s |
+| Control false positives | Mistake cuts suggested on a control recording | ≤ 1 per control |
+| Deliberate pauses kept | Share of labeled section, emphasis and action pauses judged deliberate (not shortened to hesitation length) | ≥ 85% |
+| Hesitations shortened | Share of unlabeled pauses of 1 s or more judged a hesitation or sentence break | ≥ 80% |
+| Valid answers | Share of answers that match the schema on the first try (one retry allowed) | 100% cloud, ≥ 95% local |
+| Stability | Share of decisions that change between runs of the same sample | ≤ 10% |
+| Speed and cost | Median seconds and dollars per 10 minutes of recording | Reported only |
+
+A model must beat the rules-only baseline on mistake recall or on deliberate pauses kept, and meet every bar.
+
+### 11.7 Deciding
+
+1. Open the latest `report.md`. For each disagreement, play that spot in the editor. If your label was wrong, fix `labels.tsv` (labels are data too) and run again.
+2. Tune prompts on `dev/` only. After each change, re-run and compare with the previous report.
+3. When the prompt is settled, run `SPLIT=test` once.
+   - The best provider that meets every bar on the test set becomes the default preset. Ties go to the cheaper, faster or local option.
+   - If Qwen3.5 9B meets every bar, it becomes the recommended free preset.
+4. Record the result in §9 (question 7) and as an ADR.

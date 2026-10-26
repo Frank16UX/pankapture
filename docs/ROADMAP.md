@@ -108,3 +108,34 @@ The day this lands, the old screenshot tool can be uninstalled.
 - [ ] Performance pass against every PRD §6.1 target on an M1 8 GB machine
 - [ ] Accessibility audit (DESIGN §8) on every surface
 - [ ] Two-week "daily driver" success-criteria run (PRD §7)
+
+## M8 · Smart editing
+
+Auto-edit, captions, voice cleanup, and camera backgrounds (PRD §5.11–5.12), on macOS 26+. The technical design is in [AUTO-EDIT.md](AUTO-EDIT.md). The analysis engine and the evaluation come first, so prompts are tuned on real recordings before the editor UI is built.
+
+**Before the evaluation:** record and label the sample set, then set up LM Studio and gpt-6-luna (PRD §11.2–11.4).
+
+1. **Engine + evaluation** (no UI) ✅ — modules `Transcription`, `AIProviders`, `AutoEdit`; `make eval` (ADR-30–33)
+   - [x] On-device transcription, English and Spanish (AE-1)
+   - [x] Pause detection and intent rules (AE-2); filler, repeat and retake rules (AE-4–AE-6)
+   - [x] Provider layer: Anthropic + OpenAI-compatible, checked JSON answers (AI-2, AI-6)
+   - [x] `make eval` harness and report (AI-7, PRD §11)
+2. **Auto-edit in the editor** ✅ (ADR-34) (needs QA: a long recording with hundreds of cuts; dragging edges with a real mouse)
+   - [x] Automatic-edit layer, review by kind and one at a time (AE-7)
+   - [x] Pacing presets (AE-3); adjustable segments (AE-8); clean joins (AE-9)
+   - [x] Settings ▸ AI: presets, Keychain keys, Test connection (AI-1, AI-3, AI-4)
+3. **Transcript**
+   - [ ] Transcript panel: seek, select to cut, zoom from selection (AE-10)
+   - [ ] Stutters found from the audio (AE-5)
+   - [ ] Optional cloud transcription (AI-5)
+4. **Captions**
+   - [ ] Cues, corrections, burned-in styles (CAP-1–CAP-3); .srt / .vtt (CAP-4)
+5. **Audio**
+   - [ ] Noise removal presets and normalization (AU-1–AU-3)
+6. **Camera**
+   - [ ] Blur, replace, remove; green screen (CAM-1, CAM-2)
+   - [ ] Default background; Video Effects button (CAM-3, CAM-4)
+7. **Decide**
+   - [ ] Pick the default provider from the test split (PRD §11.7); record it as an ADR
+
+**QA:** a 15 min recording with about 400 cuts plays smoothly; joins don't click; deliberate pauses survive Tight pacing; a camera background on the M1 preview.

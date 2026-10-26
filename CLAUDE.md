@@ -7,6 +7,7 @@ Read first: `docs/PRD.md` (requirements with IDs), `docs/ARCHITECTURE.md` (decis
 ## Commands
 
 - `make build`: debug compile. `make test`: unit tests. `make run`: bundle + launch `build/Pankapture.app`.
+- `make eval PROVIDERS="lmstudio:qwen3.5-9b"`: scores auto-edit on the labeled recordings in `~/PankaptureEval` (PRD §11). Without `PROVIDERS` it scores the rules alone.
 - Always run `make test` (not bare `swift test`): with the Command Line Tools toolchain it adds the swift-testing plugin path that `swift test` otherwise intermittently misses.
 - Logs: `make logs` (zsh shadows `log`; use `/usr/bin/log`).
 

@@ -57,6 +57,7 @@ Video editor (after a recording: the thumbnail, the notification, or **Edit Last
 |---|---|
 | `make build` | Debug compile |
 | `make test` | Unit tests (Swift Testing) |
+| `make eval` | Score auto-edit on labeled recordings ([PRD §11](docs/PRD.md#11-appendix-auto-edit-evaluation)) |
 | `make app` | Release `.app` into `build/` |
 | `make run` | Build + (re)launch |
 | `make dmg` | Release `.app` packaged as `build/Pankapture.dmg` |
