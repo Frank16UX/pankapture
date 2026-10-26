@@ -32,16 +32,22 @@ public enum VideoExporter {
         defer { Log.signposter.endInterval("exportMP4", interval) }
 
         let fps = settings.frameRate.resolve(sourceFrameRate: source.frameRate)
-        // Loads the tracks and the background, and the cleaned-up voice if the project has one.
+        // Loads the tracks and the background, and the cleaned-up voice if the
+        // project has one. Making that voice, when it isn't cached, takes the
+        // first quarter of the progress.
+        let microphone = source.audioTracks.first { $0.role == .microphone }
+        let voiceShare = project.voice.map { $0.isActive && microphone != nil && VoiceProcessor.cached(for: source.url, settings: $0) == nil } == true
+            ? 0.25 : 0
         let edit = try await CompositionBuilder.build(
             source: source,
             project: project,
-            options: .init(shortSide: settings.resolution.shortSide, frameRate: fps)
+            options: .init(shortSide: settings.resolution.shortSide, frameRate: fps),
+            voiceProgress: { progress($0 * voiceShare) }
         )
         let bitrate = ExportEstimator.videoBitrate(renderSize: edit.plan.renderSize, fps: fps, quality: settings.quality)
 
         try? FileManager.default.removeItem(at: url)
-        let job = try MP4WriterJob(edit: edit, url: url, fps: fps, bitrate: bitrate, progress: progress)
+        let job = try MP4WriterJob(edit: edit, url: url, fps: fps, bitrate: bitrate) { progress(voiceShare + (1 - voiceShare) * $0) }
         Log.editor.info("MP4 export started: \(Int(edit.plan.renderSize.width))×\(Int(edit.plan.renderSize.height)) @ \(fps) fps, \(Int(bitrate / 1000)) kbps")
         do {
             try await job.run()

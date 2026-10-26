@@ -30,8 +30,8 @@ public struct LoadedTracks {
     public let audio: [CMPersistentTrackID: AVAssetTrack]
     public var camera: AVAssetTrack?
     /// The cleaned-up microphone (PRD AU-1), used instead of the recorded
-    /// one when the project asks for it, and where it starts on the timeline.
-    public var processedVoice: (track: AVAssetTrack, startTime: Double)?
+    /// one when the project asks for it.
+    public var processedVoice: ProcessedVoice?
 
     public init(video: AVAssetTrack, audio: [CMPersistentTrackID: AVAssetTrack], camera: AVAssetTrack? = nil) {
         self.video = video
@@ -39,16 +39,22 @@ public struct LoadedTracks {
         self.camera = camera
     }
 
-    /// Loads the processed voice file's audio track.
-    public mutating func useProcessedVoice(_ output: VoiceProcessor.Output?) async {
-        guard let output else {
-            processedVoice = nil
-            return
-        }
+}
+
+/// A processed voice file, loaded for a composition.
+public struct ProcessedVoice {
+    /// Held so `track` stays usable: a track only holds its asset weakly.
+    public let asset: AVURLAsset
+    public let track: AVAssetTrack
+    /// Where the file's first sample sits on the recording's timeline.
+    public let startTime: Double
+
+    public static func load(_ output: VoiceProcessor.Output) async throws -> ProcessedVoice {
         let asset = AVURLAsset(url: output.url)
-        if let track = try? await asset.loadTracks(withMediaType: .audio).first {
-            processedVoice = (track, output.startTime)
+        guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
+            throw VoiceProcessor.Failure.renderFailed("the processed voice has no audio")
         }
+        return ProcessedVoice(asset: asset, track: track, startTime: output.startTime)
     }
 }
 

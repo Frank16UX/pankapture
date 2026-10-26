@@ -50,6 +50,11 @@ public struct CameraBackgroundControls: View {
                 get: { background.keyColor.swiftUIColor },
                 set: { background.keyColor = RGBAColor($0) }
             ), supportsOpacity: false)
+            if !background.keyColorIsUsable {
+                Label("This color is too gray to tell apart from you. Pick the screen's color.", systemImage: "exclamationmark.triangle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             slider("Tolerance", value: $background.tolerance)
             slider("Remove Spill", value: $background.spill)
         }
@@ -107,7 +112,9 @@ public struct CameraBackgroundControls: View {
         panel.canChooseDirectories = false
         panel.message = "Choose a picture to show behind you"
         panel.prompt = "Use Picture"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        background.imageURL = url
+        // Copied into the app's backgrounds, so moving the original doesn't lose it.
+        guard panel.runModal() == .OK, let url = panel.url,
+              case let .image(copy) = try? BackgroundLibrary.importFile(url) else { return }
+        background.imageURL = copy
     }
 }

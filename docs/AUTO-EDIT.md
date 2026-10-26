@@ -238,7 +238,8 @@ Microphone track ─┬─▶ loudness envelope (10 ms frames) ──▶ pauses 
   - Target **−16 LUFS** with a −1 dBFS ceiling.
   - The limiter is sample-peak only (no true-peak is documented); 4× oversampling is optional.
   - The gain must be **baked into the processed file**, because audio-mix volume can't go above 1.0.
-- **Cache:** `Application Support/Pankapture/ProcessedAudio/<video>.<setting>.m4a`, deletable and regenerated on demand. A JSON sidecar holds the recording's fingerprint (size and date) and the track's start time.
+- **Cache:** `Application Support/Pankapture/ProcessedAudio/<video>-<path hash>.<setting>.m4a`, deletable and regenerated on demand. A JSON sidecar holds the pipeline version, the recording's fingerprint (size and date) and the track's start time.
+- **Isolation delay:** `AUSoundIsolation` delays its output by about 57 ms (92 ms at Max) without reporting it; it's measured per render and removed (ADR-37).
   - `CompositionBuilder` swaps it in for the microphone track and keeps the original track's start offset.
   - The waveform lane shows the processed audio.
   - A 15-minute recording takes about 20 s for the two passes (isolate and measure, then gain and limit), with progress shown.

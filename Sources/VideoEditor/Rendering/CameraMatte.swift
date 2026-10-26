@@ -76,7 +76,8 @@ public enum CameraMatte {
             return nil
         }
         guard let buffer = request.results?.first?.pixelBuffer else { return nil }
-        let mask = CIImage(cvPixelBuffer: buffer)
+        // Raw coverage, not a gray picture to color-manage.
+        let mask = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: NSNull()])
         let extent = image.extent
         guard mask.extent.width > 0, mask.extent.height > 0 else { return nil }
         let scaled = mask.transformed(by: CGAffineTransform(scaleX: extent.width / mask.extent.width,
@@ -108,18 +109,15 @@ public enum CameraMatte {
     /// what's left; `nil` when the key color is too gray to key on.
     static func chromaKeyed(_ image: CIImage, key: RGBAColor, tolerance: Double, spill: Double) -> CIImage? {
         let cubeKey = CubeKey(key: key, tolerance: tolerance, spill: spill)
-        let cached = cubes.withLock { $0[cubeKey] }
-        let data: Data
-        if let cached {
-            data = cached
-        } else {
+        // Built under the lock, so frames rendered at the same time share one build.
+        let data = cubes.withLock { cache -> Data? in
+            if let cached = cache[cubeKey] { return cached }
             guard let made = cubeData(key: key, tolerance: tolerance, spill: spill, dimension: cubeDimension) else { return nil }
-            data = made
-            cubes.withLock { cache in
-                if cache.count >= 8 { cache.removeAll() }
-                cache[cubeKey] = made
-            }
+            if cache.count >= 8 { cache.removeAll() }
+            cache[cubeKey] = made
+            return made
         }
+        guard let data else { return nil }
         let filter = CIFilter.colorCubeWithColorSpace()
         filter.inputImage = image
         filter.cubeDimension = Float(cubeDimension)
@@ -128,17 +126,27 @@ public enum CameraMatte {
         return filter.outputImage?.cropped(to: image.extent)
     }
 
-    /// A color-difference keyer as an RGBA lookup cube (premultiplied, red
-    /// varying fastest): how far a color's key channel rises above the
-    /// other two, relative to the key color's, decides its transparency.
-    static func cubeData(key: RGBAColor, tolerance: Double, spill: Double, dimension: Int) -> Data? {
-        let keyChannels = [key.red, key.green, key.blue]
-        guard let dominant = keyChannels.indices.max(by: { keyChannels[$0] < keyChannels[$1] }) else { return nil }
-        let others = keyChannels.indices.filter { $0 != dominant }
-        let keyExcess = keyChannels[dominant] - max(keyChannels[others[0]], keyChannels[others[1]])
-        guard keyExcess > 0.05 else { return nil }
+    /// How strongly `color` leans toward one channel, relative to its
+    /// brightness, and which channel; `nil` for grays.
+    static func keyStrength(of color: RGBAColor) -> (channel: Int, strength: Double)? {
+        let channels = [color.red, color.green, color.blue]
+        let dominant = channels.indices.max { channels[$0] < channels[$1] }!
+        let rest = channels.indices.filter { $0 != dominant }.map { channels[$0] }.max()!
+        let excess = channels[dominant] - rest
+        guard excess > 0.05, channels[dominant] > 0 else { return nil }
+        return (dominant, excess / channels[dominant])
+    }
 
-        // A ratio above `transparentAbove` is the screen; below `opaqueBelow`, the person.
+    /// A color-difference keyer as an RGBA lookup cube (straight alpha, red
+    /// varying fastest). A color is screen when its key channel rises above
+    /// the other two as much as the key color's does, relative to its own
+    /// brightness, so shadows on the screen key too; near-black never does.
+    static func cubeData(key: RGBAColor, tolerance: Double, spill: Double, dimension: Int) -> Data? {
+        guard let (dominant, keyStrength) = keyStrength(of: key) else { return nil }
+        let first = (dominant + 1) % 3
+        let second = (dominant + 2) % 3
+
+        // A score (1 = as strong as the key) above `transparentAbove` is the screen; below `opaqueBelow`, the person.
         let transparentAbove = 0.8 - 0.55 * tolerance.clamped(to: 0...1)
         let opaqueBelow = transparentAbove - 0.25
         let spillAmount = spill.clamped(to: 0...1)
@@ -146,16 +154,22 @@ public enum CameraMatte {
         var values = [Float](repeating: 0, count: dimension * dimension * dimension * 4)
         let step = 1 / Double(dimension - 1)
         var index = 0
+        var color = SIMD3<Double>()
         for blue in 0..<dimension {
             for green in 0..<dimension {
                 for red in 0..<dimension {
-                    var color = [Double(red) * step, Double(green) * step, Double(blue) * step]
-                    let excess = color[dominant] - max(color[others[0]], color[others[1]])
-                    let alpha = 1 - smoothstep(opaqueBelow, transparentAbove, excess / keyExcess)
-                    if excess > 0 { color[dominant] -= spillAmount * excess }
-                    values[index] = Float(color[0] * alpha)
-                    values[index + 1] = Float(color[1] * alpha)
-                    values[index + 2] = Float(color[2] * alpha)
+                    color = SIMD3(Double(red) * step, Double(green) * step, Double(blue) * step)
+                    let excess = color[dominant] - max(color[first], color[second])
+                    var alpha = 1.0
+                    if excess > 0 {
+                        let score = (excess / color[dominant]) / keyStrength * smoothstep(0.02, 0.1, color[dominant])
+                        alpha = 1 - smoothstep(opaqueBelow, transparentAbove, score)
+                        color[dominant] -= spillAmount * excess
+                    }
+                    // Core Image multiplies by alpha itself.
+                    values[index] = Float(color.x)
+                    values[index + 1] = Float(color.y)
+                    values[index + 2] = Float(color.z)
                     values[index + 3] = Float(alpha)
                     index += 4
                 }
@@ -171,17 +185,12 @@ public enum CameraMatte {
 
     // MARK: Replacement picture
 
-    private struct Picture {
-        var url: URL
-        var image: CIImage
-    }
-
-    private static let picture = Mutex<Picture?>(nil)
+    private static let pictures = Mutex<[URL: CIImage]>([:])
 
     /// The picture scaled to cover `extent`, decoded once (at most 1920 px).
     static func replacementPicture(at url: URL, filling extent: CGRect) -> CIImage? {
         let image: CIImage
-        if let cached = picture.withLock({ $0?.url == url ? $0?.image : nil }) {
+        if let cached = pictures.withLock({ $0[url] }) {
             image = cached
         } else {
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
@@ -191,7 +200,10 @@ public enum CameraMatte {
                       kCGImageSourceThumbnailMaxPixelSize: 1920,
                   ] as CFDictionary) else { return nil }
             image = CIImage(cgImage: decoded)
-            picture.withLock { $0 = Picture(url: url, image: image) }
+            pictures.withLock { cache in
+                if cache.count >= 4 { cache.removeAll() }
+                cache[url] = image
+            }
         }
         let size = image.extent.size
         guard size.width > 0, size.height > 0 else { return nil }

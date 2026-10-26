@@ -102,6 +102,34 @@ struct CameraBackgroundTests {
         #expect(CameraMatte.cubeData(key: RGBAColor(red: 0.5, green: 0.5, blue: 0.5), tolerance: 0.4, spill: 0.5, dimension: dimension) == nil)
     }
 
+    /// Half-keyed pixels come out at half strength, not darker.
+    @Test func partlyKeyedColorsKeepTheirBrightness() throws {
+        // Leans to green 18/40 = 0.45 of its brightness; the key, 0.5/0.75.
+        // At tolerance 0 that's halfway between kept and removed.
+        let color = RGBAColor(red: 22.0 / 63, green: 40.0 / 63, blue: 22.0 / 63)
+        let frame = solid(color, CGRect(x: 0, y: 0, width: 8, height: 8))
+        let keyed = try #require(CameraMatte.chromaKeyed(frame, key: Self.screenGreen, tolerance: 0, spill: 0))
+        let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0)).cropped(to: frame.extent)
+        let pixel = pixels(keyed.composited(over: black), size: CGSize(width: 8, height: 8))(4, 4)
+        #expect(close(pixel, (Int(22.0 / 63 * 0.5 * 255), Int(40.0 / 63 * 0.5 * 255), Int(22.0 / 63 * 0.5 * 255)), within: 4), "\(pixel)")
+    }
+
+    @Test func shadowsOnTheScreenKeyToo() throws {
+        let shadow = solid(RGBAColor(red: 0.05, green: 0.3, blue: 0.1), CGRect(x: 0, y: 0, width: 8, height: 8))
+        let keyed = try #require(CameraMatte.chromaKeyed(shadow, key: Self.screenGreen, tolerance: 0.4, spill: 0.5))
+        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: shadow.extent)
+        #expect(close(pixels(keyed.composited(over: white), size: CGSize(width: 8, height: 8))(4, 4), (255, 255, 255), within: 6))
+        // Near-black stays, whatever its tint.
+        let dark = solid(RGBAColor(red: 0, green: 0.03, blue: 0), CGRect(x: 0, y: 0, width: 8, height: 8))
+        let kept = try #require(CameraMatte.chromaKeyed(dark, key: Self.screenGreen, tolerance: 0.4, spill: 0))
+        #expect(close(pixels(kept.composited(over: white), size: CGSize(width: 8, height: 8))(4, 4), (0, 8, 0), within: 6))
+    }
+
+    @Test func grayKeyColorIsFlagged() {
+        #expect(CameraBackground(keyColor: Self.screenGreen).keyColorIsUsable)
+        #expect(!CameraBackground(keyColor: RGBAColor(red: 0.5, green: 0.52, blue: 0.5)).keyColorIsUsable)
+    }
+
     // MARK: Rendering
 
     /// Renders a 200×100 frame with the camera layer in the middle (80×60,

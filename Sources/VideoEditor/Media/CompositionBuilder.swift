@@ -89,12 +89,20 @@ public enum CompositionBuilder {
         CMTimeRange(start: cmTime(range.start), end: cmTime(range.end))
     }
 
-    public static func build(source: SourceMedia, project: VideoEditProject, options: Options) async throws -> sending EditComposition {
+    /// - Parameter voiceProgress: 0…1 while the cleaned-up voice is made
+    ///   (only when it isn't cached yet).
+    public static func build(
+        source: SourceMedia,
+        project: VideoEditProject,
+        options: Options,
+        voiceProgress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> sending EditComposition {
         var tracks = try await source.loadTracks()
         // Exports get the cleaned-up voice, processing it now if needed.
         if let voice = project.voice, voice.isActive, let microphone = source.audioTracks.first(where: { $0.role == .microphone }) {
-            let output = try await VoiceProcessor.process(source: source.url, microphoneTrackID: microphone.trackID, settings: voice)
-            await tracks.useProcessedVoice(output)
+            let output = try await VoiceProcessor.process(source: source.url, microphoneTrackID: microphone.trackID,
+                                                          settings: voice, progress: voiceProgress)
+            tracks.processedVoice = try await ProcessedVoice.load(output)
         }
         let background = await BackgroundVideo.load(for: project)
         return try build(source: source, tracks: tracks, project: project, options: options, background: background)
@@ -165,8 +173,14 @@ public enum CompositionBuilder {
                 // Never past the last video frame (see `SourceMedia.duration`).
                 guard let range = segment.source.intersection(audio.source.timeRange)?
                     .intersection(TimeRange(start: 0, end: source.duration)) else { continue }
-                let offset = cmTime(range.start) - cmTime(segment.source.start)
-                let shifted = TimeRange(start: range.start - audio.shift, end: range.end - audio.shift)
+                var offset = cmTime(range.start) - cmTime(segment.source.start)
+                var shifted = TimeRange(start: range.start - audio.shift, end: range.end - audio.shift)
+                // A file starting after the track's nominal start has nothing before its first sample.
+                if shifted.start < 0 {
+                    offset = offset + cmTime(-shifted.start)
+                    shifted.start = 0
+                }
+                guard shifted.end > shifted.start else { continue }
                 try audio.composition.insertTimeRange(cmRange(shifted), of: audio.track, at: pieceStart + offset)
             }
 

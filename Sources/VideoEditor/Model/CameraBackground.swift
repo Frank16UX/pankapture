@@ -91,6 +91,9 @@ public struct CameraBackground: Codable, Hashable, Sendable {
     /// The matte actually used: blur always segments the person.
     public var effectiveMatte: Matte { effect == .blur ? .person : matte }
 
+    /// A gray key color can't be told apart from the person.
+    public var keyColorIsUsable: Bool { CameraMatte.keyStrength(of: keyColor) != nil }
+
     /// Whether the camera's shape and shadow are drawn.
     public var drawsShape: Bool { effect != .remove || keepsShape }
 

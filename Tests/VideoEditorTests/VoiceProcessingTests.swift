@@ -1,3 +1,4 @@
+import AppCore
 import AudioToolbox
 import AVFoundation
 import Foundation
@@ -84,6 +85,85 @@ struct VoiceProcessingTests {
 
         let file = try AVAudioFile(forReading: output)
         #expect(abs(Double(file.length) / file.fileFormat.sampleRate - 3) < 0.2)
+    }
+
+    /// Writes `seconds` of mono 48 kHz audio: two tones in bursts of
+    /// uneven length, so the envelope has a shape to line up.
+    static func writeBursts(to url: URL, seconds: Double) throws {
+        let rate = 48_000.0
+        let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: 1, interleaved: false))
+        let file = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        let count = Int(seconds * rate)
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)))
+        let pattern = [0.13, 0.31, 0.07, 0.22, 0.41, 0.09, 0.17, 0.27]
+        let channel = try #require(buffer.floatChannelData?[0])
+        var edge = 0.0
+        var on = true
+        var step = 0
+        for i in 0..<count {
+            let t = Double(i) / rate
+            if t >= edge {
+                edge += pattern[step % pattern.count]
+                step += 1
+                on.toggle()
+            }
+            channel[i] = on ? Float(0.3 * sin(2 * .pi * 220 * t) + 0.2 * sin(2 * .pi * 660 * t)) : 0
+        }
+        buffer.frameLength = AVAudioFrameCount(count)
+        try file.write(from: buffer)
+    }
+
+    /// Voice isolation delays its output; the second pass takes the delay
+    /// back out, so the cleaned voice lines up with the original.
+    @Test func noiseRemovalStaysInSync() throws {
+        var description = AudioComponentDescription(
+            componentType: kAudioUnitType_Effect, componentSubType: kAudioUnitSubType_AUSoundIsolation,
+            componentManufacturer: kAudioUnitManufacturer_Apple, componentFlags: 0, componentFlagsMask: 0
+        )
+        guard AudioComponentFindNext(nil, &description) != nil else { return }
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let original = directory.appendingPathComponent("voice.caf")
+        try Self.writeBursts(to: original, seconds: 4)
+        let length = try AVAudioFile(forReading: original).length
+
+        let isolated = directory.appendingPathComponent("isolated.caf")
+        try VoiceProcessor.render(input: original, output: isolated, isolation: .medium, limiterGain: nil,
+                                  extraFrames: AVAudioFramePosition(VoiceProcessor.maximumIsolationDelay)) { _ in }
+        let delay = try VoiceProcessor.measureDelay(original: original, processed: isolated, maximum: VoiceProcessor.maximumIsolationDelay)
+            ?? VoiceProcessor.typicalIsolationDelay(.medium)
+
+        let aligned = directory.appendingPathComponent("aligned.caf")
+        try VoiceProcessor.render(input: isolated, output: aligned, isolation: .off, limiterGain: 0,
+                                  startFrame: AVAudioFramePosition(delay), frameCount: length) { _ in }
+        #expect(try AVAudioFile(forReading: aligned).length == length)
+        let remaining = try #require(try VoiceProcessor.measureDelay(original: original, processed: aligned, maximum: 4_800))
+        #expect(remaining <= 48, "still \(remaining) samples late (isolation delay \(delay))")
+    }
+
+    /// The composition keeps the processed voice usable after it's loaded,
+    /// cuts included (the track alone doesn't keep its file open).
+    @Test func compositionUsesTheProcessedVoice() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let movie = try await TestMovie.make(TestMovie.Spec(duration: 3, audioAmplitudes: [0.2, 0.05]), in: directory)
+        let source = try await SourceMedia.load(url: movie)
+        let microphone = try #require(source.audioTracks.first { $0.role == .microphone })
+        let settings = VoiceProcessing(normalizes: true)
+        let rendered = try await VoiceProcessor.render(source: movie, microphoneTrackID: microphone.trackID, settings: settings, in: directory)
+
+        var tracks = try await source.loadTracks()
+        tracks.processedVoice = try await ProcessedVoice.load(VoiceProcessor.Output(url: rendered.url, startTime: rendered.startTime))
+        var project = VideoEditProject(sourceURL: movie, sourceDuration: source.duration)
+        project.voice = settings
+        project.cuts = [TimeRange(start: 1, end: 1.5)]
+        let edit = try CompositionBuilder.build(source: source, tracks: tracks, project: project, options: .init(), background: nil)
+        let audio = try await edit.composition.loadTracks(withMediaType: .audio)
+        #expect(audio.count == 2)
+        for track in audio {
+            let range = try await track.load(.timeRange)
+            #expect(abs(range.duration.seconds - 2.5) < 0.1)
+        }
     }
 
     /// Runs the voice-isolation unit on a tone, where it's installed.

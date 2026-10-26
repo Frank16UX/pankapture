@@ -94,6 +94,9 @@ final class VideoEditorModel {
     /// preview uses the original voice until the cleaned one is ready.
     private(set) var voiceState: VoiceState = .idle
     @ObservationIgnored private var voiceTask: Task<Void, Never>?
+    /// Each voice change gets a number; only the latest may touch the state.
+    @ObservationIgnored private var voiceRun = 0
+    @ObservationIgnored private var waveformTasks: [CMPersistentTrackID: Task<Void, Never>] = [:]
     @ObservationIgnored var autoEditTask: Task<Void, Never>?
     /// Each analysis run gets a generation; a cancelled run that is still
     /// winding down must not touch the state of a newer one.
@@ -212,13 +215,7 @@ final class VideoEditorModel {
             self?.filmstrip = frames
         })
         for track in media.audioTracks {
-            let extraction = Task.detached(priority: .utility) {
-                try await WaveformExtractor.waveform(asset: asset, trackID: track.trackID)
-            }
-            analysisTasks.append(Task { [weak self] in
-                let waveform = try? await withTaskCancellationHandler { try await extraction.value } onCancel: { extraction.cancel() }
-                if let waveform { self?.waveforms[track.trackID] = waveform }
-            })
+            loadWaveform(for: track, asset: asset, trackID: track.trackID, startTime: nil)
         }
     }
 
@@ -515,25 +512,30 @@ final class VideoEditorModel {
     var microphoneTrack: AudioTrackInfo? { media?.audioTracks.first { $0.role == .microphone } }
 
     /// Makes the preview match `project.voice`: processes the microphone in
-    /// the background (or takes it from the cache) and swaps it in.
+    /// the background (or takes it from the cache) and swaps it in. Until a
+    /// new setting is ready, the original voice plays.
     private func updateVoice() {
         voiceTask?.cancel()
+        voiceRun += 1
         guard media != nil, let microphone = microphoneTrack else { return }
-        guard let settings = project.voice, settings.isActive else {
+        let settings = project.voice
+        let cached = settings.flatMap { $0.isActive ? VoiceProcessor.cached(for: sourceURL, settings: $0) : nil }
+        if cached == nil, tracks?.processedVoice != nil {
+            tracks?.processedVoice = nil
+            rebuildPlayerItem(seekToSource: playhead)
+            loadWaveform(for: microphone, asset: AVURLAsset(url: sourceURL), trackID: microphone.trackID, startTime: nil)
+        }
+        guard let settings, settings.isActive else {
             voiceState = .idle
-            if tracks?.processedVoice != nil {
-                tracks?.processedVoice = nil
-                rebuildPlayerItem(seekToSource: playhead)
-                loadWaveform(for: microphone, from: sourceURL, trackID: microphone.trackID, startTime: nil)
-            }
             return
         }
         let url = sourceURL
+        let run = voiceRun
         voiceState = .processing(0)
         let work = Task.detached(priority: .userInitiated) { [weak self] in
             try await VoiceProcessor.process(source: url, microphoneTrackID: microphone.trackID, settings: settings) { fraction in
                 Task { @MainActor in
-                    guard let self, case .processing = self.voiceState else { return }
+                    guard let self, self.voiceRun == run, case .processing = self.voiceState else { return }
                     self.voiceState = .processing(fraction)
                 }
             }
@@ -541,40 +543,39 @@ final class VideoEditorModel {
         voiceTask = Task { [weak self] in
             do {
                 let output = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
-                guard let self, !Task.isCancelled, self.project.voice == settings else { return }
-                let asset = AVURLAsset(url: output.url)
-                guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
-                    self.voiceState = .failed("The processed voice has no audio.")
-                    return
-                }
-                self.tracks?.processedVoice = (track, output.startTime)
+                let voice = try await ProcessedVoice.load(output)
+                // A newer change may have come in during either wait.
+                guard let self, !Task.isCancelled, self.voiceRun == run, self.project.voice == settings else { return }
+                self.tracks?.processedVoice = voice
                 self.voiceState = .idle
                 self.rebuildPlayerItem(seekToSource: self.playhead)
-                self.loadWaveform(for: microphone, from: output.url, trackID: track.trackID, startTime: output.startTime)
+                self.loadWaveform(for: microphone, asset: voice.asset, trackID: voice.track.trackID, startTime: voice.startTime)
             } catch is CancellationError {
             } catch {
-                guard let self, !Task.isCancelled else { return }
+                guard let self, !Task.isCancelled, self.voiceRun == run else { return }
                 self.voiceState = .failed(error.localizedDescription)
                 Log.editor.error("Voice processing failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
 
-    /// Redraws a lane's waveform from `url` (the processed voice, or the
-    /// recording again). `startTime` places a separate file on the timeline.
-    private func loadWaveform(for lane: AudioTrackInfo, from url: URL, trackID: CMPersistentTrackID, startTime: Double?) {
+    /// Draws a lane's waveform from `asset` (the recording, or the processed
+    /// voice placed at `startTime`). A newer request for the lane replaces
+    /// an older one still running.
+    private func loadWaveform(for lane: AudioTrackInfo, asset: AVURLAsset, trackID: CMPersistentTrackID, startTime: Double?) {
+        waveformTasks[lane.trackID]?.cancel()
         let extraction = Task.detached(priority: .utility) {
-            try await WaveformExtractor.waveform(asset: AVURLAsset(url: url), trackID: trackID)
+            try await WaveformExtractor.waveform(asset: asset, trackID: trackID)
         }
-        analysisTasks.append(Task { [weak self] in
+        waveformTasks[lane.trackID] = Task { [weak self] in
             let extracted = try? await withTaskCancellationHandler { try await extraction.value } onCancel: { extraction.cancel() }
-            guard var waveform = extracted else { return }
+            guard let self, !Task.isCancelled, var waveform = extracted else { return }
             if let startTime {
                 waveform = Waveform(startTime: waveform.startTime + startTime, bucketDuration: waveform.bucketDuration,
                                     peaks: waveform.peaks, loudestPeak: waveform.loudestPeak)
             }
-            self?.waveforms[lane.trackID] = waveform
-        })
+            self.waveforms[lane.trackID] = waveform
+        }
     }
 
     // MARK: Preview player
@@ -883,6 +884,7 @@ final class VideoEditorModel {
         exportTask?.cancel()
         autoEditTask?.cancel()
         voiceTask?.cancel()
+        waveformTasks.values.forEach { $0.cancel() }
         analysisTasks.forEach { $0.cancel() }
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil
