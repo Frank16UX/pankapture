@@ -85,7 +85,12 @@ public enum CompositionBuilder {
     }
 
     public static func build(source: SourceMedia, project: VideoEditProject, options: Options) async throws -> sending EditComposition {
-        let tracks = try await source.loadTracks()
+        var tracks = try await source.loadTracks()
+        // Exports get the cleaned-up voice, processing it now if needed.
+        if let voice = project.voice, voice.isActive, let microphone = source.audioTracks.first(where: { $0.role == .microphone }) {
+            let output = try await VoiceProcessor.process(source: source.url, microphoneTrackID: microphone.trackID, settings: voice)
+            await tracks.useProcessedVoice(output)
+        }
         let background = await BackgroundVideo.load(for: project)
         return try build(source: source, tracks: tracks, project: project, options: options, background: background)
     }
@@ -119,13 +124,20 @@ public enum CompositionBuilder {
         }
 
         // Audio tracks, each tagged with its role for the mix.
-        var audioTracks: [(composition: AVMutableCompositionTrack, source: AudioTrackInfo, track: AVAssetTrack, volume: Double)] = []
+        // `shift`: where the inserted track's time 0 sits on the source timeline
+        // (the processed voice file starts at the microphone track's start).
+        var audioTracks: [(composition: AVMutableCompositionTrack, source: AudioTrackInfo, track: AVAssetTrack, volume: Double, shift: Double)] = []
         for info in source.audioTracks {
-            guard let sourceTrack = tracks.audio[info.trackID] else { continue }
+            guard var sourceTrack = tracks.audio[info.trackID] else { continue }
+            var shift = 0.0
+            if info.role == .microphone, project.voice?.isActive == true, let voice = tracks.processedVoice {
+                sourceTrack = voice.track
+                shift = voice.startTime
+            }
             let volume = project.trackVolumes[info.role].effectiveVolume
             guard options.includeMutedAudio || volume > 0 else { continue }
             guard let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-            audioTracks.append((track, info, sourceTrack, volume))
+            audioTracks.append((track, info, sourceTrack, volume, shift))
         }
 
         // Insert kept pieces back to back; scale the ones with a speed change.
@@ -149,7 +161,8 @@ public enum CompositionBuilder {
                 guard let range = segment.source.intersection(audio.source.timeRange)?
                     .intersection(TimeRange(start: 0, end: source.duration)) else { continue }
                 let offset = cmTime(range.start) - cmTime(segment.source.start)
-                try audio.composition.insertTimeRange(cmRange(range), of: audio.track, at: pieceStart + offset)
+                let shifted = TimeRange(start: range.start - audio.shift, end: range.end - audio.shift)
+                try audio.composition.insertTimeRange(cmRange(shifted), of: audio.track, at: pieceStart + offset)
             }
 
             if abs(segment.rate - 1) > 1e-6 {

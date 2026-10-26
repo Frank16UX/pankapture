@@ -484,11 +484,47 @@ private struct AudioSection: View {
                         .disabled(volume.isMuted)
                 }
             }
+            if model.isAutoEditAvailable, model.microphoneTrack != nil {
+                VoiceControls(model: model)
+            }
             if !model.silentAudioTracks.isEmpty {
                 Text("\(ListFormatter.localizedString(byJoining: model.silentAudioTracks.map(\.label))) recorded only silence and is hidden.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+/// Noise removal and loudness for the microphone (PRD AU-1–AU-3).
+private struct VoiceControls: View {
+    @Bindable var model: VideoEditorModel
+
+    private var voice: VoiceProcessing { model.project.voice ?? VoiceProcessing() }
+
+    var body: some View {
+        FittingSegmentedPicker("Noise removal", selection: Binding(
+            get: { voice.noiseReduction },
+            set: { value in model.edit { $0.voice = VoiceProcessing(noiseReduction: value, normalizes: voice.normalizes) } }
+        )) {
+            ForEach(VoiceProcessing.NoiseReduction.allCases) { Text($0.title).tag($0) }
+        }
+        .help("Removes background noise from the microphone. System audio isn't touched.")
+        Toggle("Even out loudness", isOn: Binding(
+            get: { voice.normalizes },
+            set: { value in model.edit { $0.voice = VoiceProcessing(noiseReduction: voice.noiseReduction, normalizes: value) } }
+        ))
+        .help("Brings the voice to a steady −16 LUFS, a common level for online video")
+        switch model.voiceState {
+        case .processing(let fraction):
+            HStack(spacing: PK.Spacing.s) {
+                ProgressView(value: fraction).frame(maxWidth: 120)
+                Text("Cleaning up the voice…").font(.caption).foregroundStyle(.secondary)
+            }
+        case .failed(let message):
+            Label(message, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.red)
+        case .idle:
+            EmptyView()
         }
     }
 }

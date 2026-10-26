@@ -136,6 +136,17 @@ Answers are checked: schema, word ranges, overlaps, and a cap of 35% removed. An
 - **Sidecar file:** after an MP4 export, an `.srt` or `.vtt` with the same cues is written next to it.
 - **Deferred:** an embedded, switchable subtitle track (CAP-5) needs an `AVAssetWriter` pass and waits.
 
+**ADR-37: Voice cleanup renders a processed copy of the microphone, offline.**
+- **Settings:** `VideoEditProject.voice` holds the noise-removal preset (Off/Min/Medium/Max) and whether to normalize.
+- **Pipeline** (`VoiceProcessor`, two offline `AVAudioEngine` passes, faster than real time):
+  1. Decode the microphone track to 48 kHz mono.
+  2. An 80 Hz high-pass, then `AUSoundIsolation` at the preset's wet/dry mix (Max uses the high-quality voice model). This pass measures the BS.1770 integrated loudness with our own `LoudnessMeter`; the SDK has none.
+  3. `AUPeakLimiter` with a pre-gain to −16 LUFS (−12…+24 dB) and a −1 dBFS ceiling, written as AAC.
+- **Why offline, not a live tap:** an audio mix can't raise volume above 1.0, so the gain has to be baked into a file. Rendering once also makes the preview and the export identical, and scrubbing stays cheap.
+- **Cache:** one file per recording and setting in `ProcessedAudio`, with a sidecar holding the recording's fingerprint and the track's start time.
+- **Use:** the editor processes in the background on load and on every change, then swaps the file in for the microphone (`LoadedTracks.processedVoice`, offset by the start time) and redraws its waveform. The original plays until the processed copy is ready. MP4 export builds through `CompositionBuilder.build(source:project:options:)`, which processes first (or reuses the cache). GIFs have no audio.
+- **Not processed:** system audio. Auto-edit keeps analyzing the original microphone.
+
 **ADR-33: Prompts and the default provider are chosen by an offline evaluation.** `pankapture-eval` (`make eval`) is a separate executable target, not part of the app bundle. It runs the app's analysis and prompt over labeled recordings kept outside the repo (PRD §11), caching each sample's transcript. It scores mistakes (by overlap, ±0.3 s), content lost, false positives on controls, and pause intent against a pass bar. The report carries a fingerprint of the prompt and schema, so runs can be compared.
 
 ## 3. Module map
@@ -240,6 +251,7 @@ Three spaces exist and bugs live at their borders. Convert in one place per boun
 | Layered recordings | `~/Library/Application Support/Pankapture/Recordings/Sources/<video>.mp4` | MP4 with the "Camera" track; the save folder has the composite (ADR-25) |
 | Video backgrounds | `~/Library/Application Support/Pankapture/Backgrounds/<uuid>.<ext>` | copies of pictures/movies used as editor backgrounds |
 | Transcripts | `~/Library/Application Support/Pankapture/Transcripts/<video>.<language>.json` | `Transcript` (words with times), cached by auto-edit (ADR-30) |
+| Processed voice | `~/Library/Application Support/Pankapture/ProcessedAudio/<video>.<setting>.m4a` (+ `.json`) | Cleaned-up microphone audio, regenerated on demand (ADR-37) |
 | Auto-edit suggestions | inside the video's project (`Edits/<video>.json`, key `autoEdit`) | `AutoEditLayer`: pauses, removals, pacing, user overrides (ADR-34) |
 | AI provider | `UserDefaults["ai.providerConfiguration"]`; the key in the Keychain (service `com.franklinperez.Pankapture.ai-provider`) | `ProviderConfiguration` JSON, no secrets (ADR-31) |
 

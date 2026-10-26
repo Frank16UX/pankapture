@@ -242,9 +242,9 @@ Everything runs on the Mac unless the user configured an AI provider (§5.12). E
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| AU-1 | **Noise removal** on the microphone track: Off / Min / Medium / Max. It's non-destructive (a processed copy is cached), and system audio is never processed. | Must | M8 |
-| AU-2 | **Normalize** the voice to a consistent loudness (−16 LUFS, peaks at or below −1 dBFS). | Must | M8 |
-| AU-3 | The preview and the waveform use the processed audio. Processing runs in the background and shows progress. | Must | M8 |
+| AU-1 | **Noise removal** on the microphone track: Off / Min / Medium / Max. It's non-destructive (a processed copy is cached), and system audio is never processed. | Must | M8 ✅ |
+| AU-2 | **Normalize** the voice to a consistent loudness (−16 LUFS, peaks at or below −1 dBFS). | Must | M8 ✅ |
+| AU-3 | The preview and the waveform use the processed audio. Processing runs in the background and shows progress. | Must | M8 ✅ |
 
 **Camera**
 

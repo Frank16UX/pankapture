@@ -31,6 +31,12 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("Transcripts", isDirectory: true)
     }
 
+    /// Cleaned-up copies of recordings' microphone tracks (noise removal,
+    /// loudness), one per setting; deletable, regenerated on demand (PRD AU-1).
+    public static var processedAudio: URL {
+        applicationSupport.appendingPathComponent("ProcessedAudio", isDirectory: true)
+    }
+
     /// Layered originals of recordings made with the camera as its own track
     /// (ADR-25). The save folder gets a composited copy with the same name;
     /// the video editor opens the original from here.

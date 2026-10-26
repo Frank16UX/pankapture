@@ -83,6 +83,17 @@ final class VideoEditorModel {
     var selectedAutoItem: AutoEditItem?
     /// Words selected in the transcript panel (PRD AE-10).
     var transcriptSelection: ClosedRange<Int>?
+
+    enum VoiceState: Equatable {
+        case idle
+        case processing(Double)
+        case failed(String)
+    }
+
+    /// Voice cleanup (PRD AU-3): processing runs in the background; the
+    /// preview uses the original voice until the cleaned one is ready.
+    private(set) var voiceState: VoiceState = .idle
+    @ObservationIgnored private var voiceTask: Task<Void, Never>?
     @ObservationIgnored var autoEditTask: Task<Void, Never>?
     /// Each analysis run gets a generation; a cancelled run that is still
     /// winding down must not touch the state of a newer one.
@@ -176,6 +187,7 @@ final class VideoEditorModel {
             }
             rebuildPlayerItem(seekToSource: project.trim.start)
             startAnalysis(media)
+            if project.voice?.isActive == true { updateVoice() }
             Log.editor.info("Opened \(self.sourceURL.lastPathComponent, privacy: .public): \(media.duration)s, \(media.audioTracks.count) audio track(s)")
         } catch {
             loadError = error.localizedDescription
@@ -297,6 +309,7 @@ final class VideoEditorModel {
             updatePreviewVideoComposition()
         }
         if old.trackVolumes != updated.trackVolumes { updatePreviewAudioMix() }
+        if old.voice != updated.voice { updateVoice() }
         scheduleSave()
         notifyUnsavedChanges()
     }
@@ -495,6 +508,73 @@ final class VideoEditorModel {
         guard currentEdit != nil, time.isNumeric, pendingSeeks == 0 else { return }
         playhead = timeline.sourceTime(forOutput: time.seconds)
         if isPlaying, player.rate == 0 { isPlaying = false }
+    }
+
+    // MARK: Voice cleanup (PRD AU-1–AU-3)
+
+    var microphoneTrack: AudioTrackInfo? { media?.audioTracks.first { $0.role == .microphone } }
+
+    /// Makes the preview match `project.voice`: processes the microphone in
+    /// the background (or takes it from the cache) and swaps it in.
+    private func updateVoice() {
+        voiceTask?.cancel()
+        guard media != nil, let microphone = microphoneTrack else { return }
+        guard let settings = project.voice, settings.isActive else {
+            voiceState = .idle
+            if tracks?.processedVoice != nil {
+                tracks?.processedVoice = nil
+                rebuildPlayerItem(seekToSource: playhead)
+                loadWaveform(for: microphone, from: sourceURL, trackID: microphone.trackID, startTime: nil)
+            }
+            return
+        }
+        let url = sourceURL
+        voiceState = .processing(0)
+        let work = Task.detached(priority: .userInitiated) { [weak self] in
+            try await VoiceProcessor.process(source: url, microphoneTrackID: microphone.trackID, settings: settings) { fraction in
+                Task { @MainActor in
+                    guard let self, case .processing = self.voiceState else { return }
+                    self.voiceState = .processing(fraction)
+                }
+            }
+        }
+        voiceTask = Task { [weak self] in
+            do {
+                let output = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+                guard let self, !Task.isCancelled, self.project.voice == settings else { return }
+                let asset = AVURLAsset(url: output.url)
+                guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
+                    self.voiceState = .failed("The processed voice has no audio.")
+                    return
+                }
+                self.tracks?.processedVoice = (track, output.startTime)
+                self.voiceState = .idle
+                self.rebuildPlayerItem(seekToSource: self.playhead)
+                self.loadWaveform(for: microphone, from: output.url, trackID: track.trackID, startTime: output.startTime)
+            } catch is CancellationError {
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.voiceState = .failed(error.localizedDescription)
+                Log.editor.error("Voice processing failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Redraws a lane's waveform from `url` (the processed voice, or the
+    /// recording again). `startTime` places a separate file on the timeline.
+    private func loadWaveform(for lane: AudioTrackInfo, from url: URL, trackID: CMPersistentTrackID, startTime: Double?) {
+        let extraction = Task.detached(priority: .utility) {
+            try await WaveformExtractor.waveform(asset: AVURLAsset(url: url), trackID: trackID)
+        }
+        analysisTasks.append(Task { [weak self] in
+            let extracted = try? await withTaskCancellationHandler { try await extraction.value } onCancel: { extraction.cancel() }
+            guard var waveform = extracted else { return }
+            if let startTime {
+                waveform = Waveform(startTime: waveform.startTime + startTime, bucketDuration: waveform.bucketDuration,
+                                    peaks: waveform.peaks, loudestPeak: waveform.loudestPeak)
+            }
+            self?.waveforms[lane.trackID] = waveform
+        })
     }
 
     // MARK: Preview player
@@ -801,6 +881,7 @@ final class VideoEditorModel {
         backgroundTask?.cancel()
         exportTask?.cancel()
         autoEditTask?.cancel()
+        voiceTask?.cancel()
         analysisTasks.forEach { $0.cancel() }
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil

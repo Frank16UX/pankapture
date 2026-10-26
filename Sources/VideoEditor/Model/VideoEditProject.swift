@@ -140,6 +140,8 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
     public var transcript: Transcript?
     /// Burned-in captions and the captions file (PRD CAP-1–CAP-4).
     public var captions: CaptionSettings?
+    /// Noise removal and loudness for the microphone (PRD AU-1, AU-2).
+    public var voice: VoiceProcessing?
 
     public init(
         sourceURL: URL,
@@ -155,7 +157,8 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         camera: CameraOverlay? = nil,
         autoEdit: AutoEditLayer? = nil,
         transcript: Transcript? = nil,
-        captions: CaptionSettings? = nil
+        captions: CaptionSettings? = nil,
+        voice: VoiceProcessing? = nil
     ) {
         self.version = Self.currentVersion
         self.sourceURL = sourceURL
@@ -172,11 +175,12 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         self.autoEdit = autoEdit
         self.transcript = transcript
         self.captions = captions
+        self.voice = voice
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, sourceURL, sourceDuration, trim, cuts, zooms, speedSegments, background, trackVolumes
-        case zoomFillsFrame, splits, camera, autoEdit, transcript, captions
+        case zoomFillsFrame, splits, camera, autoEdit, transcript, captions, voice
     }
 
     /// Keys added after version 1 are optional, so older saved projects open.
@@ -197,6 +201,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         autoEdit = try container.decodeIfPresent(AutoEditLayer.self, forKey: .autoEdit)
         transcript = try container.decodeIfPresent(Transcript.self, forKey: .transcript)
         captions = try container.decodeIfPresent(CaptionSettings.self, forKey: .captions)
+        voice = try container.decodeIfPresent(VoiceProcessing.self, forKey: .voice)
     }
 
     /// The user's cuts plus auto-edit's enabled ones: what the timeline
@@ -234,6 +239,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         cuts.isEmpty && zooms.isEmpty && speedSegments.isEmpty && camera?.isVisible != true
             && (autoEdit.map { $0.cuts.isEmpty && $0.speedSegments.isEmpty } ?? true)
             && !(captions?.isEnabled == true && transcript != nil)
+            && voice?.isActive != true
             && !background.altersFrame && trackVolumes == TrackVolumes()
             && abs(trim.start) < 1e-6 && abs(trim.end - sourceDuration) < 1e-6
     }

@@ -32,14 +32,11 @@ public enum VideoExporter {
         defer { Log.signposter.endInterval("exportMP4", interval) }
 
         let fps = settings.frameRate.resolve(sourceFrameRate: source.frameRate)
-        let tracks = try await source.loadTracks()
-        let background = await BackgroundVideo.load(for: project)
-        let edit = try CompositionBuilder.build(
+        // Loads the tracks and the background, and the cleaned-up voice if the project has one.
+        let edit = try await CompositionBuilder.build(
             source: source,
-            tracks: tracks,
             project: project,
-            options: .init(shortSide: settings.resolution.shortSide, frameRate: fps),
-            background: background
+            options: .init(shortSide: settings.resolution.shortSide, frameRate: fps)
         )
         let bitrate = ExportEstimator.videoBitrate(renderSize: edit.plan.renderSize, fps: fps, quality: settings.quality)
 

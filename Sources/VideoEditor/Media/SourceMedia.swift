@@ -29,6 +29,27 @@ public struct LoadedTracks {
     public let video: AVAssetTrack
     public let audio: [CMPersistentTrackID: AVAssetTrack]
     public var camera: AVAssetTrack?
+    /// The cleaned-up microphone (PRD AU-1), used instead of the recorded
+    /// one when the project asks for it, and where it starts on the timeline.
+    public var processedVoice: (track: AVAssetTrack, startTime: Double)?
+
+    public init(video: AVAssetTrack, audio: [CMPersistentTrackID: AVAssetTrack], camera: AVAssetTrack? = nil) {
+        self.video = video
+        self.audio = audio
+        self.camera = camera
+    }
+
+    /// Loads the processed voice file's audio track.
+    public mutating func useProcessedVoice(_ output: VoiceProcessor.Output?) async {
+        guard let output else {
+            processedVoice = nil
+            return
+        }
+        let asset = AVURLAsset(url: output.url)
+        if let track = try? await asset.loadTracks(withMediaType: .audio).first {
+            processedVoice = (track, output.startTime)
+        }
+    }
 }
 
 /// The loaded properties of a source movie, gathered once with the async

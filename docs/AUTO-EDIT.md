@@ -232,13 +232,13 @@ Microphone track ─┬─▶ loudness envelope (10 ms frames) ──▶ pauses 
 
   Tune the values by ear on real recordings.
 - **Normalization** has no Apple loudness meter, so we implement ITU-R BS.1770 integrated loudness ourselves. It's pure and testable:
-  - K-weighting biquads (`vDSP_biquad`).
+  - K-weighting biquads (`LoudnessMeter`).
   - 400 ms blocks with 75% overlap.
   - An absolute gate at −70 LUFS and a relative gate at −10 LU.
   - Target **−16 LUFS** with a −1 dBFS ceiling.
   - The limiter is sample-peak only (no true-peak is documented); 4× oversampling is optional.
   - The gain must be **baked into the processed file**, because audio-mix volume can't go above 1.0.
-- **Cache:** `Application Support/Pankapture/ProcessedAudio/<video>.<settings-hash>.m4a`, deletable and regenerated on demand.
+- **Cache:** `Application Support/Pankapture/ProcessedAudio/<video>.<setting>.m4a`, deletable and regenerated on demand. A JSON sidecar holds the recording's fingerprint (size and date) and the track's start time.
   - `CompositionBuilder` swaps it in for the microphone track and keeps the original track's start offset.
   - The waveform lane shows the processed audio.
   - A 15-minute recording takes about 20 s for the two passes (isolate and measure, then gain and limit), with progress shown.

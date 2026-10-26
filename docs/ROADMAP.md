@@ -130,8 +130,8 @@ Auto-edit, captions, voice cleanup, and camera backgrounds (PRD §5.11–5.12), 
    - [x] Optional cloud transcription (AI-5)
 4. **Captions** ✅ (ADR-36)
    - [x] Cues, corrections, burned-in styles (CAP-1–CAP-3); .srt / .vtt (CAP-4)
-5. **Audio**
-   - [ ] Noise removal presets and normalization (AU-1–AU-3)
+5. **Audio** ✅ (ADR-37) (needs QA: the presets by ear on a noisy real recording; a 15 min recording's processing time)
+   - [x] Noise removal presets and normalization (AU-1–AU-3)
 6. **Camera**
    - [ ] Blur, replace, remove; green screen (CAM-1, CAM-2)
    - [ ] Default background; Video Effects button (CAM-3, CAM-4)
