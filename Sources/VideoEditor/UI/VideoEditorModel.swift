@@ -609,17 +609,28 @@ final class VideoEditorModel {
 
     /// Output size for the current export settings.
     var exportRenderSize: CGSize {
-        guard let media else { return .zero }
-        let plan = switch exportSettings.format {
-        case .mp4: RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, shortSide: exportSettings.resolution.shortSide)
-        case .gif: RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, width: exportSettings.gif.width)
+        switch exportSettings.format {
+        case .mp4:
+            return mp4RenderSize(for: exportSettings)
+        case .gif:
+            guard let media else { return .zero }
+            return RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, width: exportSettings.gif.width).renderSize
         }
-        return plan.renderSize
+    }
+
+    /// MP4 output size for `settings`; the export sheet also sizes each menu
+    /// option with it.
+    func mp4RenderSize(for settings: ExportSettings) -> CGSize {
+        guard let media else { return .zero }
+        return RenderPlan(
+            project: project, sourceSize: media.size, orientation: media.orientation,
+            shortSideCap: settings.mp4ShortSideCap, shortSide: settings.mp4ShortSide, scale: settings.mp4Scale
+        ).renderSize
     }
 
     var exportFrameRate: Int {
         switch exportSettings.format {
-        case .mp4: exportSettings.frameRate.resolve(sourceFrameRate: media?.frameRate ?? 30)
+        case .mp4: exportSettings.mp4FrameRate(sourceFrameRate: media?.frameRate ?? 30)
         case .gif: exportSettings.gif.fps
         }
     }
@@ -637,7 +648,7 @@ final class VideoEditorModel {
             let hasAudio = audioTracks.contains { project.trackVolumes[$0.role].effectiveVolume > 0 }
             return ExportEstimator.mp4Bytes(
                 renderSize: size, fps: exportFrameRate, duration: outputDuration,
-                quality: exportSettings.quality, hasAudio: hasAudio, contentBitrate: content
+                encoding: exportSettings.mp4Encoding, hasAudio: hasAudio, contentBitrate: content
             )
         case .gif:
             return ExportEstimator.gifBytes(renderSize: size, fps: exportFrameRate, duration: outputDuration, contentBitrate: content)

@@ -192,6 +192,8 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 | VE-11 | Speed change for segments (e.g. 2× during boring parts). | Could | M5 ✅ |
 | VE-13 | **Camera layer:** move and resize the webcam in the preview; shape (circle, square, rectangle) with adjustable corner roundness, size, mirror, show/hide. Zooms leave it in place unless the zoom fills the frame. | Must | M5 ✅ |
 | VE-12 | **Edit projects:** edits are saved explicitly (⌘S); closing or quitting with unsaved edits asks to Save / Don't Save / Cancel; unsaved edits survive a crash as a draft. Reopening the recording restores the saved project. | Must | M5 ✅ |
+| VE-14 | **Export size by percentage:** a segmented control picks how the MP4 size is chosen: a **resolution** (VE-8) or a **percentage** of the original (75, 50, 33, 25, 20, 10 %). Each option shows the pixel size it produces. | Should | M7 ✅ |
+| VE-15 | **Optimize for Sharing:** one switch for a small MP4 that uploads quickly and plays inline in chat apps and email: H.264, at most 1080p and 30 fps, a bitrate tuned for screen recordings, sparse keyframes, lighter audio (ADR-30). It replaces the quality and frame-rate pickers while on. | Should | M7 ✅ |
 
 ### 5.10 Capture history (library)
 

@@ -44,6 +44,45 @@ public enum ExportResolution: String, Codable, CaseIterable, Sendable, Identifia
     }
 }
 
+/// How the MP4 size is picked: a standard resolution, or a percentage of the
+/// canvas (for Retina recordings, 50% is the size the screen showed).
+public enum ExportSizeMode: String, Codable, CaseIterable, Sendable, Identifiable {
+    case resolution
+    case percentage
+
+    public var id: String { rawValue }
+    public var title: String { rawValue.capitalized }
+}
+
+/// MP4 output size as a fraction of the canvas; never upscales.
+public enum ExportScale: String, Codable, CaseIterable, Sendable, Identifiable {
+    case original
+    case percent75
+    case percent50
+    case percent33
+    case percent25
+    case percent20
+    case percent10
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        self == .original ? "Original" : "\(Int((factor * 100).rounded()))%"
+    }
+
+    public var factor: Double {
+        switch self {
+        case .original: 1
+        case .percent75: 0.75
+        case .percent50: 0.5
+        case .percent33: 0.33
+        case .percent25: 0.25
+        case .percent20: 0.2
+        case .percent10: 0.1
+        }
+    }
+}
+
 public enum ExportQuality: String, Codable, CaseIterable, Sendable, Identifiable {
     case high
     case medium
@@ -61,6 +100,34 @@ public enum ExportQuality: String, Codable, CaseIterable, Sendable, Identifiable
         case .low: 0.035
         }
     }
+}
+
+/// H.264 encoder targets for an MP4 export: a quality preset's, or the
+/// sharing profile's. Always H.264 (not HEVC), so the file plays inline in
+/// every browser, chat app, and mail client.
+public struct MP4Encoding: Sendable, Equatable {
+    /// Bits per pixel per frame for the average-bitrate target.
+    public var bitsPerPixel: Double
+    /// Longest gap between keyframes, seconds. Screen recordings are mostly
+    /// still, so keyframes are a large share of the file; spacing them out
+    /// shrinks it at the cost of coarser seeking.
+    public var keyFrameInterval: Double
+    /// AAC bitrate of the mixed stereo track.
+    public var audioBitrate: Double
+
+    public init(bitsPerPixel: Double, keyFrameInterval: Double = 2, audioBitrate: Double = ExportEstimator.audioBitrate) {
+        self.bitsPerPixel = bitsPerPixel
+        self.keyFrameInterval = keyFrameInterval
+        self.audioBitrate = audioBitrate
+    }
+
+    public init(quality: ExportQuality) {
+        self.init(bitsPerPixel: quality.bitsPerPixel)
+    }
+
+    /// Small files that still keep text legible: between the Low and Medium
+    /// targets, sparse keyframes, and voice-grade audio.
+    public static let sharing = MP4Encoding(bitsPerPixel: 0.045, keyFrameInterval: 10, audioBitrate: 96_000)
 }
 
 public enum ExportFrameRate: String, Codable, CaseIterable, Sendable, Identifiable {
@@ -113,23 +180,74 @@ public struct GIFOptions: Codable, Hashable, Sendable {
 /// `PreferenceKey.videoEditorExportSettings` so the last choice sticks.
 public struct ExportSettings: Codable, Hashable, Sendable {
     public var format: ExportFormat
+    public var sizeMode: ExportSizeMode
     public var resolution: ExportResolution
+    public var scale: ExportScale
     public var quality: ExportQuality
     public var frameRate: ExportFrameRate
+    /// A small MP4 for chat and email: caps the size and frame rate, and
+    /// encodes with `MP4Encoding.sharing` instead of the quality and frame
+    /// rate picks.
+    public var optimizeForSharing: Bool
     public var gif: GIFOptions
+
+    /// Sharing exports' shorter-side ceiling: text stays legible and the
+    /// file stays small.
+    public static let sharingShortSideCap: Double = 1080
+    /// Sharing exports' frame-rate ceiling; screen content rarely needs more.
+    public static let sharingFrameRateCap = 30
 
     public init(
         format: ExportFormat = .mp4,
+        sizeMode: ExportSizeMode = .resolution,
         resolution: ExportResolution = .hd1080,
+        scale: ExportScale = .original,
         quality: ExportQuality = .high,
         frameRate: ExportFrameRate = .original,
+        optimizeForSharing: Bool = false,
         gif: GIFOptions = GIFOptions()
     ) {
         self.format = format
+        self.sizeMode = sizeMode
         self.resolution = resolution
+        self.scale = scale
         self.quality = quality
         self.frameRate = frameRate
+        self.optimizeForSharing = optimizeForSharing
         self.gif = gif
+    }
+
+    /// Settings saved before a field existed decode with its default.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let defaults = ExportSettings()
+        format = try container.decodeIfPresent(ExportFormat.self, forKey: .format) ?? defaults.format
+        sizeMode = try container.decodeIfPresent(ExportSizeMode.self, forKey: .sizeMode) ?? defaults.sizeMode
+        resolution = try container.decodeIfPresent(ExportResolution.self, forKey: .resolution) ?? defaults.resolution
+        scale = try container.decodeIfPresent(ExportScale.self, forKey: .scale) ?? defaults.scale
+        quality = try container.decodeIfPresent(ExportQuality.self, forKey: .quality) ?? defaults.quality
+        frameRate = try container.decodeIfPresent(ExportFrameRate.self, forKey: .frameRate) ?? defaults.frameRate
+        optimizeForSharing = try container.decodeIfPresent(Bool.self, forKey: .optimizeForSharing) ?? defaults.optimizeForSharing
+        gif = try container.decodeIfPresent(GIFOptions.self, forKey: .gif) ?? defaults.gif
+    }
+
+    // MARK: MP4 output
+
+    /// Exact shorter side (resolution mode), `nil` = canvas size.
+    public var mp4ShortSide: Double? { sizeMode == .resolution ? resolution.shortSide : nil }
+    /// Fraction of the canvas (percentage mode), `nil` = canvas size.
+    public var mp4Scale: Double? { sizeMode == .percentage ? scale.factor : nil }
+    /// Shorter-side ceiling applied after the size pick.
+    public var mp4ShortSideCap: Double? { optimizeForSharing ? Self.sharingShortSideCap : nil }
+
+    /// Sharing ignores the frame-rate pick: the source's rate, up to 30 fps.
+    public func mp4FrameRate(sourceFrameRate: Double) -> Int {
+        guard optimizeForSharing else { return frameRate.resolve(sourceFrameRate: sourceFrameRate) }
+        return min(ExportFrameRate.original.resolve(sourceFrameRate: sourceFrameRate), Self.sharingFrameRateCap)
+    }
+
+    public var mp4Encoding: MP4Encoding {
+        optimizeForSharing ? .sharing : MP4Encoding(quality: quality)
     }
 }
 
@@ -150,8 +268,8 @@ public enum ExportEstimator {
     static let containerOverhead: Double = 1.01
 
     /// Target average bitrate for the encoder.
-    public static func videoBitrate(renderSize: CGSize, fps: Int, quality: ExportQuality) -> Double {
-        let raw = Double(renderSize.width * renderSize.height) * Double(fps) * quality.bitsPerPixel
+    public static func videoBitrate(renderSize: CGSize, fps: Int, bitsPerPixel: Double) -> Double {
+        let raw = Double(renderSize.width * renderSize.height) * Double(fps) * bitsPerPixel
         return max(250_000, raw)
     }
 
@@ -178,14 +296,14 @@ public enum ExportEstimator {
         renderSize: CGSize,
         fps: Int,
         duration: Double,
-        quality: ExportQuality,
+        encoding: MP4Encoding,
         hasAudio: Bool,
         contentBitrate: Double? = nil
     ) -> Int64 {
         guard duration > 0 else { return 0 }
-        var video = videoBitrate(renderSize: renderSize, fps: fps, quality: quality)
+        var video = videoBitrate(renderSize: renderSize, fps: fps, bitsPerPixel: encoding.bitsPerPixel)
         if let contentBitrate { video = min(video, contentBitrate) }
-        let bitrate = video + (hasAudio ? audioBitrate : 0)
+        let bitrate = video + (hasAudio ? encoding.audioBitrate : 0)
         return Int64((bitrate * duration / 8 * containerOverhead).rounded())
     }
 

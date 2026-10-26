@@ -35,8 +35,11 @@ public struct RenderPlan: Sendable, Equatable {
     public var altersFrame: Bool
 
     /// - Parameters:
-    ///   - shortSideCap: resolution cap, never upscaling (the preview).
-    ///   - shortSide: exact shorter side, up or down (MP4 export presets).
+    ///   - shortSideCap: resolution cap, never upscaling (the preview, MP4
+    ///     sharing exports); applied after `shortSide` or `scale`.
+    ///   - shortSide: exact shorter side, up or down (MP4 resolution presets).
+    ///   - scale: fraction of the canvas (MP4 percentage presets); ignored
+    ///     when `shortSide` is set.
     ///   - width: exact output width cap (GIF).
     public init(
         project: VideoEditProject,
@@ -44,6 +47,7 @@ public struct RenderPlan: Sendable, Equatable {
         orientation: CGImagePropertyOrientation = .up,
         shortSideCap: Double? = nil,
         shortSide: Double? = nil,
+        scale: Double? = nil,
         width: Int? = nil,
         zoomEnabled: Bool = true,
         backgroundOrientation: CGImagePropertyOrientation = .up,
@@ -54,7 +58,8 @@ public struct RenderPlan: Sendable, Equatable {
         let canvas = CanvasLayout.canvasSize(source: sourceSize, aspect: background.aspect)
         var renderSize = shortSide != nil
             ? CanvasLayout.scaled(canvas, shortSide: shortSide)
-            : CanvasLayout.scaled(canvas, shortSideCap: shortSideCap)
+            : CanvasLayout.scaled(canvas, scale: scale)
+        renderSize = CanvasLayout.scaled(renderSize, shortSideCap: shortSideCap)
         if width != nil { renderSize = CanvasLayout.scaled(renderSize, width: width) }
         let videoRect = CanvasLayout.videoRect(canvas: renderSize, source: sourceSize, padding: background.effectivePadding)
 

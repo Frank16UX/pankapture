@@ -35,6 +35,8 @@ public enum CompositionBuilder {
         public var shortSideCap: Double?
         /// MP4 export size (shorter side, up or down), `nil` = canvas size.
         public var shortSide: Double?
+        /// MP4 export size as a fraction of the canvas, `nil` = canvas size.
+        public var scale: Double?
         /// GIF width cap, `nil` = canvas width.
         public var width: Int?
         public var frameRate: Int
@@ -48,6 +50,7 @@ public enum CompositionBuilder {
         public init(
             shortSideCap: Double? = nil,
             shortSide: Double? = nil,
+            scale: Double? = nil,
             width: Int? = nil,
             frameRate: Int = 30,
             zoomEnabled: Bool = true,
@@ -56,6 +59,7 @@ public enum CompositionBuilder {
         ) {
             self.shortSideCap = shortSideCap
             self.shortSide = shortSide
+            self.scale = scale
             self.width = width
             self.frameRate = frameRate
             self.zoomEnabled = zoomEnabled
@@ -183,6 +187,7 @@ public enum CompositionBuilder {
             orientation: source.orientation,
             shortSideCap: options.shortSideCap,
             shortSide: options.shortSide,
+            scale: options.scale,
             width: options.width,
             zoomEnabled: options.zoomEnabled,
             backgroundOrientation: background?.orientation ?? .up,

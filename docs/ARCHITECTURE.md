@@ -83,6 +83,8 @@ Short ADRs. If a decision changes, update it here; don't delete it.
 
 **ADR-26: Pankapture's standard windows are capturable.** Captures exclude the app so its capture UI never leaks in, which also hid the editors, history, and Settings, so the app couldn't be shown in its own screenshots or recordings. `OwnWindows.capturableIDs()` (visible, titled, non-panel windows) are excepted from that exclusion in screenshots, window snapping and picking, and recordings. Display and area recordings re-check the set every 2 s and update the stream filter when it changes, so an editor opened mid-recording appears.
 
+**ADR-30: Sharing exports tune the built-in H.264 encoder instead of bundling a codec.** The export sheet's "Optimize for Sharing" (VE-15) makes an MP4 that uploads quickly and plays inline in chat apps and mail clients. It keeps the system's hardware H.264 encoder and changes only its inputs (`MP4Encoding.sharing`): shorter side at most 1080 px, at most 30 fps, 0.045 bits per pixel per frame (between Low and Medium), a keyframe every 10 s instead of 2 s, and 96 kbps AAC. Screen recordings are mostly still, so keyframes are a large share of their size: the longer interval alone cut a mostly-still 100 s recording by 29%. On three real recordings the profile made files 55–60% smaller than the High preset, with text unchanged to the eye, and encoded in half the time at 30 fps. Rejected: HEVC (hardware-encoded and smaller still, but it doesn't play in every browser and mail client yet, which defeats "send it anywhere"); AV1 (Apple Silicon decodes it but has no encoder, and the open-source software encoders, libaom, SVT-AV1, and rav1e, are BSD-licensed but slow and would be the app's first third-party dependency); x264 (compresses better than the hardware encoder, but it's GPL, which an MIT-licensed app can't ship without relicensing, and it's far slower). H.264 plays everywhere and costs nothing to license (the OS encoder covers it).
+
 ## 3. Module map
 
 ```
@@ -141,7 +143,7 @@ Record ─▶ source picker (area/window/display) + audio/mic/camera options
 
 ### 4.3 Video export (M5 target)
 
-`AVMutableComposition` (trim/cut by inserting time ranges; per-track audio mix volumes) + custom `AVVideoCompositing` that applies zoom/pan keyframes and background/padding with Core Image on the GPU → `AVAssetExportSession` (MP4) or frame extraction → ImageIO GIF encoder.
+`AVMutableComposition` (trim/cut by inserting time ranges; per-track audio mix volumes) + custom `AVVideoCompositing` that applies zoom/pan keyframes and background/padding with Core Image on the GPU → `AVAssetReader` → `AVAssetWriter` (MP4: H.264 at the bitrate of the quality preset or the sharing profile, ADR-30) or frame extraction → ImageIO GIF encoder. The MP4 size is a resolution preset (exact shorter side) or a percentage of the canvas; sharing then caps the shorter side at 1080 px.
 
 ## 5. Coordinate systems
 
