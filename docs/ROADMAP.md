@@ -105,6 +105,7 @@ The day this lands, the old screenshot tool can be uninstalled.
 
 - [x] Onboarding (GL-7), app icon, About
 - [x] Release on every merge to `main`; in-app update check and install (UP-1, ADR-28) (needs QA: first update from one release to the next)
+- [x] Export size as a percentage of the original (VE-14); Optimize for Sharing (VE-15, ADR-30) (needs QA: the export sheet by hand)
 - [ ] Performance pass against every PRD §6.1 target on an M1 8 GB machine
 - [ ] Accessibility audit (DESIGN §8) on every surface
 - [ ] Two-week "daily driver" success-criteria run (PRD §7)

@@ -88,6 +88,30 @@ struct MediaPipelineTests {
         #expect(try await exported.loadTracks(withMediaType: .audio).count == 1)
     }
 
+    @Test func exportsAPercentageOptimizedForSharing() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await TestMovie.make(TestMovie.Spec(fps: 60), in: directory)
+        let source = try await SourceMedia.load(url: url)
+        let project = VideoEditProject(sourceURL: url, sourceDuration: source.duration)
+
+        let output = directory.appendingPathComponent("share.mp4")
+        let settings = ExportSettings(sizeMode: .percentage, scale: .percent50, frameRate: .fps60, optimizeForSharing: true)
+        let result = try await VideoExporter.exportMP4(source: source, project: project, settings: settings, to: output)
+        #expect(result.pixelSize == CGSize(width: 80, height: 46))
+        let track = try #require(try await AVURLAsset(url: output).loadTracks(withMediaType: .video).first)
+        #expect(try await track.load(.nominalFrameRate) <= 30.5)
+
+        // The smallest preset of a tiny movie still encodes.
+        let tiny = try await VideoExporter.exportMP4(
+            source: source, project: project,
+            settings: ExportSettings(sizeMode: .percentage, scale: .percent10),
+            to: directory.appendingPathComponent("tiny.mp4")
+        )
+        #expect(tiny.pixelSize == CGSize(width: 16, height: 10))
+        #expect(tiny.byteCount > 0)
+    }
+
     @Test func exportsGIFHonoringTheComposition() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

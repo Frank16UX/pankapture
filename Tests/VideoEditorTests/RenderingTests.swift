@@ -44,15 +44,26 @@ struct CanvasLayoutTests {
 
 @Suite("Export estimates")
 struct ExportEstimatorTests {
+    private let high = MP4Encoding(quality: .high)
+    private let low = MP4Encoding(quality: .low)
+
     @Test func mp4SizeFollowsBitrateAndDuration() {
-        let bytes = ExportEstimator.mp4Bytes(renderSize: CGSize(width: 1920, height: 1080), fps: 30, duration: 60, quality: .high, hasAudio: true)
+        let bytes = ExportEstimator.mp4Bytes(renderSize: CGSize(width: 1920, height: 1080), fps: 30, duration: 60, encoding: high, hasAudio: true)
         let expected = (0.12 * 1920 * 1080 * 30 + 128_000) * 60 / 8 * 1.01
         #expect(abs(Double(bytes) - expected) < 1)
-        let low = ExportEstimator.mp4Bytes(renderSize: CGSize(width: 1920, height: 1080), fps: 30, duration: 60, quality: .low, hasAudio: true)
-        #expect(low < bytes)
-        let silent = ExportEstimator.mp4Bytes(renderSize: CGSize(width: 1920, height: 1080), fps: 30, duration: 60, quality: .high, hasAudio: false)
+        let lowBytes = ExportEstimator.mp4Bytes(renderSize: CGSize(width: 1920, height: 1080), fps: 30, duration: 60, encoding: low, hasAudio: true)
+        #expect(lowBytes < bytes)
+        let silent = ExportEstimator.mp4Bytes(renderSize: CGSize(width: 1920, height: 1080), fps: 30, duration: 60, encoding: high, hasAudio: false)
         #expect(silent < bytes)
-        #expect(ExportEstimator.mp4Bytes(renderSize: CGSize(width: 10, height: 10), fps: 30, duration: 0, quality: .high, hasAudio: true) == 0)
+        #expect(ExportEstimator.mp4Bytes(renderSize: CGSize(width: 10, height: 10), fps: 30, duration: 0, encoding: high, hasAudio: true) == 0)
+    }
+
+    @Test func sharingEstimateUsesItsBitrateAndAudio() {
+        let size = CGSize(width: 1920, height: 1080)
+        let bytes = ExportEstimator.mp4Bytes(renderSize: size, fps: 30, duration: 60, encoding: .sharing, hasAudio: true)
+        let expected = (0.045 * 1920 * 1080 * 30 + 96_000) * 60 / 8 * 1.01
+        #expect(abs(Double(bytes) - expected) < 1)
+        #expect(bytes < ExportEstimator.mp4Bytes(renderSize: size, fps: 30, duration: 60, encoding: MP4Encoding(quality: .medium), hasAudio: true))
     }
 
     @Test func sourceDataRateCapsTheEstimate() throws {
@@ -60,11 +71,11 @@ struct ExportEstimatorTests {
         // A 1 Mbps 4K source, exported at 1080p: a quarter of the pixels.
         let content = try #require(ExportEstimator.contentBitrate(sourceBitrate: 1_000_000, sourceSize: CGSize(width: 3840, height: 2160), renderSize: size))
         #expect(abs(content - 250_000 * 1.15) < 1e-6)
-        let capped = ExportEstimator.mp4Bytes(renderSize: size, fps: 30, duration: 60, quality: .high, hasAudio: false, contentBitrate: content)
+        let capped = ExportEstimator.mp4Bytes(renderSize: size, fps: 30, duration: 60, encoding: high, hasAudio: false, contentBitrate: content)
         #expect(abs(Double(capped) - content * 60 / 8 * 1.01) < 1)
         // A busy source never pushes the estimate above the encoder target.
-        let busy = ExportEstimator.mp4Bytes(renderSize: size, fps: 30, duration: 60, quality: .low, hasAudio: false, contentBitrate: 100_000_000)
-        #expect(busy == ExportEstimator.mp4Bytes(renderSize: size, fps: 30, duration: 60, quality: .low, hasAudio: false))
+        let busy = ExportEstimator.mp4Bytes(renderSize: size, fps: 30, duration: 60, encoding: low, hasAudio: false, contentBitrate: 100_000_000)
+        #expect(busy == ExportEstimator.mp4Bytes(renderSize: size, fps: 30, duration: 60, encoding: low, hasAudio: false))
         #expect(ExportEstimator.contentBitrate(sourceBitrate: 0, sourceSize: size, renderSize: size) == nil)
         let doubled = try #require(ExportEstimator.contentBitrate(sourceBitrate: 1_000_000, sourceSize: size, sourceFrameRate: 30, renderSize: size, fps: 60))
         #expect(abs(doubled - 1_000_000 * 1.15 * 2.0.squareRoot()) < 1e-6)
@@ -72,7 +83,7 @@ struct ExportEstimatorTests {
     }
 
     @Test func tinyFramesStillGetAUsableBitrate() {
-        #expect(ExportEstimator.videoBitrate(renderSize: CGSize(width: 16, height: 16), fps: 10, quality: .low) == 250_000)
+        #expect(ExportEstimator.videoBitrate(renderSize: CGSize(width: 16, height: 16), fps: 10, bitsPerPixel: ExportQuality.low.bitsPerPixel) == 250_000)
     }
 
     @Test func gifFrameCountRoundsUp() {
@@ -90,8 +101,39 @@ struct ExportEstimatorTests {
     }
 
     @Test func settingsRoundTripThroughJSON() throws {
-        let settings = ExportSettings(format: .gif, resolution: .hd720, quality: .low, frameRate: .fps60, gif: GIFOptions(width: nil, fps: 20))
+        let settings = ExportSettings(
+            format: .gif, sizeMode: .percentage, resolution: .hd720, scale: .percent33, quality: .low,
+            frameRate: .fps60, optimizeForSharing: true, gif: GIFOptions(width: nil, fps: 20)
+        )
         #expect(try JSONDecoder().decode(ExportSettings.self, from: JSONEncoder().encode(settings)) == settings)
+    }
+
+    @Test func settingsSavedBeforeNewFieldsKeepTheirChoices() throws {
+        let saved = #"{"format":"mp4","resolution":"hd720","quality":"low","frameRate":"fps60","gif":{"fps":10,"loopCount":0}}"#
+        let settings = try JSONDecoder().decode(ExportSettings.self, from: Data(saved.utf8))
+        #expect(settings == ExportSettings(resolution: .hd720, quality: .low, frameRate: .fps60, gif: GIFOptions(width: nil, fps: 10)))
+        #expect(settings.sizeMode == .resolution && settings.scale == .original && !settings.optimizeForSharing)
+    }
+
+    @Test func sharingCapsFrameRateAndIgnoresThePicks() {
+        var settings = ExportSettings(quality: .high, frameRate: .fps60)
+        #expect(settings.mp4FrameRate(sourceFrameRate: 60) == 60)
+        #expect(settings.mp4Encoding == MP4Encoding(quality: .high))
+        #expect(settings.mp4ShortSideCap == nil)
+
+        settings.optimizeForSharing = true
+        #expect(settings.mp4FrameRate(sourceFrameRate: 60) == 30)
+        // The hidden 60 fps pick doesn't upsample a 24 fps source.
+        #expect(settings.mp4FrameRate(sourceFrameRate: 24) == 24)
+        #expect(settings.mp4Encoding == .sharing)
+        #expect(settings.mp4ShortSideCap == 1080)
+    }
+
+    @Test func sizeModeChoosesWhichPresetApplies() {
+        var settings = ExportSettings(sizeMode: .resolution, resolution: .hd720, scale: .percent50)
+        #expect(settings.mp4ShortSide == 720 && settings.mp4Scale == nil)
+        settings.sizeMode = .percentage
+        #expect(settings.mp4ShortSide == nil && settings.mp4Scale == 0.5)
     }
 }
 

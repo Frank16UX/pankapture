@@ -31,21 +31,27 @@ public enum VideoExporter {
         let interval = Log.signposter.beginInterval("exportMP4", id: signpostID)
         defer { Log.signposter.endInterval("exportMP4", interval) }
 
-        let fps = settings.frameRate.resolve(sourceFrameRate: source.frameRate)
+        let fps = settings.mp4FrameRate(sourceFrameRate: source.frameRate)
         let tracks = try await source.loadTracks()
         let background = await BackgroundVideo.load(for: project)
         let edit = try CompositionBuilder.build(
             source: source,
             tracks: tracks,
             project: project,
-            options: .init(shortSide: settings.resolution.shortSide, frameRate: fps),
+            options: .init(
+                shortSideCap: settings.mp4ShortSideCap,
+                shortSide: settings.mp4ShortSide,
+                scale: settings.mp4Scale,
+                frameRate: fps
+            ),
             background: background
         )
-        let bitrate = ExportEstimator.videoBitrate(renderSize: edit.plan.renderSize, fps: fps, quality: settings.quality)
+        let encoding = settings.mp4Encoding
+        let bitrate = ExportEstimator.videoBitrate(renderSize: edit.plan.renderSize, fps: fps, bitsPerPixel: encoding.bitsPerPixel)
 
         try? FileManager.default.removeItem(at: url)
-        let job = try MP4WriterJob(edit: edit, url: url, fps: fps, bitrate: bitrate, progress: progress)
-        Log.editor.info("MP4 export started: \(Int(edit.plan.renderSize.width))×\(Int(edit.plan.renderSize.height)) @ \(fps) fps, \(Int(bitrate / 1000)) kbps")
+        let job = try MP4WriterJob(edit: edit, url: url, fps: fps, bitrate: bitrate, encoding: encoding, progress: progress)
+        Log.editor.info("MP4 export started: \(Int(edit.plan.renderSize.width))×\(Int(edit.plan.renderSize.height)) @ \(fps) fps, \(Int(bitrate / 1000)) kbps\(settings.optimizeForSharing ? ", optimized for sharing" : "")")
         do {
             try await job.run()
         } catch {
@@ -90,7 +96,14 @@ final class MP4WriterJob: @unchecked Sendable {
     private var isCancelled = false
     private var isFinishing = false
 
-    init(edit: EditComposition, url: URL, fps: Int, bitrate: Double, progress: @escaping @Sendable (Double) -> Void) throws {
+    init(
+        edit: EditComposition,
+        url: URL,
+        fps: Int,
+        bitrate: Double,
+        encoding: MP4Encoding,
+        progress: @escaping @Sendable (Double) -> Void
+    ) throws {
         self.duration = max(edit.duration, 0.001)
         self.progress = progress
         reader = try AVAssetReader(asset: edit.composition)
@@ -113,8 +126,9 @@ final class MP4WriterJob: @unchecked Sendable {
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: Int(bitrate),
                 AVVideoExpectedSourceFrameRateKey: fps,
-                AVVideoMaxKeyFrameIntervalKey: fps * 2,
+                AVVideoMaxKeyFrameIntervalKey: max(1, Int((Double(fps) * encoding.keyFrameInterval).rounded())),
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC,
             ],
             AVVideoColorPropertiesKey: [
                 AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
@@ -149,7 +163,7 @@ final class MP4WriterJob: @unchecked Sendable {
                 AVFormatIDKey: kAudioFormatMPEG4AAC,
                 AVSampleRateKey: 48_000,
                 AVNumberOfChannelsKey: 2,
-                AVEncoderBitRateKey: Int(ExportEstimator.audioBitrate),
+                AVEncoderBitRateKey: Int(encoding.audioBitrate),
             ])
             audioInput.expectsMediaDataInRealTime = false
             if reader.canAdd(audioOutput), writer.canAdd(audioInput) {
