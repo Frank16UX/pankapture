@@ -30,6 +30,8 @@ public struct RenderPlan: Sendable, Equatable {
     /// Rotation that turns camera frames upright.
     public var cameraOrientation: CGImagePropertyOrientation
     public var timeline: Timeline
+    /// Burned-in captions (PRD CAP-3), when on and there's a transcript.
+    public var captions: CaptionTrack?
     /// The editor turns zoom off while the user positions a zoom rectangle.
     public var zoomEnabled: Bool
     public var altersFrame: Bool
@@ -72,6 +74,7 @@ public struct RenderPlan: Sendable, Equatable {
         self.camera = camera?.isVisible == true ? camera : nil
         self.cameraOrientation = cameraOrientation
         self.timeline = Timeline(project: project)
+        self.captions = project.captionTrack(timeline: self.timeline, portrait: renderSize.height > renderSize.width)
         self.zoomEnabled = zoomEnabled
         self.altersFrame = background.altersFrame
     }
@@ -79,7 +82,7 @@ public struct RenderPlan: Sendable, Equatable {
     /// When false, frames are a plain scaled copy of the source and the much
     /// cheaper built-in compositor is used instead of `VideoEditCompositor`.
     public var needsCustomCompositor: Bool {
-        altersFrame || camera != nil || (zoomEnabled && !zooms.isEmpty)
+        altersFrame || camera != nil || captions != nil || (zoomEnabled && !zooms.isEmpty)
     }
 
     /// Where the camera layer sits in the output, pixels, **bottom-left**
@@ -157,7 +160,8 @@ public struct FrameRenderer: Sendable {
         outputTime time: Double,
         backdrop: CIImage? = nil,
         background: CIImage? = nil,
-        camera cameraFrame: CIImage? = nil
+        camera cameraFrame: CIImage? = nil,
+        caption: CIImage? = nil
     ) -> CIImage {
         let upright = source.oriented(plan.orientation)
         let frame = upright.transformed(by: CGAffineTransform(translationX: -upright.extent.minX, y: -upright.extent.minY))
@@ -223,6 +227,8 @@ public struct FrameRenderer: Sendable {
         if let cameraFrame, let layer = cameraLayer(cameraFrame) {
             frameImage = layer.transformed(by: camera).composited(over: frameImage)
         }
+        // Captions sit on the canvas, unaffected by zooms.
+        if let caption { frameImage = caption.composited(over: frameImage) }
         return frameImage.cropped(to: canvas)
     }
 

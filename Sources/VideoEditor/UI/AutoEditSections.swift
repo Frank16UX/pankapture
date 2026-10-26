@@ -147,6 +147,52 @@ struct AutoEditSection: View {
     }
 }
 
+/// Burned-in captions from the transcript (PRD CAP-1, CAP-3, CAP-4).
+struct CaptionsSection: View {
+    @Bindable var model: VideoEditorModel
+
+    private var settings: CaptionSettings { model.project.captions ?? CaptionSettings(isEnabled: false) }
+
+    private func set(_ change: @escaping (inout CaptionSettings) -> Void) {
+        model.edit { project in
+            var captions = project.captions ?? CaptionSettings(isEnabled: false)
+            change(&captions)
+            project.captions = captions
+        }
+    }
+
+    var body: some View {
+        Section("Captions") {
+            if model.transcript == nil {
+                Text("Analyze the recording to get its transcript; captions are made from it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Toggle("Show Captions", isOn: Binding(get: { settings.isEnabled }, set: { value in set { $0.isEnabled = value } }))
+                Group {
+                    FittingSegmentedPicker("Style", selection: Binding(get: { settings.style }, set: { value in set { $0.style = value } })) {
+                        ForEach(CaptionSettings.Style.allCases) { Text($0.title).tag($0) }
+                    }
+                    FittingSegmentedPicker("Position", selection: Binding(get: { settings.position }, set: { value in set { $0.position = value } })) {
+                        ForEach(CaptionSettings.Position.allCases) { Text($0.title).tag($0) }
+                    }
+                    FittingSegmentedPicker("Size", selection: Binding(get: { settings.size }, set: { value in set { $0.size = value } })) {
+                        ForEach(CaptionSettings.Size.allCases) { Text($0.title).tag($0) }
+                    }
+                    Picker("Captions file", selection: Binding(get: { settings.fileFormat }, set: { value in set { $0.fileFormat = value } })) {
+                        ForEach(CaptionSettings.FileFormat.allCases) { Text($0.title).tag($0) }
+                    }
+                    .help("Also save the captions as a file next to exported MP4s")
+                    Text("Captions are burned into exports. Fix any word in the Transcript panel.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .disabled(!settings.isEnabled)
+            }
+        }
+    }
+}
+
 /// Every suggestion, to check one by one (PRD AE-7). Removals switch on
 /// and off; pauses take a kind or "keep as is" (AE-8).
 struct AutoEditReviewSection: View {

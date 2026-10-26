@@ -12,6 +12,7 @@ struct InspectorView: View {
         Form {
             if model.isAutoEditAvailable {
                 AutoEditSection(model: model)
+                CaptionsSection(model: model)
                 if let layer = model.project.autoEdit {
                     AutoEditReviewSection(model: model, layer: layer)
                 }

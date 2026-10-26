@@ -89,15 +89,20 @@ final class VideoEditCompositor: NSObject, AVVideoCompositing, Sendable {
         let camera = instruction.cameraTrackID
             .flatMap { request.sourceFrame(byTrackID: $0) }
             .map { CIImage(cvPixelBuffer: $0) }
+        let outputTime = request.compositionTime.seconds
+        let caption = renderer.plan.captions.flatMap { track in
+            track.cue(at: outputTime).flatMap { CaptionRasterizer.shared.image(for: $0, track: track, canvas: renderer.plan.renderSize) }
+        }
         var image: CIImage
         let sourceBuffer = request.sourceFrame(byTrackID: instruction.sourceTrackID)
         if let sourceBuffer {
             image = renderer.render(
                 source: CIImage(cvPixelBuffer: sourceBuffer),
-                outputTime: request.compositionTime.seconds,
+                outputTime: outputTime,
                 backdrop: backdrop,
                 background: background,
-                camera: camera
+                camera: camera,
+                caption: caption
             )
         } else if let background {
             image = backdrop.composited(over: renderer.aspectFill(background, in: renderer.canvasRect))

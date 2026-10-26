@@ -126,6 +126,16 @@ Answers are checked: schema, word ranges, overlaps, and a cap of 35% removed. An
 - **Cloud transcription (AI-5):** `CloudTranscriber` compresses the microphone track to 16 kHz AAC and posts it to ElevenLabs (`scribe_v2`, verbatim by default) or an OpenAI-compatible Whisper endpoint. Whisper's word list lacks punctuation, so punctuation is aligned back from its full text.
 - **Stutters from audio (AE-5):** short words the recognizer stretched far beyond the speaker's pace, with a silence inside, are offered (switched off) as possible merged repeats.
 
+**ADR-36: Captions are burned in by the compositor, from the corrected transcript.**
+- **Settings:** `VideoEditProject.captions` holds on/off, style, position, size and the sidecar file format.
+- **Cues:** `CaptionBuilder` turns the project's transcript into cues on the **output** timeline.
+  - Removed words are dropped.
+  - A cue breaks at sentence ends, at pauses of 0.35 s or more, and wherever footage was spliced out.
+  - Each cue is at most two balanced lines of about 42 characters (32 for portrait) and lasts 0.8–6 s.
+- **Rendering:** `RenderPlan` carries the cues, so the preview, MP4 and GIF all draw them through `VideoEditCompositor`. The active cue is rasterized once with Core Text (`CaptionRasterizer`, a small cache behind a `Mutex`) and composited on the canvas after the camera layer, unaffected by zooms.
+- **Sidecar file:** after an MP4 export, an `.srt` or `.vtt` with the same cues is written next to it.
+- **Deferred:** an embedded, switchable subtitle track (CAP-5) needs an `AVAssetWriter` pass and waits.
+
 **ADR-33: Prompts and the default provider are chosen by an offline evaluation.** `pankapture-eval` (`make eval`) is a separate executable target, not part of the app bundle. It runs the app's analysis and prompt over labeled recordings kept outside the repo (PRD §11), caching each sample's transcript. It scores mistakes (by overlap, ±0.3 s), content lost, false positives on controls, and pause intent against a pass bar. The report carries a fingerprint of the prompt and schema, so runs can be compared.
 
 ## 3. Module map

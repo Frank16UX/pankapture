@@ -290,6 +290,7 @@ final class VideoEditorModel {
             // timeline redraws immediately and the preview follows shortly.
             scheduleRebuild(delay: isContinuousEdit ? .milliseconds(200) : .zero)
         } else if old.background != updated.background || old.zoomFillsFrame != updated.zoomFillsFrame || old.camera != updated.camera
+                    || old.captions != updated.captions || (updated.captions?.isEnabled == true && old.transcript != updated.transcript)
                     || (old.zooms != updated.zooms && selectedZoomID == nil) {
             // While a zoom is being edited the preview ignores zooms, so
             // dragging its rectangle doesn't need a new video composition.
@@ -733,6 +734,7 @@ final class VideoEditorModel {
                     try? FileManager.default.removeItem(at: result.url)
                     return
                 }
+                if settings.format == .mp4 { Self.writeCaptionsFile(for: project, nextTo: result.url) }
                 self.exportState = .finished(result)
                 self.onExportFinished?(result)
             } catch {
@@ -748,6 +750,21 @@ final class VideoEditorModel {
     }
 
     @ObservationIgnored private var exportGeneration = 0
+
+    /// Saves the captions as `.srt` or `.vtt` beside an MP4 export (CAP-4),
+    /// timed like the exported video.
+    nonisolated static func writeCaptionsFile(for project: VideoEditProject, nextTo video: URL) {
+        guard let settings = project.captions, settings.isEnabled, settings.fileFormat != .none,
+              let words = project.transcript?.words else { return }
+        let cues = CaptionBuilder.cues(words: words, timeline: project.timeline)
+        let (text, fileExtension) = settings.fileFormat == .srt ? (CaptionBuilder.srt(cues), "srt") : (CaptionBuilder.vtt(cues), "vtt")
+        let url = video.deletingPathExtension().appendingPathExtension(fileExtension)
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            Log.editor.error("Couldn't save the captions file: \(error.localizedDescription, privacy: .public)")
+        }
+    }
 
     func cancelExport() {
         exportTask?.cancel()

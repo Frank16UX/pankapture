@@ -128,8 +128,8 @@ Auto-edit, captions, voice cleanup, and camera backgrounds (PRD §5.11–5.12), 
    - [x] Transcript panel: seek, select to cut, zoom from selection (AE-10)
    - [x] Stutters found from the audio (AE-5)
    - [x] Optional cloud transcription (AI-5)
-4. **Captions**
-   - [ ] Cues, corrections, burned-in styles (CAP-1–CAP-3); .srt / .vtt (CAP-4)
+4. **Captions** ✅ (ADR-36)
+   - [x] Cues, corrections, burned-in styles (CAP-1–CAP-3); .srt / .vtt (CAP-4)
 5. **Audio**
    - [ ] Noise removal presets and normalization (AU-1–AU-3)
 6. **Camera**

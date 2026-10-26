@@ -232,10 +232,10 @@ Everything runs on the Mac unless the user configured an AI provider (§5.12). E
 
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
-| CAP-1 | **Captions** from the transcript (English or Spanish), grouped into readable cues (at most 2 lines of about 42 characters, 0.8–6 s each). They follow cuts and speed changes. | Must | M8 |
-| CAP-2 | **Correct the transcript** in place. Captions use the corrected text and keep their timing; corrections are saved with the project (VE-12). | Must | M8 |
-| CAP-3 | **Burn captions** into MP4 and GIF exports, with a few style presets (position, size, background). | Must | M8 |
-| CAP-4 | Save an **.srt / .vtt** file next to the exported video. | Should | M8 |
+| CAP-1 | **Captions** from the transcript (English or Spanish), grouped into readable cues (at most 2 lines of about 42 characters, 0.8–6 s each). They follow cuts and speed changes. | Must | M8 ✅ |
+| CAP-2 | **Correct the transcript** in place. Captions use the corrected text and keep their timing; corrections are saved with the project (VE-12). | Must | M8 ✅ |
+| CAP-3 | **Burn captions** into MP4 and GIF exports, with a few style presets (position, size, background). | Must | M8 ✅ |
+| CAP-4 | Save an **.srt / .vtt** file next to the exported video. | Should | M8 ✅ |
 | CAP-5 | Embedded, switchable subtitle track in the MP4. | Could | later |
 
 **Audio**
