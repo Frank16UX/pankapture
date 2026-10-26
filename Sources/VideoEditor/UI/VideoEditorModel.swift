@@ -1,8 +1,10 @@
 import AppCore
 import AppKit
+import AutoEdit
 import AVFoundation
 import Observation
 import Synchronization
+import Transcription
 
 /// State and actions of one editor window. Owns the preview player and keeps
 /// it in sync with the edit project: timeline edits rebuild the player item,
@@ -33,13 +35,20 @@ final class VideoEditorModel {
     private(set) var playhead: Double = 0
     private(set) var isPlaying = false
     /// Range selected on the timeline (source seconds), for Cut and Speed.
-    var selection: TimeRange?
-    var selectedCut: TimeRange?
+    /// One thing is selected at a time: selecting a range, cut, or zoom
+    /// deselects auto-edit's item, so ⌫ and [ ] act on what's visible.
+    var selection: TimeRange? {
+        didSet { if selection != nil { selectedAutoItem = nil } }
+    }
+    var selectedCut: TimeRange? {
+        didSet { if selectedCut != nil { selectedAutoItem = nil } }
+    }
     /// The zoom being edited. While set, the preview shows the unzoomed frame
     /// so the user can position the zoom rectangle over it.
     var selectedZoomID: ZoomSegment.ID? {
         didSet {
             guard oldValue != selectedZoomID else { return }
+            if selectedZoomID != nil { selectedAutoItem = nil }
             updatePreviewVideoComposition()
         }
     }
@@ -57,6 +66,25 @@ final class VideoEditorModel {
     /// When the running export started, for the time-left estimate.
     private(set) var exportStartDate: Date?
     var isShowingExportSheet = false
+
+    // MARK: Auto-edit (PRD §5.11; actions in VideoEditorModel+AutoEdit.swift)
+
+    enum AutoEditState: Equatable {
+        case idle
+        case running(stage: String, fraction: Double?)
+        case failed(String)
+    }
+
+    var autoEditState: AutoEditState = .idle
+    /// Why the provider's answer wasn't used, or what its checks dropped.
+    var autoEditNotice: String?
+    var autoEditLanguage: TranscriptLanguage
+    /// The auto-edit pause or removal selected on the timeline or in the review list.
+    var selectedAutoItem: AutoEditItem?
+    @ObservationIgnored var autoEditTask: Task<Void, Never>?
+    /// Each analysis run gets a generation; a cancelled run that is still
+    /// winding down must not touch the state of a newer one.
+    @ObservationIgnored var autoEditGeneration = 0
 
     @ObservationIgnored var onExportFinished: ((VideoExportResult) -> Void)?
     /// Called when `hasUnsavedChanges` flips (the window's edited dot).
@@ -82,6 +110,8 @@ final class VideoEditorModel {
         project = empty
         savedProject = empty
         exportSettings = Self.loadExportSettings()
+        autoEditLanguage = UserDefaults.standard.string(forKey: PreferenceKey.autoEditLanguage)
+            .flatMap(TranscriptLanguage.init(rawValue:)) ?? .preferred
         player.actionAtItemEnd = .pause
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(value: 1, timescale: 30),
@@ -136,6 +166,7 @@ final class VideoEditorModel {
                 project = saved
             }
             self.media = media
+            if let language = project.autoEdit?.language { autoEditLanguage = language }
             notifyUnsavedChanges()
             self.sidecar = sidecar
             if let url = project.background.fill.videoURL {
@@ -245,8 +276,10 @@ final class VideoEditorModel {
         refreshUndoState()
         if let id = selectedZoomID, !updated.zooms.contains(where: { $0.id == id }) { selectedZoomID = nil }
         if let cut = selectedCut, !updated.cuts.contains(cut) { selectedCut = nil }
+        if let item = selectedAutoItem, updated.autoEdit?.range(of: item) == nil { selectedAutoItem = nil }
 
-        let timelineChanged = old.trim != updated.trim || old.cuts != updated.cuts || old.speedSegments != updated.speedSegments
+        // Timelines compare by their segments (auto-edit derives cuts and speeds).
+        let timelineChanged = Timeline(project: old) != Timeline(project: updated)
         if old.background.fill.videoURL != updated.background.fill.videoURL {
             // A background movie is a track of the composition.
             loadBackgroundVideo(updated.background.fill.videoURL)
@@ -370,8 +403,11 @@ final class VideoEditorModel {
     }
 
     /// Deletes whatever is selected (zoom, cut, or the selection as a cut).
+    /// For an auto-edit item, ⌫ restores what it removed (AE-8).
     func deleteSelected() {
-        if selectedZoomID != nil {
+        if let item = selectedAutoItem {
+            restoreAutoItem(item)
+        } else if selectedZoomID != nil {
             removeSelectedZoom()
         } else if let cut = selectedCut {
             removeCut(cut)
@@ -385,6 +421,7 @@ final class VideoEditorModel {
         selection = nil
         selectedCut = nil
         selectedZoomID = nil
+        selectedAutoItem = nil
     }
 
     // MARK: Playback
@@ -531,7 +568,9 @@ final class VideoEditorModel {
 
     private func updatePreviewAudioMix() {
         guard let media, let edit = currentEdit else { return }
-        player.currentItem?.audioMix = CompositionBuilder.audioMix(for: edit.composition, source: media, volumes: project.trackVolumes)
+        player.currentItem?.audioMix = CompositionBuilder.audioMix(
+            for: edit.composition, source: media, volumes: project.trackVolumes, timeline: edit.timeline
+        )
     }
 
     // MARK: Persistence
@@ -740,6 +779,7 @@ final class VideoEditorModel {
         rebuildTask?.cancel()
         backgroundTask?.cancel()
         exportTask?.cancel()
+        autoEditTask?.cancel()
         analysisTasks.forEach { $0.cancel() }
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil

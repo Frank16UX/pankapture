@@ -203,11 +203,9 @@ public enum CompositionBuilder {
         var audioMix: AVMutableAudioMix?
         if !audioTracks.isEmpty {
             let mix = AVMutableAudioMix()
+            let joins = joinTimes(timeline)
             mix.inputParameters = audioTracks.map { audio in
-                let parameters = AVMutableAudioMixInputParameters(track: audio.composition)
-                parameters.setVolume(Float(audio.volume), at: .zero)
-                parameters.audioTimePitchAlgorithm = .spectral
-                return parameters
+                mixParameters(for: audio.composition, volume: audio.volume, joins: joins)
             }
             audioMix = mix
         }
@@ -284,16 +282,46 @@ public enum CompositionBuilder {
     }
 
     /// A fresh audio mix for the preview player when only volumes changed.
-    public static func audioMix(for composition: AVComposition, source: SourceMedia, volumes: TrackVolumes) -> AVAudioMix? {
+    public static func audioMix(for composition: AVComposition, source: SourceMedia, volumes: TrackVolumes, timeline: Timeline) -> AVAudioMix? {
         let compositionTracks = composition.tracks(withMediaType: .audio)
         guard compositionTracks.count == source.audioTracks.count, !compositionTracks.isEmpty else { return nil }
         let mix = AVMutableAudioMix()
+        let joins = joinTimes(timeline)
         mix.inputParameters = zip(compositionTracks, source.audioTracks).map { track, info in
-            let parameters = AVMutableAudioMixInputParameters(track: track)
-            parameters.setVolume(Float(volumes[info.role].effectiveVolume), at: .zero)
-            parameters.audioTimePitchAlgorithm = .spectral
-            return parameters
+            mixParameters(for: track, volume: volumes[info.role].effectiveVolume, joins: joins)
         }
         return mix
+    }
+
+    /// Length of the fade out and back in at each join (AE-9): long enough
+    /// that a cut doesn't click, too short to hear as a dip.
+    public static let joinFade = 0.008
+
+    /// Output times where removed footage was spliced out: consecutive
+    /// segments that aren't contiguous in the source. Speed changes alone
+    /// don't make a join.
+    public static func joinTimes(_ timeline: Timeline) -> [Double] {
+        zip(timeline.segments, timeline.segments.dropFirst()).compactMap { previous, next in
+            abs(previous.source.end - next.source.start) > 1e-6 ? next.outputStart : nil
+        }
+    }
+
+    /// Constant volume with a short fade out and in around every join.
+    static func mixParameters(for track: AVAssetTrack, volume: Double, joins: [Double]) -> AVMutableAudioMixInputParameters {
+        let parameters = AVMutableAudioMixInputParameters(track: track)
+        let level = Float(volume)
+        parameters.setVolume(level, at: .zero)
+        parameters.audioTimePitchAlgorithm = .spectral
+        guard level > 0 else { return parameters }
+        var lastEnd = 0.0
+        for join in joins.sorted() {
+            // Joins closer together than two fades keep the previous ramp.
+            let fadeStart = max(lastEnd, join - joinFade)
+            guard join - fadeStart > 0.001 else { continue }
+            parameters.setVolumeRamp(fromStartVolume: level, toEndVolume: 0, timeRange: CMTimeRange(start: cmTime(fadeStart), end: cmTime(join)))
+            parameters.setVolumeRamp(fromStartVolume: 0, toEndVolume: level, timeRange: CMTimeRange(start: cmTime(join), end: cmTime(join + joinFade)))
+            lastEnd = join + joinFade
+        }
+        return parameters
     }
 }

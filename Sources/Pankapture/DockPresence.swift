@@ -54,7 +54,7 @@ final class DockPresence {
 @Observable
 final class SettingsWindow {
     enum Tab: Hashable {
-        case general, screenshots, recording, shortcuts, history, permissions, updates
+        case general, screenshots, recording, shortcuts, history, ai, permissions, updates
     }
 
     static let shared = SettingsWindow()

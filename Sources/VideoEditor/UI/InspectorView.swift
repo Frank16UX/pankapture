@@ -3,13 +3,19 @@ import DesignSystem
 import ImageIO
 import SwiftUI
 
-/// Trailing inspector: background (VE-6), zoom (VE-4/5), speed (VE-11),
-/// audio (VE-7), and the list of cuts (VE-3).
+/// Trailing inspector: auto-edit (PRD §5.11), background (VE-6), zoom
+/// (VE-4/5), speed (VE-11), audio (VE-7), and the list of cuts (VE-3).
 struct InspectorView: View {
     @Bindable var model: VideoEditorModel
 
     var body: some View {
         Form {
+            if model.isAutoEditAvailable {
+                AutoEditSection(model: model)
+                if let layer = model.project.autoEdit {
+                    AutoEditReviewSection(model: model, layer: layer)
+                }
+            }
             BackgroundSection(model: model)
             ZoomSection(model: model)
             SpeedSection(model: model)

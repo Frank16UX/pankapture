@@ -25,6 +25,9 @@ struct SettingsView: View {
                     HistorySettingsView(library: library) { coordinator.showLibrary() }
                 }
             }
+            Tab("AI", systemImage: "sparkles", value: .ai) {
+                AISettingsView()
+            }
             Tab("Permissions", systemImage: "lock.shield", value: .permissions) {
                 PermissionsSettingsView()
             }

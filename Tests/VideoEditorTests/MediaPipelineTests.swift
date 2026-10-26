@@ -1,3 +1,4 @@
+import AppCore
 import AVFoundation
 import CoreGraphics
 import Foundation

@@ -200,6 +200,8 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             case "l": model.playFaster()
             case "z": model.addZoomAtPlayhead()
             case "s": model.splitAtPlayhead()
+            case "[": model.setSelectedEdgeToPlayhead(start: true)
+            case "]": model.setSelectedEdgeToPlayhead(start: false)
             default: return false
             }
         }

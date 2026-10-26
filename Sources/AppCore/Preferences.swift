@@ -216,3 +216,17 @@ public extension PreferenceKey {
     /// frame under "NSWindow Frame <name>").
     static let videoEditorWindowFrame = "videoEditor.window"
 }
+
+// MARK: Smart editing (M8)
+
+public extension PreferenceKey {
+    /// Use the configured AI provider for auto-edit (PRD AI-1). Missing = false.
+    static let aiProviderEnabled = "ai.providerEnabled"
+    /// The provider, JSON-encoded `AIProviders.ProviderConfiguration` (no
+    /// secrets; keys live in the Keychain, AI-3). Missing = none.
+    static let aiProviderConfiguration = "ai.providerConfiguration"
+    /// Last pacing preset used by auto-edit (AE-3): "tight", "natural", or "relaxed".
+    static let autoEditPacing = "autoEdit.pacing"
+    /// Last language analyzed: "en" or "es". Missing = the system language.
+    static let autoEditLanguage = "autoEdit.language"
+}

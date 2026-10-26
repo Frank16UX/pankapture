@@ -1,3 +1,4 @@
+import AppCore
 import AVFoundation
 import CoreGraphics
 import ImageIO
@@ -60,7 +61,7 @@ public struct SourceMedia: Sendable {
         var screenTracks: [AVAssetTrack] = []
         var cameraTrack: AVAssetTrack?
         for track in try await asset.loadTracks(withMediaType: .video) {
-            if cameraTrack == nil, await Self.name(of: track)?.lowercased() == Self.cameraTrackName {
+            if cameraTrack == nil, await RecordingTracks.name(of: track)?.lowercased() == RecordingTracks.cameraName {
                 cameraTrack = track
             } else {
                 screenTracks.append(track)
@@ -90,16 +91,16 @@ public struct SourceMedia: Sendable {
         var names: [String?] = []
         var ranges: [TimeRange] = []
         for track in try await asset.loadTracks(withMediaType: .audio) {
-            let name = await Self.name(of: track)
+            let name = await RecordingTracks.name(of: track)
             // The recorder's "Mix" track (system + mic for players that play
             // one track) duplicates the separate tracks the editor mixes itself.
-            if name?.lowercased() == Self.mixTrackName { continue }
+            if name?.lowercased() == RecordingTracks.mixName { continue }
             audio.append(track)
             names.append(name)
             let range = try await track.load(.timeRange)
             ranges.append(TimeRange(start: range.start.seconds, end: range.end.seconds))
         }
-        let roles = Self.resolveRoles(names: names)
+        let roles = RecordingTracks.resolveRoles(names: names)
         let audioTracks = audio.indices.map { index in
             AudioTrackInfo(
                 trackID: audio[index].trackID,
@@ -145,11 +146,6 @@ public struct SourceMedia: Sendable {
         )
     }
 
-    /// Title of the recorder's mixed track (`RecordingWriter.TrackName.mix`), lowercased.
-    static let mixTrackName = "mix"
-    /// Title of the recorder's webcam track (`RecordingWriter.TrackName.camera`), lowercased.
-    static let cameraTrackName = "camera"
-
     /// Resolves the AVFoundation tracks (cheap: the asset has them loaded).
     public func loadTracks() async throws -> sending LoadedTracks {
         guard let video = try await asset.loadTrack(withTrackID: videoTrackID) else {
@@ -162,27 +158,6 @@ public struct SourceMedia: Sendable {
         var camera: AVAssetTrack?
         if let info = self.camera { camera = try await asset.loadTrack(withTrackID: info.trackID) }
         return LoadedTracks(video: video, audio: audio, camera: camera)
-    }
-
-    /// Track roles from track names when present ("…mic…" / "…system…");
-    /// otherwise by order (first = system, second = microphone, REC-4) with
-    /// neutral labels, since the order is only a convention.
-    static func resolveRoles(names: [String?]) -> [(role: AudioRole, label: String)] {
-        var result: [(role: AudioRole, label: String)?] = Array(repeating: nil, count: names.count)
-        for (index, name) in names.enumerated() {
-            guard let name = name?.lowercased() else { continue }
-            if name.contains("mic") || name.contains("voice") {
-                result[index] = (.microphone, "Microphone")
-            } else if name.contains("system") {
-                result[index] = (.system, "System Audio")
-            }
-        }
-        var free = AudioRole.allCases.filter { role in !result.contains { $0?.role == role } }
-        for index in result.indices where result[index] == nil {
-            let role = free.isEmpty ? AudioRole.system : free.removeFirst()
-            result[index] = (role, names.count == 1 ? "Audio" : "Audio \(index + 1)")
-        }
-        return result.map { $0 ?? (.system, "Audio") }
     }
 
     static func orientation(for transform: CGAffineTransform) -> CGImagePropertyOrientation {
@@ -199,19 +174,5 @@ public struct SourceMedia: Sendable {
     static func normalized(_ transform: CGAffineTransform, naturalSize: CGSize) -> CGAffineTransform {
         let bounds = CGRect(origin: .zero, size: naturalSize).applying(transform)
         return transform.concatenating(CGAffineTransform(translationX: -bounds.minX, y: -bounds.minY))
-    }
-
-    private static func name(of track: AVAssetTrack) async -> String? {
-        guard let items = try? await track.load(.metadata) else { return nil }
-        let identifiers: Set<AVMetadataIdentifier> = [
-            .quickTimeUserDataTrackName, .commonIdentifierTitle, .quickTimeMetadataDisplayName,
-        ]
-        for item in items {
-            // MP4 stores the recorder's titles as ISO user data (`uiso/titl`),
-            // which only matches by common key.
-            guard item.commonKey == .commonKeyTitle || item.identifier.map(identifiers.contains) == true else { continue }
-            if let value = try? await item.load(.stringValue), !value.isEmpty { return value }
-        }
-        return nil
     }
 }

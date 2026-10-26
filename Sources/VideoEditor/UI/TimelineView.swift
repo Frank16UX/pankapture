@@ -1,3 +1,5 @@
+import AppCore
+import AutoEdit
 import AVFoundation
 import DesignSystem
 import SwiftUI
@@ -39,11 +41,14 @@ struct TimelineView: View {
     static let filmstripHeight: CGFloat = 56
     static let zoomLaneHeight: CGFloat = 30
     static let audioLaneHeight: CGFloat = 34
+    static let autoEditLaneHeight: CGFloat = 22
 
     private var totalHeight: CGFloat {
         let audio = CGFloat(model.visibleAudioTracks.count)
+        let autoEdit: CGFloat = model.project.autoEdit == nil ? 0 : 1
         let lanes = Self.rulerHeight + Self.filmstripHeight + Self.zoomLaneHeight + audio * Self.audioLaneHeight
-        return lanes + PK.Spacing.xs * (2 + audio)
+            + autoEdit * Self.autoEditLaneHeight
+        return lanes + PK.Spacing.xs * (2 + audio + autoEdit)
     }
 
     var body: some View {
@@ -54,6 +59,10 @@ struct TimelineView: View {
                     .frame(height: Self.rulerHeight)
                 FilmstripLane(model: model, scale: scale)
                     .frame(height: Self.filmstripHeight)
+                if let layer = model.project.autoEdit {
+                    AutoEditLane(model: model, layer: layer, scale: scale)
+                        .frame(height: Self.autoEditLaneHeight)
+                }
                 ZoomLane(model: model, scale: scale)
                     .frame(height: Self.zoomLaneHeight)
                 ForEach(model.visibleAudioTracks) { track in
@@ -168,6 +177,7 @@ private struct FilmstripLane: View {
                 context.clip(to: shape)
                 drawFrames(in: &context, lane: lane)
                 drawRemovedParts(in: &context, lane: lane)
+                drawAutoEditCuts(in: &context, lane: lane)
             }
 
             ForEach(model.project.cuts, id: \.self) { cut in
@@ -175,6 +185,18 @@ private struct FilmstripLane: View {
                     .frame(width: max(2, scale.width(cut)), height: TimelineView.filmstripHeight)
                     .offset(x: scale.x(cut.start))
                     .allowsHitTesting(false)
+            }
+
+            // The selected cut's edges move (AE-8).
+            if let cut = model.selectedCut {
+                CutEdgeHandle()
+                    .offset(x: scale.x(cut.start) - CutEdgeHandle.width / 2)
+                    .gesture(cutEdgeGesture(cut, isStart: true))
+                    .accessibilityLabel("Cut start")
+                CutEdgeHandle()
+                    .offset(x: scale.x(cut.end) - CutEdgeHandle.width / 2)
+                    .gesture(cutEdgeGesture(cut, isStart: false))
+                    .accessibilityLabel("Cut end")
             }
 
             if let selection = model.selection {
@@ -227,11 +249,46 @@ private struct FilmstripLane: View {
         }
     }
 
+    /// Auto-edit's removals: dimmed, without the user cuts' hatching, so the
+    /// two layers stay distinguishable (AE-7).
+    private func drawAutoEditCuts(in context: inout GraphicsContext, lane: CGRect) {
+        // Only what the timeline actually removes (auto-edit is ignored when
+        // it would leave almost nothing).
+        let project = model.project
+        guard let auto = project.autoEdit?.cuts, !auto.isEmpty, project.effectiveCuts != project.cuts else { return }
+        let cuts = auto
+        let dim = GraphicsContext.Shading.color(Color(nsColor: .windowBackgroundColor).opacity(0.6))
+        for cut in cuts {
+            context.fill(Path(CGRect(x: scale.x(cut.start), y: 0, width: max(1, scale.width(cut)), height: lane.height)), with: dim)
+        }
+    }
+
     private func drawRemovedParts(in context: inout GraphicsContext, lane: CGRect) {
         let trim = model.project.trim
         let dim = GraphicsContext.Shading.color(Color(nsColor: .windowBackgroundColor).opacity(0.72))
         context.fill(Path(CGRect(x: lane.minX, y: 0, width: scale.x(trim.start) - lane.minX, height: lane.height)), with: dim)
         context.fill(Path(CGRect(x: scale.x(trim.end), y: 0, width: lane.maxX - scale.x(trim.end), height: lane.height)), with: dim)
+    }
+
+    @State private var cutDrag: (original: TimeRange, current: TimeRange)?
+
+    private func cutEdgeGesture(_ cut: TimeRange, isStart: Bool) -> some Gesture {
+        DragGesture(minimumDistance: 1, coordinateSpace: .named(TimelineView.space))
+            .onChanged { value in
+                if cutDrag == nil {
+                    cutDrag = (cut, cut)
+                    model.beginContinuousEdit()
+                }
+                guard let drag = cutDrag else { return }
+                let edge = isStart ? drag.original.start : drag.original.end
+                let time = scale.time(scale.x(edge) + value.translation.width)
+                model.moveCutEdge(drag.current, start: isStart, to: time)
+                if let selected = model.selectedCut { cutDrag?.current = selected }
+            }
+            .onEnded { _ in
+                cutDrag = nil
+                model.endContinuousEdit()
+            }
     }
 
     /// Moves the edge by the drag's translation from where it was grabbed, so
@@ -262,6 +319,7 @@ private struct FilmstripLane: View {
                 let current = scale.time(value.location.x)
                 model.selectedCut = nil
                 model.selectedZoomID = nil
+                model.selectedAutoItem = nil
                 model.selection = TimeRange(start: min(start, current), end: max(start, current))
             }
             .onEnded { value in
@@ -272,6 +330,7 @@ private struct FilmstripLane: View {
                 let time = scale.time(value.location.x)
                 model.selection = nil
                 model.selectedZoomID = nil
+                model.selectedAutoItem = nil
                 if let cut = model.project.cuts.first(where: { $0.contains(time) }) {
                     model.selectedCut = cut
                 } else {
@@ -348,6 +407,131 @@ private struct TrimHandle: View {
         .contentShape(Rectangle().inset(by: -4))
         .pointerStyle(.columnResize)
         .accessibilityLabel(edge == .leading ? "Trim start" : "Trim end")
+    }
+}
+
+/// Grip on an edge of the selected cut: drag to resize it (AE-8).
+private struct CutEdgeHandle: View {
+    static let width: CGFloat = 8
+
+    var body: some View {
+        Capsule()
+            .fill(Color.red)
+            .overlay(Capsule().strokeBorder(Color.white, lineWidth: 1.5))
+            .frame(width: Self.width, height: TimelineView.filmstripHeight - 12)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle().inset(by: -4))
+            .pointerStyle(.columnResize)
+    }
+}
+
+// MARK: Auto-edit lane
+
+/// Auto-edit's suggestions (PRD AE-7): one block per removal or shortened
+/// pause, tinted by group; off ones are outlined. Click to select and
+/// review; drag the selected block's edges to adjust it (AE-8).
+private struct AutoEditLane: View {
+    @Bindable var model: VideoEditorModel
+    let layer: AutoEditLayer
+    let scale: TimelineScale
+
+    @State private var drag: (item: AutoEditItem, original: TimeRange)?
+
+    private struct Block: Identifiable {
+        var item: AutoEditItem
+        var range: TimeRange
+        var group: AutoEditGroup
+        var applies: Bool
+        var id: AutoEditItem { item }
+    }
+
+    private var blocks: [Block] {
+        var blocks: [Block] = layer.pauses.compactMap { pause in
+            guard let cut = pause.cut(pacing: layer.pacing) else { return nil }
+            return Block(item: .pause(pause.id), range: cut, group: .pauses, applies: layer.groups.contains(.pauses))
+        }
+        blocks += layer.removals.map { removal in
+            Block(item: .removal(removal.id), range: removal.range, group: removal.group,
+                  applies: removal.isEnabled && layer.groups.contains(removal.group))
+        }
+        return blocks
+    }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: PK.Radius.control, style: .continuous)
+                .fill(.quaternary.opacity(0.4))
+                .frame(width: scale.usableWidth, height: TimelineView.autoEditLaneHeight)
+                .offset(x: scale.inset)
+                .onTapGesture { model.selectedAutoItem = nil }
+
+            ForEach(blocks) { block in
+                blockView(block)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityLabel("Auto-edit suggestions")
+    }
+
+    private func blockView(_ block: Block) -> some View {
+        let isSelected = model.selectedAutoItem == block.item
+        let width = max(3, scale.width(block.range))
+        return RoundedRectangle(cornerRadius: 3, style: .continuous)
+            .fill(block.group.color.opacity(block.applies ? (isSelected ? 0.95 : 0.7) : 0.12))
+            .strokeBorder(isSelected ? Color.primary : block.group.color.opacity(block.applies ? 0 : 0.7), lineWidth: isSelected ? 1.5 : 1)
+            .frame(width: width, height: TimelineView.autoEditLaneHeight - 6)
+            .overlay(alignment: .leading) {
+                if isSelected { edgeHandle(block, isStart: true).offset(x: -4) }
+            }
+            .overlay(alignment: .trailing) {
+                if isSelected { edgeHandle(block, isStart: false).offset(x: 4) }
+            }
+            .contentShape(Rectangle().inset(by: -2))
+            .offset(x: scale.x(block.range.start), y: 3)
+            .onTapGesture { model.selectAutoItem(block.item) }
+            .help(help(for: block))
+            .accessibilityElement()
+            .accessibilityLabel("\(block.group.title) at \(Format.time(block.range.start))")
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { model.selectAutoItem(block.item) }
+            .accessibilityAction(named: "Restore") { model.restoreAutoItem(block.item) }
+    }
+
+    private func help(for block: Block) -> String {
+        switch block.item {
+        case .pause(let id):
+            let kind = layer.pauses.first { $0.id == id }?.pause.kind.title ?? "Pause"
+            return "\(kind): shortened. Drag the ends to adjust; ⌫ keeps it as is."
+        case .removal(let id):
+            guard let removal = layer.removals.first(where: { $0.id == id }) else { return "" }
+            return "\(removal.suggestion.kind.title): \(removal.suggestion.reason). ⌫ keeps it."
+        }
+    }
+
+    private func edgeHandle(_ block: Block, isStart: Bool) -> some View {
+        Capsule()
+            .fill(Color.white)
+            .overlay(Capsule().strokeBorder(block.group.color, lineWidth: 1.5))
+            .frame(width: 7, height: TimelineView.autoEditLaneHeight - 4)
+            .contentShape(Rectangle().inset(by: -4))
+            .pointerStyle(.columnResize)
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .named(TimelineView.space))
+                    .onChanged { value in
+                        if drag == nil {
+                            drag = (block.item, block.range)
+                            model.beginContinuousEdit()
+                        }
+                        guard let drag else { return }
+                        let edge = isStart ? drag.original.start : drag.original.end
+                        model.moveAutoItemEdge(drag.item, start: isStart, to: scale.time(scale.x(edge) + value.translation.width))
+                    }
+                    .onEnded { _ in
+                        drag = nil
+                        model.endContinuousEdit()
+                    }
+            )
+            .accessibilityLabel(isStart ? "Suggestion start" : "Suggestion end")
     }
 }
 
@@ -553,7 +737,7 @@ private struct WaveformLane: View {
             let dim = GraphicsContext.Shading.color(Color(nsColor: .windowBackgroundColor).opacity(0.7))
             context.fill(Path(CGRect(x: lane.minX, y: 0, width: scale.x(trim.start) - lane.minX, height: size.height)), with: dim)
             context.fill(Path(CGRect(x: scale.x(trim.end), y: 0, width: lane.maxX - scale.x(trim.end), height: size.height)), with: dim)
-            for cut in model.project.cuts {
+            for cut in model.project.effectiveCuts {
                 context.fill(Path(CGRect(x: scale.x(cut.start), y: 0, width: scale.width(cut), height: size.height)), with: dim)
             }
         }

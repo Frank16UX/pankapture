@@ -25,6 +25,12 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("Library", isDirectory: true)
     }
 
+    /// On-device transcripts of recordings, `<video>.<language>.json` (PRD AE-1),
+    /// cached so auto-edit and captions don't transcribe twice.
+    public static var transcripts: URL {
+        applicationSupport.appendingPathComponent("Transcripts", isDirectory: true)
+    }
+
     /// Layered originals of recordings made with the camera as its own track
     /// (ADR-25). The save folder gets a composited copy with the same name;
     /// the video editor opens the original from here.
