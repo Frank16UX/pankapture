@@ -20,6 +20,7 @@ What to expect:
 
 - `main` is protected. Every change lands through a pull request that the maintainer reviews and merges.
 - CI runs on your pull request after the maintainer approves it to run. It tests and builds the app but has no access to signing keys and publishes nothing.
+- An automated reviewer comments on each pull request and its later pushes, guided by [CLAUDE.md](CLAUDE.md); settings live in `.symphony/review.yml`. A critical finding fails its check.
 - Every merge to `main` ships a release to everyone with automatic updates on, so reviews are careful and changes to `.github/` or `scripts/` get extra scrutiny.
 - Keep pull requests focused. One fix or feature each is easier to review and to revert.
 - Don't name other apps in code, docs, or commits; describe features generically.
