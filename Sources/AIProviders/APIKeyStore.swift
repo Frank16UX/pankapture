@@ -60,7 +60,11 @@ public enum APIKeyStore {
             item[kSecValueData as String] = data
             item[kSecAttrLabel as String] = "Pankapture AI provider key (\(presetID))"
             let added = SecItemAdd(item as CFDictionary, nil)
-            guard added == errSecSuccess else { throw KeychainError(status: added) }
+            guard added == errSecSuccess else {
+                // The old item is already gone; don't keep serving it from the cache.
+                cache.withLock { $0[presetID] = nil }
+                throw KeychainError(status: added)
+            }
         } else {
             let updated = SecItemUpdate(baseQuery(presetID) as CFDictionary, [kSecValueData as String: data] as CFDictionary)
             guard updated == errSecSuccess else { throw KeychainError(status: updated) }

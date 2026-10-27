@@ -74,8 +74,9 @@ extension VideoEditorModel {
         // Detached: reading and analyzing audio blocks its thread.
         let work = Task.detached(priority: .userInitiated) { [weak self] () async throws -> AutoEditResult in
             // Keys are read here, off the main actor: the first read after an
-            // update can wait on a Keychain prompt (ADR-41).
-            let cloud: CloudTranscription? = if let cloudService, let cloudProviderID {
+            // update can wait on a Keychain prompt (ADR-41). A cached transcript
+            // sends no request, so it reads no key.
+            let cloud: CloudTranscription? = if cached == nil, let cloudService, let cloudProviderID {
                 AISettings.cloudTranscription(service: cloudService.service, model: cloudService.model, providerID: cloudProviderID)
             } else {
                 nil

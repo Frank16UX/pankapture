@@ -236,7 +236,7 @@ Pankapture (executable, app shell)
  │  planned
  ├── Overlay        selection overlay, loupe, inline editor canvas + toolbars (M1)  → Capture, Annotation, DesignSystem
  ├── Recording      SCStream → AVAssetWriter, HUD, webcam/clicks/keys overlays (M3–M4)
- ├── VideoEditor    timeline, composition, zoom compositor, export (M5)
+ ├── VideoEditor    timeline, composition, zoom compositor, export (M5)             → AppCore, DesignSystem, Transcription, AIProviders, AutoEdit
  ├── Library        SwiftData history, OCR index, library window (M6)
  │
  │  smart editing (M8, macOS 26+), service modules

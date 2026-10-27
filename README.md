@@ -2,7 +2,7 @@
 
 A fast, native macOS menu bar app for screenshots, in-place annotation, and screen recording with **system audio + microphone**, plus a lightweight video editor and searchable capture history.
 
-Apple Silicon · macOS 15+ · Swift 6 · no dependencies · fully offline.
+Apple Silicon · macOS 15+ · Swift 6 · no dependencies · offline by default (optional cloud transcription and AI providers use the network, only when you add them).
 
 > **Status:** v1 feature-complete: area/window/fullscreen/scrolling/text capture with inline annotation, full editor with backgrounds, pins, quick-access thumbnails, screen recording with system audio + mic (webcam, clicks, keystrokes), video editor, and searchable history. Manual QA and the performance pass are tracked in [docs/ROADMAP.md](docs/ROADMAP.md).
 

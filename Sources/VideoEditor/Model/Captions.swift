@@ -1,5 +1,6 @@
 import AppCore
 import Foundation
+import Synchronization
 import Transcription
 
 /// How captions look and whether they're on (PRD CAP-1, CAP-3, CAP-4).
@@ -223,8 +224,34 @@ public extension VideoEditProject {
     /// there's no transcript yet.
     func captionTrack(timeline: Timeline, portrait: Bool) -> CaptionTrack? {
         guard let settings = captions, settings.isEnabled, let words = transcript?.words, !words.isEmpty else { return nil }
+        return CaptionTrackCache.track(words: words, timeline: timeline, settings: settings, portrait: portrait)
+    }
+}
+
+/// The last caption track built. Every render plan asks for one, and the
+/// preview plan is rebuilt as the playhead moves (about 30 Hz in playback),
+/// while building cues scans the timeline for each word. The inputs rarely
+/// change, and an unchanged transcript's words share storage, so the check
+/// is cheap.
+private enum CaptionTrackCache {
+    private struct Entry: Sendable {
+        var words: [TranscriptWord]
+        var timeline: Timeline
+        var settings: CaptionSettings
+        var portrait: Bool
+        var track: CaptionTrack?
+    }
+
+    private static let last = Mutex<Entry?>(nil)
+
+    static func track(words: [TranscriptWord], timeline: Timeline, settings: CaptionSettings, portrait: Bool) -> CaptionTrack? {
+        if let entry = last.withLock({ $0 }), entry.portrait == portrait, entry.settings == settings,
+           entry.timeline == timeline, entry.words == words {
+            return entry.track
+        }
         let cues = CaptionBuilder.cues(words: words, timeline: timeline, maxLineLength: portrait ? 32 : 42)
-        guard !cues.isEmpty else { return nil }
-        return CaptionTrack(cues: cues, style: settings.style, position: settings.position, size: settings.size)
+        let track = cues.isEmpty ? nil : CaptionTrack(cues: cues, style: settings.style, position: settings.position, size: settings.size)
+        last.withLock { $0 = Entry(words: words, timeline: timeline, settings: settings, portrait: portrait, track: track) }
+        return track
     }
 }
