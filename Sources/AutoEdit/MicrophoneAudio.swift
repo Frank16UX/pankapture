@@ -35,9 +35,15 @@ public enum MicrophoneAudio {
     /// Decodes the microphone track of `movieURL` to `outputURL`. Prefers the
     /// track titled "Microphone" (REC-4); a file with one audio track uses it.
     /// Gaps in the track are filled with silence so times stay aligned with
-    /// the movie. Runs synchronously on the caller's executor; call it from a
-    /// task that may block.
+    /// the movie. The read blocks on AVFoundation, so it runs on its own
+    /// queue rather than the cooperative pool.
     public static func extract(from movieURL: URL, to outputURL: URL) async throws -> ExtractedAudio {
+        try await withBlockingExecutor(label: "com.franklinperez.Pankapture.autoedit.microphone") {
+            try await read(from: movieURL, to: outputURL)
+        }
+    }
+
+    private static func read(from movieURL: URL, to outputURL: URL) async throws -> ExtractedAudio {
         let signpostID = Log.signposter.makeSignpostID()
         let interval = Log.signposter.beginInterval("extractMicrophone", id: signpostID)
         defer { Log.signposter.endInterval("extractMicrophone", interval) }

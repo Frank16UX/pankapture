@@ -243,8 +243,15 @@ public enum VoiceProcessor {
     }
 
     /// Decodes one audio track to 48 kHz mono Float32; returns where its
-    /// first sample sits on the recording's timeline.
+    /// first sample sits on the recording's timeline. The read blocks on
+    /// AVFoundation, so it runs on its own queue rather than the cooperative pool.
     static func decode(source: URL, trackID: CMPersistentTrackID, to url: URL) async throws -> Double {
+        try await withBlockingExecutor(label: "com.franklinperez.Pankapture.audio.decode") {
+            try await read(source: source, trackID: trackID, to: url)
+        }
+    }
+
+    private static func read(source: URL, trackID: CMPersistentTrackID, to url: URL) async throws -> Double {
         let asset = AVURLAsset(url: source)
         guard let track = try await asset.loadTrack(withTrackID: trackID) else { throw Failure.noMicrophone }
         let start = (try? await track.load(.timeRange).start.seconds) ?? 0
