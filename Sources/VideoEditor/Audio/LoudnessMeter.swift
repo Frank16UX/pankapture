@@ -58,7 +58,10 @@ struct LoudnessMeter {
     /// `nil` when there's under 400 ms of signal or everything is silent.
     var integratedLoudness: Double? {
         guard steps.count >= 4 else { return nil }
-        let blocks = (0...(steps.count - 4)).map { (steps[$0] + steps[$0 + 1] + steps[$0 + 2] + steps[$0 + 3]) / 4 }
+        let blocks: [Double] = (0...(steps.count - 4)).map { (i: Int) -> Double in
+            let sum: Double = steps[i] + steps[i + 1] + steps[i + 2] + steps[i + 3]
+            return sum / 4
+        }
         func loudness(_ meanSquare: Double) -> Double { -0.691 + 10 * log10(max(meanSquare, 1e-12)) }
         let absolute = blocks.filter { loudness($0) > -70 }
         guard !absolute.isEmpty else { return nil }
