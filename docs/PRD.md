@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v1 feature-complete (M0–M6, M7 partly); manual QA and performance pass pending. M8 (smart editing) planned |
+| **Status** | v1 feature-complete (M0–M6, M7 partly); manual QA and performance pass pending. M8 (smart editing) built; the default-provider decision and the matte track remain ([ROADMAP M8](ROADMAP.md#m8--smart-editing)) |
 | **Owner** | Franklin Perez |
 | **Last updated** | 2026-10-26 |
 | **Platform** | macOS 15 Sequoia or later, Apple Silicon only |

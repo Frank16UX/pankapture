@@ -175,8 +175,11 @@ struct Evaluation {
                 }
                 runs.append(scores)
             }
-            let instability = analyses.values.map(Scorer.instability).reduce((unstable: 0, total: 0)) {
-                (unstable: $0.unstable + $1.unstable, total: $0.total + $1.total)
+            var instability: (unstable: Int, total: Int) = (0, 0)
+            for runs in analyses.values {
+                let sample = Scorer.instability(runs)
+                instability.unstable += sample.unstable
+                instability.total += sample.total
             }
             var summary = Summarizer.summarize(
                 name: spec.label, isRules: false, isLocal: spec.configuration.isLocal, runs: runs,

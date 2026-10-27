@@ -120,7 +120,8 @@ struct AutoEditViewTests {
         // Corrections keep the span and share it out by length.
         model.correctWords(0...1, to: "Hi there, everybody.")
         let corrected = try #require(model.transcript?.words)
-        #expect(corrected.prefix(3).map(\.text) == ["Hi", "there,", "everybody."])
+        let firstTexts: [String] = corrected.prefix(3).map(\.text)
+        #expect(firstTexts == ["Hi", "there,", "everybody."])
         #expect(corrected.count == words.count + 1)
         #expect(corrected[0].start == words[0].start)
         #expect(abs(corrected[2].end - words[1].end) < 1e-9)

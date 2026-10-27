@@ -56,7 +56,11 @@ struct MatteSmootherTests {
             steadied.append(smoother.smooth(wobble, luma: luma, width: width, height: height, time: Double(frame) / 30))
         }
         func change(_ frames: [[Float]]) -> Float {
-            zip(frames.dropFirst(10), frames.dropFirst(11)).map { zip($0, $1).map { abs($0 - $1) }.reduce(0, +) }.reduce(0, +)
+            var total: Float = 0
+            for (previous, next) in zip(frames.dropFirst(10), frames.dropFirst(11)) {
+                for (a, b) in zip(previous, next) { total += abs(a - b) }
+            }
+            return total
         }
         #expect(change(steadied) < change(raw) * 0.4)
     }

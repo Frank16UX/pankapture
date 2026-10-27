@@ -19,7 +19,9 @@ struct LabelTests {
         3:40.0\t3:52.0\taction_pause\tclicking ? not sure
         """
         let labels = try LabelParser.parse(text)
-        #expect(labels.map(\.kind) == [.retake, .falseStart, .sectionPause, .actionPause])
+        let kinds: [Label.Kind] = labels.map(\.kind)
+        let expected: [Label.Kind] = [.retake, .falseStart, .sectionPause, .actionPause]
+        #expect(kinds == expected)
         #expect(labels[0].range == TimeRange(start: 12.4, end: 15.1))
         #expect(labels[0].note.hasPrefix("\"April."))
         #expect(labels[2].kind.isPause && !labels[0].kind.isPause)

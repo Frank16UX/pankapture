@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Decided 2026-10-26 (§9). Requirements are in [PRD §5.11–5.12](PRD.md#511-smart-editing), the evaluation in [PRD §11](PRD.md#11-appendix-auto-edit-evaluation), and the plan in [ROADMAP M8](ROADMAP.md#m8--smart-editing). Nothing is built yet. |
+| **Status** | Decided 2026-10-26 (§9). Requirements are in [PRD §5.11–5.12](PRD.md#511-smart-editing), the evaluation in [PRD §11](PRD.md#11-appendix-auto-edit-evaluation), and the plan in [ROADMAP M8](ROADMAP.md#m8--smart-editing). Built in M8; ROADMAP M8 lists what remains. |
 | **Branch** | `feature/auto-edit` |
 | **Date** | 2026-10-26 |
 | **Scope** | Auto-edit (pauses, fillers, stutters, mistakes), editable captions (English, Spanish), noise removal and loudness normalization, camera background effects |
