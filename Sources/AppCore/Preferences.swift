@@ -223,16 +223,25 @@ public extension PreferenceKey {
 // MARK: Smart editing (M8)
 
 public extension PreferenceKey {
-    /// Use the configured AI provider for auto-edit (PRD AI-1). Missing = false.
-    static let aiProviderEnabled = "ai.providerEnabled"
-    /// The provider, JSON-encoded `AIProviders.ProviderConfiguration` (no
-    /// secrets; keys live in the Keychain, AI-3). Missing = none.
-    static let aiProviderConfiguration = "ai.providerConfiguration"
+    /// Providers added in Settings ▸ AI (PRD AI-8), JSON-encoded
+    /// `[AutoEdit.ProviderAccount]` (no secrets; keys live in the Keychain,
+    /// AI-3). Missing = migrate the settings from before ADR-45.
+    static let aiProviders = "ai.providers"
+    /// What judges auto-edit in a new editor, JSON-encoded `AutoEdit.Judge`.
+    /// Missing = the built-in rules (AI-1).
+    static let aiDefaultJudge = "ai.defaultJudge"
+    /// What transcribes in a new editor, JSON-encoded `AutoEdit.Transcriber`.
+    /// Missing = on this Mac (AI-5).
+    static let aiDefaultTranscriber = "ai.defaultTranscriber"
+    /// Before ADR-45: whether the one provider was used. Read once, to migrate.
+    static let legacyAIProviderEnabled = "ai.providerEnabled"
+    /// Before ADR-45: the one provider, a JSON `ProviderConfiguration`. Read once, to migrate.
+    static let legacyAIProviderConfiguration = "ai.providerConfiguration"
     /// Last pacing preset used by auto-edit (AE-3): "tight", "natural", or "relaxed".
     static let autoEditPacing = "autoEdit.pacing"
     /// Last language analyzed: "en" or "es". Missing = the system language.
     static let autoEditLanguage = "autoEdit.language"
-    /// Cloud transcription service (PRD AI-5): "elevenLabs", "openAI", or
-    /// "groq". Missing = on-device transcription only (the default).
-    static let cloudTranscriptionService = "ai.cloudTranscriptionService"
+    /// Before ADR-45: the cloud transcription service, "elevenLabs", "openAI",
+    /// or "groq". Read once, to migrate.
+    static let legacyCloudTranscriptionService = "ai.cloudTranscriptionService"
 }

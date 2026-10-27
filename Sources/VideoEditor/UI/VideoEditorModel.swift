@@ -25,6 +25,11 @@ final class VideoEditorModel {
 
     private(set) var media: SourceMedia?
     private(set) var loadError: String?
+    /// The editor's controls are built (VE-18). The first editor of a launch
+    /// takes a moment to build, so the window shows a skeleton of it first.
+    var isEditorMounted = false
+    /// What opening is waiting on, for the loading status.
+    private(set) var loadingStage: LoadingStage = .buildingEditor
     private(set) var project: VideoEditProject
     /// The project as last saved (VE-12); edits beyond it are unsaved.
     private(set) var savedProject: VideoEditProject
@@ -38,19 +43,23 @@ final class VideoEditorModel {
     /// One thing is selected at a time: selecting a range, cut, or zoom
     /// deselects auto-edit's item, so ⌫ and [ ] act on what's visible.
     var selection: TimeRange? {
-        didSet { if selection != nil { selectedAutoItem = nil } }
+        didSet { if selection != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil } }
     }
     var selectedCut: TimeRange? {
-        didSet { if selectedCut != nil { selectedAutoItem = nil } }
+        didSet { if selectedCut != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil } }
     }
     /// The zoom being edited. While set, the preview shows the unzoomed frame
     /// so the user can position the zoom rectangle over it.
     var selectedZoomID: ZoomSegment.ID? {
         didSet {
             guard oldValue != selectedZoomID else { return }
-            if selectedZoomID != nil { selectedAutoItem = nil }
+            if selectedZoomID != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil }
             updatePreviewVideoComposition()
         }
+    }
+    /// The camera layout being edited (CAM-6).
+    var selectedCameraLayoutID: CameraLayoutSegment.ID? {
+        didSet { if selectedCameraLayoutID != nil { selectedAutoItem = nil } }
     }
 
     private(set) var filmstrip: [FilmstripFrame] = []
@@ -79,6 +88,10 @@ final class VideoEditorModel {
     /// Why the provider's answer wasn't used, or what its checks dropped.
     var autoEditNotice: String?
     var autoEditLanguage: TranscriptLanguage
+    /// This editor's own choice of judge and transcriber (PRD AI-8); `nil`
+    /// follows Settings ▸ AI's default, live.
+    var judgeOverride: Judge?
+    var transcriberOverride: Transcriber?
     /// The auto-edit pause or removal selected on the timeline or in the review list.
     var selectedAutoItem: AutoEditItem?
     /// Words selected in the transcript panel (PRD AE-10).
@@ -86,7 +99,7 @@ final class VideoEditorModel {
     /// Words being corrected in the transcript's popover (CAP-2).
     var wordsBeingCorrected: ClosedRange<Int>?
 
-    // MARK: Panels (VE-14, VE-15)
+    // MARK: Panels (VE-16, VE-17)
 
     /// The one inspector pane on screen. Selecting something on the
     /// timeline shows the pane that edits it.
@@ -129,6 +142,10 @@ final class VideoEditorModel {
     @ObservationIgnored private var analysisTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var isContinuousEdit = false
     @ObservationIgnored private let store: ProjectStore
+    /// When the window asked for the recording, to log how long opening took.
+    @ObservationIgnored private let openedAt = ContinuousClock.now
+    @ObservationIgnored private var didAppear = false
+    @ObservationIgnored private var didLogReady = false
 
     init(url: URL, store: ProjectStore = ProjectStore()) {
         sourceURL = url
@@ -151,6 +168,18 @@ final class VideoEditorModel {
 
     // MARK: Loading
 
+    enum LoadingStage: Equatable {
+        case buildingEditor
+        case readingRecording
+
+        var message: String {
+            switch self {
+            case .buildingEditor: "Opening the editor…"
+            case .readingRecording: "Loading the recording…"
+            }
+        }
+    }
+
     var duration: Double { project.sourceDuration }
     var timeline: Timeline { currentEdit?.timeline ?? project.timeline }
     var outputDuration: Double { project.timeline.outputDuration }
@@ -165,6 +194,13 @@ final class VideoEditorModel {
     }
     var clickCount: Int { sidecar?.clicks.count ?? 0 }
     var selectedZoom: ZoomSegment? { project.zooms.first { $0.id == selectedZoomID } }
+    var selectedCameraLayout: CameraLayoutSegment? { project.cameraLayouts.first { $0.id == selectedCameraLayoutID } }
+    /// The camera is in its usual place at the playhead, so the preview can
+    /// offer to drag and resize it.
+    var isCameraInUsualPlace: Bool {
+        guard let camera = project.camera else { return false }
+        return CameraLayoutMath.state(at: playhead, segments: project.cameraLayouts, isVisible: camera.isVisible) == .usual
+    }
     var hasUnsavedChanges: Bool { media != nil && project != savedProject }
 
     /// Preview render plan (for overlay geometry: canvas and video rect).
@@ -176,7 +212,28 @@ final class VideoEditorModel {
         )
     }
 
+    /// The editor's controls are on screen.
+    func editorDidAppear() {
+        didAppear = true
+        logReadyIfComplete()
+    }
+
+    /// Logs how long opening took once the editor shows the recording
+    /// (VE-18 budget, PRD §6.1).
+    private func logReadyIfComplete() {
+        guard didAppear, media != nil, !didLogReady else { return }
+        didLogReady = true
+        // After this update's layout and drawing, which cost the most.
+        DispatchQueue.main.async { [openedAt, sourceURL] in
+            let elapsed = ContinuousClock.now - openedAt
+            Log.editor.info("Editor ready for \(sourceURL.lastPathComponent, privacy: .public) in \(elapsed.formatted(.units(allowed: [.milliseconds])), privacy: .public)")
+        }
+    }
+
     func load() async {
+        let signpost = Log.signposter.beginInterval("loadRecording")
+        defer { Log.signposter.endInterval("loadRecording", signpost) }
+        loadingStage = .readingRecording
         do {
             let media = try await SourceMedia.load(url: sourceURL)
             tracks = try await media.loadTracks()
@@ -200,10 +257,17 @@ final class VideoEditorModel {
             if let url = project.background.fill.videoURL {
                 backgroundVideo = try? await BackgroundVideo.load(url: url)
             }
+            if media.camera != nil, let background = project.camera?.background,
+               background.isActive, background.effectiveMatte == .person {
+                // Before the first preview frame needs the model (CAM-7).
+                Task.detached(priority: .userInitiated) { CameraMatte.prepare(quality: .fast) }
+            }
             rebuildPlayerItem(seekToSource: project.trim.start)
             startAnalysis(media)
+            logReadyIfComplete()
             if project.voice?.isActive == true { updateVoice() }
-            Log.editor.info("Opened \(self.sourceURL.lastPathComponent, privacy: .public): \(media.duration)s, \(media.audioTracks.count) audio track(s)")
+            let elapsed = ContinuousClock.now - openedAt
+            Log.editor.info("Opened \(self.sourceURL.lastPathComponent, privacy: .public) in \(elapsed.formatted(.units(allowed: [.milliseconds])), privacy: .public): \(media.duration)s, \(media.audioTracks.count) audio track(s)")
         } catch {
             loadError = error.localizedDescription
             Log.editor.error("Couldn't open \(self.sourceURL.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -298,6 +362,7 @@ final class VideoEditorModel {
         project = updated
         refreshUndoState()
         if let id = selectedZoomID, !updated.zooms.contains(where: { $0.id == id }) { selectedZoomID = nil }
+        if let id = selectedCameraLayoutID, !updated.cameraLayouts.contains(where: { $0.id == id }) { selectedCameraLayoutID = nil }
         if let cut = selectedCut, !updated.cuts.contains(cut) { selectedCut = nil }
         if let item = selectedAutoItem, updated.autoEdit?.range(of: item) == nil { selectedAutoItem = nil }
 
@@ -311,6 +376,7 @@ final class VideoEditorModel {
             // timeline redraws immediately and the preview follows shortly.
             scheduleRebuild(delay: isContinuousEdit ? .milliseconds(200) : .zero)
         } else if old.background != updated.background || old.zoomFillsFrame != updated.zoomFillsFrame || old.camera != updated.camera
+                    || old.cameraLayouts != updated.cameraLayouts
                     || old.captions != updated.captions || (updated.captions?.isEnabled == true && old.transcript != updated.transcript)
                     || (old.zooms != updated.zooms && selectedZoomID == nil) {
             // While a zoom is being edited the preview ignores zooms, so
@@ -417,6 +483,37 @@ final class VideoEditorModel {
         edit { $0.removeZoom(id: id) }
     }
 
+    /// Adds a camera layout at the playhead (CAM-6), or selects the one
+    /// already there.
+    func addCameraLayoutAtPlayhead(_ layout: CameraLayoutSegment.Layout) {
+        if let existing = project.cameraLayouts.first(where: { playhead >= $0.range.start && playhead < $0.range.end }) {
+            selectCameraLayout(existing.id)
+            return
+        }
+        var added: CameraLayoutSegment?
+        edit { added = $0.addCameraLayout(layout, at: playhead) }
+        if let added { selectCameraLayout(added.id) } else { NSSound.beep() }
+    }
+
+    func selectCameraLayout(_ id: CameraLayoutSegment.ID) {
+        selection = nil
+        selectedCut = nil
+        selectedZoomID = nil
+        selectedCameraLayoutID = id
+        inspectorSection = .camera
+    }
+
+    func setSelectedCameraLayout(_ layout: CameraLayoutSegment.Layout) {
+        guard var segment = selectedCameraLayout, segment.layout != layout else { return }
+        segment.layout = layout
+        edit { $0.updateCameraLayout(segment) }
+    }
+
+    func removeSelectedCameraLayout() {
+        guard let id = selectedCameraLayoutID else { return }
+        edit { $0.removeCameraLayout(id: id) }
+    }
+
     func applyAutoZoom() {
         guard let sidecar, !sidecar.clicks.isEmpty else { return }
         let suggestions = AutoZoomSuggester().suggest(clicks: sidecar.clicks, sourceDuration: duration)
@@ -437,6 +534,8 @@ final class VideoEditorModel {
             restoreAutoItem(item)
         } else if selectedZoomID != nil {
             removeSelectedZoom()
+        } else if selectedCameraLayoutID != nil {
+            removeSelectedCameraLayout()
         } else if let cut = selectedCut {
             removeCut(cut)
         } else if selection != nil {
@@ -449,6 +548,7 @@ final class VideoEditorModel {
         selection = nil
         selectedCut = nil
         selectedZoomID = nil
+        selectedCameraLayoutID = nil
         selectedAutoItem = nil
     }
 
@@ -754,17 +854,28 @@ final class VideoEditorModel {
 
     /// Output size for the current export settings.
     var exportRenderSize: CGSize {
-        guard let media else { return .zero }
-        let plan = switch exportSettings.format {
-        case .mp4: RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, shortSide: exportSettings.resolution.shortSide)
-        case .gif: RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, width: exportSettings.gif.width)
+        switch exportSettings.format {
+        case .mp4:
+            return mp4RenderSize(for: exportSettings)
+        case .gif:
+            guard let media else { return .zero }
+            return RenderPlan(project: project, sourceSize: media.size, orientation: media.orientation, width: exportSettings.gif.width).renderSize
         }
-        return plan.renderSize
+    }
+
+    /// MP4 output size for `settings`; the export sheet also sizes each menu
+    /// option with it.
+    func mp4RenderSize(for settings: ExportSettings) -> CGSize {
+        guard let media else { return .zero }
+        return RenderPlan(
+            project: project, sourceSize: media.size, orientation: media.orientation,
+            shortSideCap: settings.mp4ShortSideCap, shortSide: settings.mp4ShortSide, scale: settings.mp4Scale
+        ).renderSize
     }
 
     var exportFrameRate: Int {
         switch exportSettings.format {
-        case .mp4: exportSettings.frameRate.resolve(sourceFrameRate: media?.frameRate ?? 30)
+        case .mp4: exportSettings.mp4FrameRate(sourceFrameRate: media?.frameRate ?? 30)
         case .gif: exportSettings.gif.fps
         }
     }
@@ -782,7 +893,7 @@ final class VideoEditorModel {
             let hasAudio = audioTracks.contains { project.trackVolumes[$0.role].effectiveVolume > 0 }
             return ExportEstimator.mp4Bytes(
                 renderSize: size, fps: exportFrameRate, duration: outputDuration,
-                quality: exportSettings.quality, hasAudio: hasAudio, contentBitrate: content
+                encoding: exportSettings.mp4Encoding, hasAudio: hasAudio, contentBitrate: content
             )
         case .gif:
             return ExportEstimator.gifBytes(renderSize: size, fps: exportFrameRate, duration: outputDuration, contentBitrate: content)

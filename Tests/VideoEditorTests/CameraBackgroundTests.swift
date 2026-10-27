@@ -192,4 +192,44 @@ struct CameraBackgroundTests {
         let blurred = CameraMatte.apply(CameraBackground(effect: .blur), to: frame, quality: .fast)
         if let blurred { #expect(blurred.extent == frame.extent) }
     }
+
+    /// The mask's soft band is narrowed: under 25 % is background, over 75 %
+    /// the person, a ramp between (ADR-39).
+    @Test func maskEdgeIsNarrowed() {
+        func narrowed(_ value: Double) -> Double {
+            let gray = CIImage(color: CIColor(red: value, green: value, blue: value)).cropped(to: CGRect(x: 0, y: 0, width: 1, height: 1))
+            var pixel = [Float](repeating: 0, count: 4)
+            CIContext(options: [.workingColorSpace: NSNull()]).render(CameraMatte.narrowedEdge(gray), toBitmap: &pixel, rowBytes: 16,
+                                                                      bounds: CGRect(x: 0, y: 0, width: 1, height: 1), format: .RGBAf, colorSpace: nil)
+            return Double(pixel[0])
+        }
+        #expect(narrowed(0.1) == 0)
+        #expect(abs(narrowed(0.5) - 0.5) < 0.01)
+        #expect(abs(narrowed(0.6) - 0.7) < 0.01)
+        #expect(narrowed(0.9) == 1)
+    }
+
+    /// Blur mode blurs the background without the person: with nobody in the
+    /// frame it's a plain blur, and under the person it stays defined.
+    @Test func blurLeavesThePersonOutOfTheBackground() {
+        let frame = halfScreenFrame()
+        let size = frame.extent.size
+        let plain = pixels(CameraMatte.blurred(frame, amount: 0.5), size: size)
+        let empty = CIImage(color: .black).cropped(to: frame.extent)
+        let background = pixels(CameraMatte.blurredBackground(frame, mask: empty, amount: 0.5), size: size)
+        for (x, y) in [(5, 5), (31, 24), (60, 40)] {
+            let a = plain(x, y), b = background(x, y)
+            #expect(close(b, (Int(a.r), Int(a.g), Int(a.b)), within: 3))
+        }
+        // A person on the right half: just inside their edge, the background
+        // comes from the left (screen green), not from their red.
+        let person = CIImage(color: .white).cropped(to: CGRect(x: 32, y: 0, width: 32, height: 48))
+            .composited(over: empty)
+        let under = pixels(CameraMatte.blurredBackground(frame, mask: person, amount: 1), size: size)(34, 24)
+        #expect(under.g > under.r)
+        #expect(pixels(CameraMatte.blurred(frame, amount: 1), size: size)(34, 24).r > under.r)
+        let full = CIImage(color: .white).cropped(to: frame.extent)
+        let covered = pixels(CameraMatte.blurredBackground(frame, mask: full, amount: 0.5), size: size)(32, 24)
+        #expect(close(covered, (Int(plain(32, 24).r), Int(plain(32, 24).g), Int(plain(32, 24).b)), within: 20))
+    }
 }

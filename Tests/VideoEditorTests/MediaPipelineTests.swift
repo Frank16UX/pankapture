@@ -43,6 +43,34 @@ struct MediaPipelineTests {
         #expect(abs(fast.duration - 1.0) < 0.05)
     }
 
+    /// Recordings made before CAM-7 start the camera a moment after the
+    /// screen; the composition shows its first frame from the start.
+    @Test func lateCameraShowsItsFirstFrameFromTheStart() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await TestMovie.make(.init(duration: 2, cameraColor: (0, 255, 0), cameraStart: 0.2), in: directory)
+        let source = try await SourceMedia.load(url: url)
+        let camera = try #require(source.camera)
+        #expect(abs(camera.firstFrameTime - 0.2) < 0.02)
+
+        var project = VideoEditProject(sourceURL: url, sourceDuration: source.duration)
+        project.camera = .standard
+        let edit = try await CompositionBuilder.build(source: source, project: project, options: .init())
+        let track = try #require(edit.composition.tracks(withMediaType: .video).first { $0.trackID == edit.cameraTrackID })
+        let first = try #require(track.segments.first)
+        #expect(!first.isEmpty)
+        #expect(first.timeMapping.target.start == .zero)
+        // The held frame runs into the rest without a gap.
+        #expect(track.segments.dropFirst().allSatisfy { !$0.isEmpty })
+        #expect(abs(track.timeRange.end.seconds - edit.duration) < 0.05)
+
+        // A trim past the camera's start needs no hold.
+        project.setTrimStart(0.5)
+        let trimmed = try await CompositionBuilder.build(source: source, project: project, options: .init())
+        let trimmedTrack = try #require(trimmed.composition.tracks(withMediaType: .video).first { $0.trackID == trimmed.cameraTrackID })
+        #expect(trimmedTrack.segments.allSatisfy { !$0.isEmpty })
+    }
+
     @Test func mutedTracksAreLeftOutOfExports() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -87,6 +115,30 @@ struct MediaPipelineTests {
         #expect(abs(try await exported.load(.duration).seconds - 1.5) < 0.1)
         #expect(try await exported.loadTracks(withMediaType: .video).count == 1)
         #expect(try await exported.loadTracks(withMediaType: .audio).count == 1)
+    }
+
+    @Test func exportsAPercentageOptimizedForSharing() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await TestMovie.make(TestMovie.Spec(fps: 60), in: directory)
+        let source = try await SourceMedia.load(url: url)
+        let project = VideoEditProject(sourceURL: url, sourceDuration: source.duration)
+
+        let output = directory.appendingPathComponent("share.mp4")
+        let settings = ExportSettings(sizeMode: .percentage, scale: .percent50, frameRate: .fps60, optimizeForSharing: true)
+        let result = try await VideoExporter.exportMP4(source: source, project: project, settings: settings, to: output)
+        #expect(result.pixelSize == CGSize(width: 80, height: 46))
+        let track = try #require(try await AVURLAsset(url: output).loadTracks(withMediaType: .video).first)
+        #expect(try await track.load(.nominalFrameRate) <= 30.5)
+
+        // The smallest preset of a tiny movie still encodes.
+        let tiny = try await VideoExporter.exportMP4(
+            source: source, project: project,
+            settings: ExportSettings(sizeMode: .percentage, scale: .percent10),
+            to: directory.appendingPathComponent("tiny.mp4")
+        )
+        #expect(tiny.pixelSize == CGSize(width: 16, height: 10))
+        #expect(tiny.byteCount > 0)
     }
 
     @Test func exportsGIFHonoringTheComposition() async throws {

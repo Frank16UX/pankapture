@@ -15,6 +15,12 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("Recordings/InProgress", isDirectory: true)
     }
 
+    /// OpenRouter's public model list with prices (PRD AI-8), refetched daily.
+    public static var modelCatalog: URL {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("Pankapture/openrouter-models.json")
+    }
+
     /// Per-recording metadata (`RecordingSidecar`) for the video editor.
     public static var sidecars: URL {
         applicationSupport.appendingPathComponent("Sidecars", isDirectory: true)

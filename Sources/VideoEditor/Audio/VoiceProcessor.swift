@@ -51,7 +51,7 @@ public struct VoiceProcessing: Codable, Hashable, Sendable {
 }
 
 /// Renders a cleaned-up copy of the microphone track, offline and faster
-/// than real time (ADR-37):
+/// than real time (ADR-38):
 /// 1. decode the track to 48 kHz mono;
 /// 2. `AUSoundIsolation` at the preset's wet/dry mix, measuring loudness and
 ///    the delay the isolation adds;

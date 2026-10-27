@@ -98,13 +98,16 @@ The day this lands, the old screenshot tool can be uninstalled.
 - [x] Library window: grid, filters, sort (HI-2); OCR + name search (HI-3)
 - [x] Re-edit with live annotations (HI-4, ED-3); recover discarded captures (OUT-8)
 - [x] Retention + storage cap (HI-5); recent captures in menu bar (HI-6)
+- [x] Rename (HI-7), tags (HI-8), and library folders (HI-9); index schema V2 with migration (ADR-47)
+- [x] Windows use the current system design: the binary records its real SDK (ADR-46)
 
-**QA:** drag-out to Finder/other apps, Quick Look, Share from the library window.
+**QA:** drag-out to Finder/other apps, Quick Look, Share from the library window; first launch on an existing history (migration); renaming in the inspector and in the sidebar; dragging captures onto folders and tags; every window (editors, Settings, HUDs, onboarding) in the current system design.
 
 ## M7 · Polish & v1.0
 
 - [x] Onboarding (GL-7), app icon, About
 - [x] Release on every merge to `main`; in-app update check and install (UP-1, ADR-28) (needs QA: first update from one release to the next)
+- [x] Export size as a percentage of the original (VE-14); Optimize for Sharing (VE-15, ADR-30) (needs QA: the export sheet by hand)
 - [ ] Performance pass against every PRD §6.1 target on an M1 8 GB machine
 - [ ] Accessibility audit (DESIGN §8) on every surface
 - [ ] Two-week "daily driver" success-criteria run (PRD §7)
@@ -115,31 +118,39 @@ Auto-edit, captions, voice cleanup, and camera backgrounds (PRD §5.11–5.12), 
 
 **Before the evaluation:** record and label the sample set, then set up LM Studio and gpt-6-luna (PRD §11.2–11.4).
 
-1. **Engine + evaluation** (no UI) ✅ — modules `Transcription`, `AIProviders`, `AutoEdit`; `make eval` (ADR-30–33)
+1. **Engine + evaluation** (no UI) ✅ — modules `Transcription`, `AIProviders`, `AutoEdit`; `make eval` (ADR-31–34)
    - [x] On-device transcription, English and Spanish (AE-1)
    - [x] Pause detection and intent rules (AE-2); filler, repeat and retake rules (AE-4–AE-6)
    - [x] Provider layer: Anthropic + OpenAI-compatible, checked JSON answers (AI-2, AI-6)
    - [x] `make eval` harness and report (AI-7, PRD §11)
-2. **Auto-edit in the editor** ✅ (ADR-34) (needs QA: a long recording with hundreds of cuts; dragging edges with a real mouse)
+2. **Auto-edit in the editor** ✅ (ADR-35) (needs QA: a long recording with hundreds of cuts; dragging edges with a real mouse)
    - [x] Automatic-edit layer, review by kind and one at a time (AE-7)
    - [x] Pacing presets (AE-3); adjustable segments (AE-8); clean joins (AE-9)
    - [x] Settings ▸ AI: presets, Keychain keys, Test connection (AI-1, AI-3, AI-4)
-3. **Transcript** ✅ (ADR-35) (needs QA: selecting and correcting words with a real mouse; a cloud transcription run with a real key)
+   - [x] Keys read only when a request is made, once per launch; rejected keys explained (AI-3, ADR-41) (needs QA: after an update, exactly one Keychain prompt, on the first analysis)
+   - [x] Several providers, Add Provider, one key per vendor; model, effort and transcription picked per editor, with prices; OpenRouter's whole list and its transcription (AI-8, ADR-45) (needs QA: an analysis with a model picked in the editor; a cloud transcription through OpenRouter on a real recording)
+3. **Transcript** ✅ (ADR-36) (needs QA: selecting and correcting words with a real mouse; a cloud transcription run with a real key)
    - [x] Transcript panel: seek, select to cut, zoom from selection (AE-10)
    - [x] Stutters found from the audio (AE-5)
    - [x] Optional cloud transcription (AI-5)
    - [x] Correct in a popover, Correct All, Edit Text mode (CAP-2) (needs QA: the popover's placement with a real mouse; Edit Text on a 15 min transcript)
-4. **Captions** ✅ (ADR-36)
+4. **Captions** ✅ (ADR-37)
    - [x] Cues, corrections, burned-in styles (CAP-1–CAP-3); .srt / .vtt (CAP-4)
-5. **Audio** ✅ (ADR-37) (needs QA: the presets by ear on a noisy real recording; a 15 min recording's processing time)
+5. **Audio** ✅ (ADR-38) (needs QA: the presets by ear on a noisy real recording; a 15 min recording's processing time)
    - [x] Noise removal presets and normalization (AU-1–AU-3)
-6. **Editor panels** ✅ (ADR-39) (needs QA: ⌘-scroll with a real mouse wheel and a trackpad; a 15 min recording zoomed in)
-   - [x] Timeline zoom: ⌘-scroll, pinch, slider, scroller, paging (VE-14)
-   - [x] One inspector pane at a time, rail with labels (VE-15)
+6. **Editor panels** ✅ (ADR-40) (needs QA: ⌘-scroll with a real mouse wheel and a trackpad; a 15 min recording zoomed in)
+   - [x] Timeline zoom: ⌘-scroll, pinch, slider, scroller, paging (VE-16)
+   - [x] One inspector pane at a time, rail with labels (VE-17)
    - [x] Review inside Auto-Edit, synced with the timeline (AE-7)
-7. **Camera** ✅ (ADR-38) (needs QA: a real person on camera in the preview and an export; edge flicker; preview speed on the M1)
+   - [x] Editors open at once: skeleton, loading status, warm-up after launch, one window per item (VE-18, ADR-42) (needs QA: opening from the menu right after launch, on the M1)
+7. **Camera** ✅ (ADR-39, ADR-43, ADR-44) (needs QA: a real person on camera in the preview and an export; edge flicker; preview speed on the M1)
    - [x] Blur, replace, remove; green screen (CAM-1, CAM-2)
    - [x] Default background; Video Effects button (CAM-3, CAM-4)
+   - [x] Clean edges: mask upsampled along the person's outline, blur without the person (CAM-5)
+   - [x] Camera Only / Screen Only layouts over time; size up to the full height (CAM-6, VE-13) (needs QA: dragging layouts with a real mouse; an MP4 and a GIF with layouts)
+   - [x] Camera from the first frame, new and older recordings (CAM-7) (needs QA: a new recording with the camera on)
+   - [x] Edges steadied over time in the compositor (CAM-5, ADR-39) (needs QA: an export with blur at full frame)
+   - [ ] Matte track (offline, motion-compensated), if edges still flicker (ADR-39)
 8. **Decide**
    - [ ] Pick the default provider from the test split (PRD §11.7); record it as an ADR
 

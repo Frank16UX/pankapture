@@ -171,6 +171,16 @@ public final class ScreenRecorder {
             Task { @MainActor in await self?.handleInterruption(.streamStopped(error.localizedDescription)) }
         }
 
+        // The camera first: the frame it delivers just before the first
+        // screen frame starts the camera track, so the camera shows from the
+        // very start (CAM-7). Delivered on the writer's queue, its executor.
+        if cameraSource?.frameSize != nil {
+            _ = cameraSource?.startDeliveringFrames(on: writer.queue) { buffer in
+                let sample = ReadySampleBuffer(buffer)
+                writer.assumeIsolated { $0.appendCamera(sample.buffer) }
+            }
+        }
+
         let stream = SCStream(filter: setup.filter, configuration: setup.configuration, delegate: output)
         do {
             try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: writer.queue)
@@ -182,6 +192,7 @@ public final class ScreenRecorder {
             }
             try await stream.startCapture()
         } catch {
+            cameraSource?.stopDeliveringFrames()
             await writer.cancel()
             try? FileManager.default.removeItem(at: RecordingManifest.manifestURL(for: manifest.id, in: inProgressDirectory))
             Log.recording.error("Stream failed to start: \(error.localizedDescription, privacy: .public)")
@@ -195,6 +206,7 @@ public final class ScreenRecorder {
         // `cancel()` while the stream was starting.
         guard state != .idle else {
             try? await stream.stopCapture()
+            cameraSource?.stopDeliveringFrames()
             await writer.cancel()
             try? FileManager.default.removeItem(at: RecordingManifest.manifestURL(for: manifest.id, in: inProgressDirectory))
             throw RecordingError.cancelled
@@ -203,13 +215,6 @@ public final class ScreenRecorder {
         self.stream = stream
         self.output = output
         self.writer = writer
-        if cameraSource?.frameSize != nil {
-            // Delivered on the writer's queue, which is its executor.
-            _ = cameraSource?.startDeliveringFrames(on: writer.queue) { buffer in
-                let sample = ReadySampleBuffer(buffer)
-                writer.assumeIsolated { $0.appendCamera(sample.buffer) }
-            }
-        }
         self.manifest = manifest
         self.setup = setup
         activeRecordingID = manifest.id

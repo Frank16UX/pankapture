@@ -35,6 +35,8 @@ public enum CompositionBuilder {
         public var shortSideCap: Double?
         /// MP4 export size (shorter side, up or down), `nil` = canvas size.
         public var shortSide: Double?
+        /// MP4 export size as a fraction of the canvas, `nil` = canvas size.
+        public var scale: Double?
         /// GIF width cap, `nil` = canvas width.
         public var width: Int?
         public var frameRate: Int
@@ -50,6 +52,7 @@ public enum CompositionBuilder {
         public init(
             shortSideCap: Double? = nil,
             shortSide: Double? = nil,
+            scale: Double? = nil,
             width: Int? = nil,
             frameRate: Int = 30,
             zoomEnabled: Bool = true,
@@ -59,6 +62,7 @@ public enum CompositionBuilder {
         ) {
             self.shortSideCap = shortSideCap
             self.shortSide = shortSide
+            self.scale = scale
             self.width = width
             self.frameRate = frameRate
             self.zoomEnabled = zoomEnabled
@@ -165,7 +169,17 @@ public enum CompositionBuilder {
                 try videoTrack.insertTimeRange(cmRange(range), of: tracks.video, at: pieceStart + offset)
             }
             if let cameraTrack, let camera = tracks.camera, let info = source.camera,
-               let range = segment.source.intersection(info.timeRange)?.intersection(TimeRange(start: 0, end: source.duration)) {
+               var range = segment.source.intersection(info.timeRange)?.intersection(TimeRange(start: 0, end: source.duration)) {
+                // A camera that started after the screen shows its first frame
+                // until then, rather than popping in late (CAM-7).
+                if range.start < info.firstFrameTime, range.end > info.firstFrameTime {
+                    let at = pieceStart + cmTime(range.start) - cmTime(segment.source.start)
+                    let firstFrame = CMTimeRange(start: cmTime(info.firstFrameTime), duration: CMTime(value: 1, timescale: 600))
+                    try cameraTrack.insertTimeRange(firstFrame, of: camera, at: at)
+                    cameraTrack.scaleTimeRange(CMTimeRange(start: at, duration: firstFrame.duration),
+                                               toDuration: cmTime(info.firstFrameTime) - cmTime(range.start))
+                    range.start = info.firstFrameTime
+                }
                 let offset = cmTime(range.start) - cmTime(segment.source.start)
                 try cameraTrack.insertTimeRange(cmRange(range), of: camera, at: pieceStart + offset)
             }
@@ -215,6 +229,7 @@ public enum CompositionBuilder {
             orientation: source.orientation,
             shortSideCap: options.shortSideCap,
             shortSide: options.shortSide,
+            scale: options.scale,
             width: options.width,
             zoomEnabled: options.zoomEnabled,
             backgroundOrientation: background?.orientation ?? .up,

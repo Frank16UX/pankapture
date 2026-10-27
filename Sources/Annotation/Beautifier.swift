@@ -27,6 +27,71 @@ public struct BeautifyOptions: Codable, Hashable, Sendable {
         case transparent
         case solid(RGBAColor)
         case gradient(GradientPreset)
+        case customGradient(Gradient)
+        /// A picture, scaled to fill the canvas. The file is a private copy
+        /// (`BackgroundFiles`), so the options survive the original moving.
+        case image(URL)
+
+        /// The two gradient colors and direction, for preset or custom gradients.
+        public var gradient: Gradient? {
+            switch self {
+            case let .gradient(preset): Gradient(preset)
+            case let .customGradient(gradient): gradient
+            default: nil
+            }
+        }
+
+        /// The background picture, if the fill is one.
+        public var imageURL: URL? {
+            if case let .image(url) = self { return url }
+            return nil
+        }
+    }
+
+    /// Solid swatches offered in the editor, after Transparent.
+    public static let solidPresets: [RGBAColor] = [
+        .white,
+        RGBAColor(red: 0.91, green: 0.92, blue: 0.94),
+        RGBAColor(red: 0.17, green: 0.18, blue: 0.20),
+        .black,
+        RGBAColor(red: 0.18, green: 0.42, blue: 1.00),
+        RGBAColor(red: 1.00, green: 0.42, blue: 0.24),
+        RGBAColor(red: 0.20, green: 0.70, blue: 0.45),
+    ]
+
+    /// A user-made two-stop linear gradient.
+    public struct Gradient: Codable, Hashable, Sendable {
+        public var start: RGBAColor
+        public var end: RGBAColor
+        /// Direction in degrees as seen on screen: 0 runs left → right, 90 top →
+        /// bottom. 45 matches the presets (top-leading → bottom-trailing).
+        public var angle: Double
+
+        public init(start: RGBAColor, end: RGBAColor, angle: Double = 45) {
+            self.start = start
+            self.end = end
+            self.angle = angle
+        }
+
+        public init(_ preset: GradientPreset) {
+            let (start, end) = preset.colors
+            self.init(start: start, end: end)
+        }
+
+        public static let angleRange: ClosedRange<Double> = 0...360
+
+        /// Start and end points of the gradient line in `rect` with a
+        /// **top-left** origin, spanning the rect's corners.
+        public func endpoints(in rect: CGRect) -> (start: CGPoint, end: CGPoint) {
+            let radians = angle * .pi / 180
+            let direction = CGVector(dx: cos(radians), dy: sin(radians))
+            let halfLength = (abs(direction.dx) * rect.width + abs(direction.dy) * rect.height) / 2
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            return (
+                CGPoint(x: center.x - direction.dx * halfLength, y: center.y - direction.dy * halfLength),
+                CGPoint(x: center.x + direction.dx * halfLength, y: center.y + direction.dy * halfLength)
+            )
+        }
     }
 
     public enum GradientPreset: String, Codable, CaseIterable, Sendable, Identifiable {
@@ -101,7 +166,10 @@ public enum Beautifier {
 
     /// Composites `image` (pixels at `scale`) onto the background. Returns the
     /// image unchanged when beautify is off.
-    public static func render(_ image: CGImage, scale: CGFloat, options: BeautifyOptions) -> CGImage? {
+    /// - Parameter backgroundImage: the picture for an `.image` background,
+    ///   loaded by the caller (this module does no file I/O).
+    public static func render(_ image: CGImage, scale: CGFloat, options: BeautifyOptions,
+                              backgroundImage: CGImage? = nil) -> CGImage? {
         guard options.isEnabled else { return image }
         let imageSize = CGSize(width: CGFloat(image.width) / scale, height: CGFloat(image.height) / scale)
         let (canvas, imageRect) = layout(imageSize: imageSize, options: options)
@@ -117,7 +185,7 @@ public enum Beautifier {
         context.translateBy(x: 0, y: canvas.height * scale)
         context.scaleBy(x: scale, y: -scale)
 
-        drawBackground(options.background, size: canvas, in: context)
+        drawBackground(options.background, size: canvas, image: backgroundImage, in: context)
 
         let radius = min(options.cornerRadius, min(imageRect.width, imageRect.height) / 2)
         let clip = CGPath(roundedRect: imageRect, cornerWidth: radius, cornerHeight: radius, transform: nil)
@@ -145,7 +213,10 @@ public enum Beautifier {
         return context.makeImage()
     }
 
-    public static func drawBackground(_ background: BeautifyOptions.Background, size: CGSize, in context: CGContext) {
+    /// Fills `size` with the background. `context` has a **top-left** origin
+    /// (y down), like `render`'s.
+    public static func drawBackground(_ background: BeautifyOptions.Background, size: CGSize,
+                                      image: CGImage? = nil, in context: CGContext) {
         let rect = CGRect(origin: .zero, size: size)
         switch background {
         case .transparent:
@@ -153,12 +224,38 @@ public enum Beautifier {
         case let .solid(color):
             context.setFillColor(color.cgColor)
             context.fill(rect)
-        case let .gradient(preset):
-            let (start, end) = preset.colors
-            guard let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
-                                            colors: [start.cgColor, end.cgColor] as CFArray,
+        case .gradient, .customGradient:
+            guard let fill = background.gradient,
+                  let gradient = CGGradient(colorsSpace: CGColorSpace(name: CGColorSpace.sRGB),
+                                            colors: [fill.start.cgColor, fill.end.cgColor] as CFArray,
                                             locations: [0, 1]) else { return }
-            context.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: size.width, y: size.height), options: [])
+            let (start, end) = fill.endpoints(in: rect)
+            context.drawLinearGradient(gradient, start: start, end: end,
+                                       options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        case .image:
+            // A picture that can't be read leaves the canvas clear.
+            guard let image else {
+                context.clear(rect)
+                return
+            }
+            context.saveGState()
+            context.clip(to: rect)
+            let filled = aspectFill(CGSize(width: image.width, height: image.height), in: rect)
+            // Undo the flip locally so the picture isn't drawn upside down.
+            context.translateBy(x: filled.minX, y: filled.maxY)
+            context.scaleBy(x: 1, y: -1)
+            context.interpolationQuality = .high
+            context.draw(image, in: CGRect(origin: .zero, size: filled.size))
+            context.restoreGState()
         }
+    }
+
+    /// `size` scaled to cover `rect`, centered.
+    static func aspectFill(_ size: CGSize, in rect: CGRect) -> CGRect {
+        guard size.width > 0, size.height > 0 else { return rect }
+        let scale = max(rect.width / size.width, rect.height / size.height)
+        let filled = CGSize(width: size.width * scale, height: size.height * scale)
+        return CGRect(x: rect.midX - filled.width / 2, y: rect.midY - filled.height / 2,
+                      width: filled.width, height: filled.height)
     }
 }

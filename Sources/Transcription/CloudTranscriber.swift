@@ -6,27 +6,32 @@ import Foundation
 /// default: unlike everything else in smart editing, these receive the
 /// microphone **audio**. Their gain over the on-device recognizer is a
 /// verbatim transcript that keeps fillers and stutters (ElevenLabs keeps
-/// them by default; Whisper mostly drops them but is cheap).
+/// them by default; Whisper mostly drops them but is cheap). OpenRouter
+/// reaches several of them, Scribe included, with one key.
 public enum CloudTranscriptionService: String, Codable, CaseIterable, Sendable, Identifiable {
     case elevenLabs
     case openAI
     case groq
+    case openRouter
 
     public var id: String { rawValue }
 
     public var name: String {
         switch self {
-        case .elevenLabs: "ElevenLabs Scribe"
-        case .openAI: "OpenAI Whisper"
-        case .groq: "Groq Whisper"
+        case .elevenLabs: "ElevenLabs"
+        case .openAI: "OpenAI"
+        case .groq: "Groq"
+        case .openRouter: "OpenRouter"
         }
     }
 
-    var model: String {
+    /// The model used when none is chosen.
+    public var defaultModel: String {
         switch self {
         case .elevenLabs: "scribe_v2"
         case .openAI: "whisper-1"
         case .groq: "whisper-large-v3-turbo"
+        case .openRouter: "elevenlabs/scribe-v2"
         }
     }
 
@@ -35,12 +40,9 @@ public enum CloudTranscriptionService: String, Codable, CaseIterable, Sendable, 
         case .elevenLabs: URL(string: "https://api.elevenlabs.io/v1/speech-to-text")!
         case .openAI: URL(string: "https://api.openai.com/v1/audio/transcriptions")!
         case .groq: URL(string: "https://api.groq.com/openai/v1/audio/transcriptions")!
+        case .openRouter: URL(string: "https://openrouter.ai/api/v1/audio/transcriptions")!
         }
     }
-
-    /// Keychain account for the service's key (separate from the language
-    /// model keys, even for the same vendor, so each can be removed alone).
-    public var keyAccount: String { "stt.\(rawValue)" }
 
     /// Environment variable `make eval` reads the key from.
     public var keyEnvironmentVariable: String {
@@ -48,11 +50,35 @@ public enum CloudTranscriptionService: String, Codable, CaseIterable, Sendable, 
         case .elevenLabs: "ELEVENLABS_API_KEY"
         case .openAI: "OPENAI_API_KEY"
         case .groq: "GROQ_API_KEY"
+        case .openRouter: "OPENROUTER_API_KEY"
         }
     }
 
-    /// Keeps "um", "uh", and stutters in the transcript.
-    public var isVerbatim: Bool { self == .elevenLabs }
+    /// Whether `model` keeps "um", "uh", and stutters in the transcript
+    /// (checked on a probe clip, 2026-10-27).
+    public func isVerbatim(model: String) -> Bool {
+        switch self {
+        case .elevenLabs: true
+        case .openAI, .groq: false
+        case .openRouter: model.hasPrefix("elevenlabs/") || model.hasPrefix("assemblyai/")
+        }
+    }
+}
+
+/// What a cloud transcription needs: the service, its model, and the key.
+public struct CloudTranscription: Sendable {
+    public var service: CloudTranscriptionService
+    public var model: String
+    public var apiKey: String
+
+    public init(service: CloudTranscriptionService, model: String? = nil, apiKey: String) {
+        self.service = service
+        self.model = model.flatMap { $0.isEmpty ? nil : $0 } ?? service.defaultModel
+        self.apiKey = apiKey
+    }
+
+    /// "ElevenLabs scribe_v2", for the transcript's engine and the log.
+    public var displayName: String { "\(service.name) \(model)" }
 }
 
 public enum CloudTranscriber {
@@ -63,6 +89,8 @@ public enum CloudTranscriber {
 
         public var errorDescription: String? {
             switch self {
+            case let .http(status, _) where status == 401 || status == 403:
+                "The transcription service rejected the API key (\(status)). It may be mistyped, expired, or revoked: save a new one in Settings ▸ AI."
             case let .http(status, message): "The transcription service answered \(status): \(message)"
             case .invalidResponse(let detail): "The transcription couldn't be read: \(detail)"
             case .tooLarge(let megabytes): "The audio is \(megabytes) MB, more than the service accepts (25 MB)."
@@ -73,14 +101,13 @@ public enum CloudTranscriber {
     /// Whisper endpoints reject uploads over 25 MB (about 70 minutes at the upload bitrate).
     static let maximumUploadBytes = 25 * 1_000_000
 
-    /// Transcribes `audioURL` (any file `AVAudioFile` reads) with `service`.
+    /// Transcribes `audioURL` (any file `AVAudioFile` reads) with `cloud`.
     /// The audio is compressed to AAC before upload; word times are offset by
     /// `timeOffset`, like the on-device engine's.
     public static func transcribe(
         audioFileAt audioURL: URL,
         language: TranscriptLanguage,
-        service: CloudTranscriptionService,
-        apiKey: String,
+        cloud: CloudTranscription,
         timeOffset: Double = 0,
         session: URLSession = .shared
     ) async throws -> Transcript {
@@ -90,16 +117,16 @@ public enum CloudTranscriber {
         let audio = try Data(contentsOf: upload)
         guard audio.count <= maximumUploadBytes else { throw Failure.tooLarge(audio.count / 1_000_000) }
 
-        let request = urlRequest(service: service, language: language, apiKey: apiKey, audio: audio)
+        let request = urlRequest(cloud, language: language, audio: audio)
         let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw Failure.http(status: http.statusCode, message: errorMessage(in: data))
         }
-        let words = try parse(data, service: service).map { word in
+        let words = try parse(data, service: cloud.service).map { word in
             TranscriptWord(text: word.text, start: word.start + timeOffset, end: word.end + timeOffset, confidence: word.confidence)
         }
-        Log.editor.info("Cloud transcription (\(service.name, privacy: .public)): \(words.count) words")
-        return Transcript(language: language, localeIdentifier: language.rawValue, engine: service.name, words: words)
+        Log.editor.info("Cloud transcription (\(cloud.displayName, privacy: .public)): \(words.count) words")
+        return Transcript(language: language, localeIdentifier: language.rawValue, engine: cloud.displayName, words: words)
     }
 
     /// 16 kHz mono AAC at 48 kbps: small enough to upload, plenty for speech.
@@ -144,30 +171,30 @@ public enum CloudTranscriber {
 
     // MARK: Requests
 
-    static func urlRequest(service: CloudTranscriptionService, language: TranscriptLanguage, apiKey: String, audio: Data) -> URLRequest {
+    static func urlRequest(_ cloud: CloudTranscription, language: TranscriptLanguage, audio: Data) -> URLRequest {
         var form = MultipartForm()
-        switch service {
+        switch cloud.service {
         case .elevenLabs:
-            form.add("model_id", service.model)
+            form.add("model_id", cloud.model)
             form.add("language_code", language.rawValue)
             form.add("timestamps_granularity", "word")
             form.add("tag_audio_events", "false")
             form.add("diarize", "false")
-        case .openAI, .groq:
-            form.add("model", service.model)
+        case .openAI, .groq, .openRouter:
+            form.add("model", cloud.model)
             form.add("language", language.rawValue)
             form.add("response_format", "verbose_json")
             form.add("timestamp_granularities[]", "word")
         }
         form.addFile("file", filename: "audio.m4a", contentType: "audio/mp4", data: audio)
 
-        var request = URLRequest(url: service.endpoint)
+        var request = URLRequest(url: cloud.service.endpoint)
         request.httpMethod = "POST"
         request.timeoutInterval = 900
         request.setValue("multipart/form-data; boundary=\(form.boundary)", forHTTPHeaderField: "Content-Type")
-        switch service {
-        case .elevenLabs: request.setValue(apiKey, forHTTPHeaderField: "xi-api-key")
-        case .openAI, .groq: request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        switch cloud.service {
+        case .elevenLabs: request.setValue(cloud.apiKey, forHTTPHeaderField: "xi-api-key")
+        case .openAI, .groq, .openRouter: request.setValue("Bearer \(cloud.apiKey)", forHTTPHeaderField: "Authorization")
         }
         request.httpBody = form.finish()
         return request
@@ -204,12 +231,14 @@ public enum CloudTranscriber {
                 guard !text.isEmpty else { return nil }
                 return ParsedWord(text: text, start: start, end: end, confidence: word.logprob.map { exp($0) })
             }
-        case .openAI, .groq:
+        case .openAI, .groq, .openRouter:
+            // OpenRouter answers in this shape for every model it routes to.
             struct Response: Decodable {
                 struct Word: Decodable {
                     var word: String
                     var start: Double
                     var end: Double
+                    var confidence: Double?
                 }
                 var text: String?
                 var words: [Word]?
@@ -217,7 +246,7 @@ public enum CloudTranscriber {
             guard let response = try? JSONDecoder().decode(Response.self, from: data), let words = response.words else {
                 throw Failure.invalidResponse("no word timestamps in the answer")
             }
-            let parsed = words.map { ParsedWord(text: $0.word.trimmingCharacters(in: .whitespaces), start: $0.start, end: $0.end) }
+            let parsed = words.map { ParsedWord(text: $0.word.trimmingCharacters(in: .whitespaces), start: $0.start, end: $0.end, confidence: $0.confidence) }
             return punctuate(parsed.filter { !$0.text.isEmpty }, from: response.text ?? "")
         }
     }

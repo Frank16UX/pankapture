@@ -171,6 +171,37 @@ struct RecordingWriterTests {
         #expect(try await camera.load(.timeRange).duration.seconds > 1.5)
     }
 
+    /// The camera track starts with the screen (CAM-7): the camera frame from
+    /// just before the first screen frame, or else the first one after it,
+    /// shows from time zero instead of an empty start.
+    @Test(arguments: [true, false])
+    func cameraStartsWithTheScreen(withLeadIn: Bool) async throws {
+        let directory = try tempDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("out.mp4")
+        let writer = RecordingWriter(settings: .init(
+            url: url, codec: .h264, quality: .low, framesPerSecond: 30,
+            capturesSystemAudio: false, capturesMicrophone: false, cameraSize: CGSize(width: 320, height: 240)
+        ))
+        if withLeadIn { await writer.appendCamera(SyntheticMedia.videoFrame(at: t(19.95), shade: 40)) }
+        var next = 20.0
+        while next < 21 {
+            await writer.appendVideo(SyntheticMedia.videoFrame(at: t(next)))
+            // The camera's own frames arrive a moment late.
+            if next >= 20.2 { await writer.appendCamera(SyntheticMedia.videoFrame(at: t(next + 0.001), shade: 200)) }
+            next += 1.0 / 30
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        _ = try await writer.finish(at: t(21))
+
+        let video = try await AVURLAsset(url: url).loadTracks(withMediaType: .video)
+        try #require(video.count == 2)
+        let segments = try await video[1].load(.segments)
+        let first = try #require(segments.first)
+        #expect(!first.isEmpty)
+        #expect(abs(first.timeMapping.target.start.seconds) < 1e-3)
+    }
+
     /// Simulates a crash: snapshot the fragmented file mid-recording (as a power
     /// loss would leave it), then recover the snapshot.
     @Test func interruptedRecordingIsRecoverable() async throws {

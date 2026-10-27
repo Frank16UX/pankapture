@@ -193,10 +193,13 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 | VE-9 | Export runs in the background with progress; the editor stays responsive. | Must | M5 ✅ |
 | VE-10 | Copy the exported file to the clipboard; drag the exported file out. | Should | M5 ✅ |
 | VE-11 | Speed change for segments (e.g. 2× during boring parts). | Could | M5 ✅ |
-| VE-13 | **Camera layer:** move and resize the webcam in the preview; shape (circle, square, rectangle) with adjustable corner roundness, size, mirror, show/hide. Zooms leave it in place unless the zoom fills the frame. | Must | M5 ✅ |
+| VE-13 | **Camera layer:** move and resize the webcam in the preview; shape (circle, square, rectangle) with adjustable corner roundness, size (up to the video's full height), mirror, show/hide. Zooms leave it in place unless the zoom fills the frame. | Must | M5 ✅ |
 | VE-12 | **Edit projects:** edits are saved explicitly (⌘S); closing or quitting with unsaved edits asks to Save / Don't Save / Cancel; unsaved edits survive a crash as a draft. Reopening the recording restores the saved project. | Must | M5 ✅ |
-| VE-14 | **Timeline zoom:** ⌘-scroll or pinch over the timeline zooms around the pointer (down to about 1.5 s across); plain scrolling pans once zoomed. A zoom slider with out / in / fit sits in the transport bar (⌘= / ⌘− / ⌘0). A scroller shows where the view is; playback pages the view along; picking an item elsewhere scrolls the timeline to it. | Must | M8 ✅ |
-| VE-15 | **One inspector pane at a time:** a labeled icon rail on the trailing edge switches the panes (Auto-Edit, Transcript, Captions, Background, Zoom, Speed, Camera, Audio, Cuts; ⌘1–⌘9). A dot marks panes with edits in the video. Selecting a zoom, cut, or auto-edit item on the timeline opens the pane that edits it. | Must | M8 ✅ |
+| VE-14 | **Export size by percentage:** a segmented control picks how the MP4 size is chosen: a **resolution** (VE-8) or a **percentage** of the original (75, 50, 33, 25, 20, 10 %). Each option shows the pixel size it produces. | Should | M7 ✅ |
+| VE-15 | **Optimize for Sharing:** one switch for a small MP4 that uploads quickly and plays inline in chat apps and email: H.264, at most 1080p and 30 fps, a bitrate tuned for screen recordings, sparse keyframes, lighter audio (ADR-30). It replaces the quality and frame-rate pickers while on. | Should | M7 ✅ |
+| VE-16 | **Timeline zoom:** ⌘-scroll or pinch over the timeline zooms around the pointer (down to about 1.5 s across); plain scrolling pans once zoomed. A zoom slider with out / in / fit sits in the transport bar (⌘= / ⌘− / ⌘0). A scroller shows where the view is; playback pages the view along; picking an item elsewhere scrolls the timeline to it. | Must | M8 ✅ |
+| VE-17 | **One inspector pane at a time:** a labeled icon rail on the trailing edge switches the panes (Auto-Edit, Transcript, Captions, Background, Zoom, Speed, Camera, Audio, Cuts; ⌘1–⌘9). A dot marks panes with edits in the video. Selecting a zoom, cut, or auto-edit item on the timeline opens the pane that edits it. | Must | M8 ✅ |
+| VE-18 | **Opens at once:** choosing a recording (menu bar, history, notification) shows its editor window right away, as a skeleton of the editor with the recording loading inside it; a status line appears in the preview if loading takes longer than about half a second. A screenshot shows the capture at once while its tools are built. Choosing an item that's already open brings its window forward instead of opening a second one. | Must | M8 ✅ |
 
 ### 5.10 Capture history (library)
 
@@ -208,6 +211,9 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 | HI-4 | Actions: open, re-edit (annotations still editable), copy, reveal in Finder, share, delete. | Must | M6 ✅ |
 | HI-5 | Retention: keep forever / 30 / 90 days; optional storage cap. | Should | M6 ✅ |
 | HI-6 | Recent captures submenu in the menu bar (last 5–10). | Should | M6 ✅ |
+| HI-7 | **Rename** captures in the library (inspector name field, or Rename… in the context menu). The name is shown and searched everywhere in the app; the file on disk keeps its name. Clearing it goes back to the file name. | Must | M6 ✅ |
+| HI-8 | **Tags:** add one or more tags to one or many captures (inspector, context menu, or drag onto a sidebar tag), with suggestions from existing tags. Tags are listed in the sidebar with counts, filter the grid, are searched, and can be renamed (merging duplicates) or removed. | Must | M6 ✅ |
+| HI-9 | **Folders** in the library window: create, rename, and delete; move captures by drag, context menu, or the inspector. A capture is in at most one folder. Folders organize the library only and never move files in Finder; deleting one keeps its captures. | Must | M6 ✅ |
 
 ### 5.11 Smart editing
 
@@ -256,6 +262,9 @@ Everything runs on the Mac unless the user configured an AI provider (§5.12). E
 | CAM-2 | **Green screen** key: pick the color, set the tolerance, remove spill. | Should | M8 ✅ |
 | CAM-3 | A **default camera background** in Settings ▸ Recording, also applied to the automatic camera composite (REC-10). | Should | M8 ✅ |
 | CAM-4 | A **Video Effects…** button in the recording options opens the system camera effects (portrait blur, background replacement). That's the only option when the camera is saved in the video. | Could | M8 ✅ |
+| CAM-5 | **Clean edges:** the person's outline follows their hair and shoulders, without a halo of the old background, and holds still from frame to frame rather than flickering; blur leaves the person out of the blurred background, so their colors don't smear around them. | Must | M8 ✅ |
+| CAM-6 | **Camera layouts over time:** for parts of the video, **Camera Only** (the camera fills the frame, over the screen; with Remove, the person stands over the screen) or **Screen Only** (the camera is hidden). Added at the playhead from a timeline lane or the Camera pane; moved and resized on the lane. The camera eases between layouts. With Show Camera off, Camera Only still shows it, so a video can open full-frame on the camera and continue on the screen alone. | Must | M8 ✅ |
+| CAM-7 | The camera shows from the **first frame** of the recording, never popping in after the screen. Recordings made before this show the camera's first frame until it starts. | Must | M8 ✅ |
 
 ### 5.12 AI providers (bring your own key)
 
@@ -269,11 +278,12 @@ Everything else works without one.
 |---|---|---|---|
 | AI-1 | **Off by default.** Without a provider, every smart-editing feature still works; pause judgment and mistake detection use rules. | Must | M8 ✅ |
 | AI-2 | **Any provider, not one vendor:** presets for Anthropic, OpenAI, Google Gemini, Groq, OpenRouter, LM Studio and Ollama, plus any OpenAI-compatible endpoint (base URL + model). The model name is always editable. | Must | M8 ✅ |
-| AI-3 | API keys live in the **Keychain** only, never in settings files, projects or logs. Settings ▸ AI has **Test connection**. | Must | M8 ✅ |
+| AI-3 | API keys live in the **Keychain** only, never in settings files, projects or logs. Settings ▸ AI has **Test connection**. Opening the app, an editor, or Settings never reads a key: it's read only when a request is made, at most once per launch, so macOS asks for the Keychain password at most once after an update. A key the provider rejects (401, 403) says so and where to replace it. | Must | M8 ✅ |
 | AI-4 | For auto-edit, only **transcript text and pause timings** are sent, never audio or video, and only when the user starts the action. The button says what will be sent. | Must | M8 ✅ |
-| AI-5 | **Cloud transcription (optional):** send the microphone audio to a configured speech-to-text provider (e.g. ElevenLabs Scribe, AssemblyAI) for a verbatim transcript that keeps fillers and stutters. Off by default, and marked as sending audio. | Should | M8 ✅ |
+| AI-5 | **Cloud transcription (optional):** send the microphone audio to a configured speech-to-text provider (ElevenLabs Scribe, OpenAI, Groq, or OpenRouter's speech-to-text models, such as Scribe and AssemblyAI) for a verbatim transcript that keeps fillers and stutters. Off by default, and marked as sending audio. | Should | M8 ✅ |
 | AI-6 | Model answers are **checked** before they become suggestions: schema, word ranges, and a cap on how much may be removed. If any check fails, the rules' suggestions stand and a notice says why. | Must | M8 ✅ |
 | AI-7 | **Evaluation harness:** `make eval` scores providers and prompts against the maintainer's labeled sample recordings (§11). It's a developer tool, not part of the app. | Must | M8 ✅ |
+| AI-8 | **Providers are managed, models are picked where they're used:** Settings ▸ AI lists the added providers, one card each (key or server, Remove, Test connection), with **Add Provider** to add another; one key per vendor covers its language models and its transcription. Settings sets the default model, reasoning effort and transcription; each editor's Auto-Edit pane can pick others for that recording, and changes in Settings reach open editors at once. Model lists show the **input and output price** per 1M tokens (per hour for transcription) and an estimate per 15-minute recording; with OpenRouter, a searchable list of every model that can answer in auto-edit's format, at live prices, besides a curated selection. | Must | M8 ✅ |
 
 ## 6. Non-functional requirements
 
@@ -289,6 +299,8 @@ Everything else works without one.
 | 1080p60 recording CPU | ≤ 10% (hardware encoder) |
 | 4K60 recording | 0 dropped frames on M1 Pro or newer |
 | App launch to ready | ≤ 1 s |
+| Recent capture chosen → its window visible (VE-18) | ≤ 150 ms |
+| Recent recording chosen → editor ready with the recording | ≤ 500 ms (≤ 1 s for the first one in the first seconds after launch) |
 | Export of 1 min 1080p MP4 | ≤ 30 s |
 | On-device transcription of a 15 min recording | ≤ 90 s |
 | Auto-edit analysis of a 15 min recording, excluding the AI provider's response time | ≤ 15 s |
@@ -303,7 +315,8 @@ Everything else works without one.
 ### 6.3 Privacy and security
 - No telemetry or crash uploads. Network requests are limited to:
   - the update check (UP-1): an anonymous request for the latest GitHub release (once a day, can be turned off), plus the download when you install it;
-  - requests to an AI provider, only when the user configured one and starts an action that uses it (§5.12). These carry transcript text, or microphone audio for cloud transcription (AI-5).
+  - requests to an AI provider, only when the user configured one and starts an action that uses it (§5.12). These carry transcript text, or microphone audio for cloud transcription (AI-5);
+  - once a cloud AI provider is added, OpenRouter's public model list, for prices (AI-8): at most once a day, with no key and nothing about the user.
 - AI provider keys are stored in the Keychain.
 - Pankapture's own windows are excluded from every capture.
 - OCR, transcription and all media processing run on device, except optional cloud transcription (AI-5).

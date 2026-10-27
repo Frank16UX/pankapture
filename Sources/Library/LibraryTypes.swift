@@ -127,8 +127,14 @@ public struct CaptureSnapshot: Identifiable, Hashable, Sendable {
     public var createdAt: Date
     /// Last time annotations were re-edited (equals `createdAt` until then).
     public var editedAt: Date
-    /// File name shown in the UI and searched (HI-3).
+    /// File name (or the generated name of an unsaved capture), searched (HI-3).
     public var title: String
+    /// Name the user gave it in the library (HI-7); empty when not renamed.
+    public var customName: String
+    /// Sorted, case-insensitively unique (HI-8).
+    public var tags: [String]
+    /// The library folder it's in (HI-9), if any.
+    public var folderID: UUID?
     public var pixelSize: CGSize
     /// Pixels per point of the original capture (screenshots).
     public var scale: CGFloat
@@ -154,6 +160,15 @@ public struct CaptureSnapshot: Identifiable, Hashable, Sendable {
     public var libraryByteSize: Int64
     /// Size of the user-facing file (export, or the original when unsaved).
     public var fileByteSize: Int64
+
+    /// What the library shows: the user's name, else the file name.
+    public var displayName: String { customName.isEmpty ? title : customName }
+
+    /// `displayName` as a file name for Save As and drags (no extension).
+    public var suggestedFileName: String {
+        let base = customName.isEmpty ? (title as NSString).deletingPathExtension : customName
+        return base.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+    }
 
     /// A recording/GIF whose file is gone can't be opened at all.
     public var isUnavailable: Bool { kind.isVideoLike && (exportURL == nil || isExportMissing) }
@@ -219,6 +234,10 @@ public struct LibraryQuery: Hashable, Sendable {
     public var text: String
     public var kind: CaptureKind?
     public var dateRange: Range<Date>?
+    /// Only items in this library folder.
+    public var folderID: UUID?
+    /// Only items with this tag.
+    public var tag: String?
     public var sort: LibrarySort
     public var limit: Int?
 
@@ -226,13 +245,60 @@ public struct LibraryQuery: Hashable, Sendable {
         text: String = "",
         kind: CaptureKind? = nil,
         dateRange: Range<Date>? = nil,
+        folderID: UUID? = nil,
+        tag: String? = nil,
         sort: LibrarySort = .newest,
         limit: Int? = nil
     ) {
         self.text = text
         self.kind = kind
         self.dateRange = dateRange
+        self.folderID = folderID
+        self.tag = tag
         self.sort = sort
         self.limit = limit
+    }
+}
+
+/// A folder in the library window (HI-9). It groups captures in the library
+/// only; files on disk stay where they are.
+public struct LibraryFolder: Identifiable, Hashable, Sendable {
+    public let id: UUID
+    public var name: String
+    public var itemCount: Int
+
+    /// Name for a new folder that doesn't clash with `existing`
+    /// ("New Folder", "New Folder 2", …).
+    public static func untitledName(existing: [String]) -> String {
+        let base = "New Folder"
+        let taken = Set(existing.map { $0.lowercased() })
+        guard taken.contains(base.lowercased()) else { return base }
+        var number = 2
+        while taken.contains("\(base) \(number)".lowercased()) { number += 1 }
+        return "\(base) \(number)"
+    }
+}
+
+/// A tag and how many captures carry it (HI-8).
+public struct LibraryTag: Identifiable, Hashable, Sendable {
+    public var id: String { name }
+    public var name: String
+    public var itemCount: Int
+
+    /// Longest name kept for tags, folders, and capture names.
+    public static let maxNameLength = 120
+
+    /// `raw` trimmed, on one line, and capped; nil when nothing is left.
+    /// Used for tag, folder, and capture names.
+    public static func normalizedName(_ raw: String) -> String? {
+        let oneLine = raw.components(separatedBy: .newlines).joined(separator: " ")
+        let trimmed = oneLine.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(maxNameLength))
+    }
+
+    /// Tags are unique ignoring case and accents ("Design" is "design").
+    public static func isSame(_ lhs: String, _ rhs: String) -> Bool {
+        lhs.compare(rhs, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
     }
 }

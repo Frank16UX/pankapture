@@ -239,7 +239,7 @@ Microphone track ─┬─▶ loudness envelope (10 ms frames) ──▶ pauses 
   - The limiter is sample-peak only (no true-peak is documented); 4× oversampling is optional.
   - The gain must be **baked into the processed file**, because audio-mix volume can't go above 1.0.
 - **Cache:** `Application Support/Pankapture/ProcessedAudio/<video>-<path hash>.<setting>.m4a`, deletable and regenerated on demand. A JSON sidecar holds the pipeline version, the recording's fingerprint (size and date) and the track's start time.
-- **Isolation delay:** `AUSoundIsolation` delays its output by about 57 ms (92 ms at Max) without reporting it; it's measured per render and removed (ADR-37).
+- **Isolation delay:** `AUSoundIsolation` delays its output by about 57 ms (92 ms at Max) without reporting it; it's measured per render and removed (ADR-38).
   - `CompositionBuilder` swaps it in for the microphone track and keeps the original track's start offset.
   - The waveform lane shows the processed audio.
   - A 15-minute recording takes about 20 s for the two passes (isolate and measure, then gain and limit), with progress shown.
@@ -262,14 +262,29 @@ Microphone track ─┬─▶ loudness envelope (10 ms frames) ──▶ pauses 
     | balanced | about 9 ms | 512×384 |
     | accurate | 32–39 ms | — |
 
-  - The mask is scaled up and feathered, then the result is built with `CIBlendWithMask` from the camera frame plus a blurred copy, the replacement image, or a clear background.
-  - Measured after building it (ADR-38): fast about 5 ms and balanced about 9 ms per 720p frame on the development Mac, a mask on every frame.
-  - Apple has no public video-matting API; `CIFilter.personSegmentation` just wraps Vision.
+  - The mask is upsampled guided by the camera frame (`CIEdgePreserveUpsampleFilter`), its soft band narrowed (25–75 % coverage ramps to 0–100 %) and feathered by about a pixel, then the result is built with `CIBlendWithMask` from the camera frame plus the blurred background, the replacement image, or a clear background (CAM-5).
+  - Blur blurs the background without the person: cut out with alpha 1 − mask, blurred with its alpha, unpremultiplied. Blurring the whole frame smeared the person's colors around them.
+  - Measured after building it (ADR-39): fast about 5 ms and balanced about 9 ms per 720p frame on the development Mac, a mask on every frame; the edge refinement adds about 1 ms. The accurate level (2016×1512 mask, about 30 ms) is too slow for exports and takes in the chair behind the person.
+  - Apple has no public video-matting API; `CIFilter.personSegmentation` just wraps Vision. The newer person and foreground instance masks are no sharper; they're for telling several people or objects apart.
+- **What video-call apps publish about their background effects:** a small segmentation model, refined with a joint bilateral filter guided by the frame (what the edge-preserving upsample does), a blur weighted so the person doesn't bleed into it, and light wrapping for replacements.
+- **Open-source models** (checked October 2026, licenses from each repository):
+
+  | Model | License | Core ML | Verdict |
+  |---|---|---|---|
+  | Robust Video Matting | GPL-3.0 | official, 4–8 MB, about 13 ms at 720p on an M4 Pro | best fit for video (temporal, cleaner edges), but GPL |
+  | MODNet | Apache-2.0 | not official; plain CNN, conversion likely easy | the permissive option, per frame; try only with the matte track, if the fixes above fall short |
+  | MediaPipe Selfie | Apache-2.0 | TFLite only | same class as Vision's fast level |
+  | BiRefNet | MIT | not official | too slow for video (1024², hundreds of MB) |
+  | RMBG 1.4 / 2.0, MatAnyone | non-commercial | — | excluded |
+  | BackgroundMattingV2 | MIT | no | needs a clean background shot |
+
+- **Done since:** the mask is steadied over time in the compositor: averaged with the previous frame's where the picture didn't move, taken as is where it did (ARCHITECTURE ADR-39). About half the edge flicker on a test recording. Reusing one Vision request turned out to steady only the fast level, not the balanced one exports use.
+- **Next steps, in order:** a matte track (offline, motion-compensated smoothing both ways in time, cached like the processed voice); then edge color cleanup for Replace and Remove; a model only if those fall short.
 - **Where it runs:** inside `FrameRenderer`, on the camera frame, before the shape mask is applied.
-  - The compositor is called from several queues and out of order while scrubbing, so the requests stay stateless: a new request per frame (Vision keeps the model loaded).
+  - The compositor is called from several queues and out of order while scrubbing, so the requests stay stateless: a new request per frame (Vision keeps the model loaded). Steadying over time lives in the compositor, which sees its frames in order.
   - The preview uses fast; export uses balanced.
 - **Risk on the slowest machine:**
-  - Flicker at the person's edges is unmeasured.
+  - Edge flicker, measured on a test recording, is about half what a new mask per frame gives; the rest needs the matte track.
   - An M1 is probably 2–3× slower (an estimate). At 60 fps that leaves little headroom.
   - If preview or export misses the budget, precompute a matte track once (offline, smoothed over time, cached like the processed audio) and have the compositor only read it.
 - **Chroma key:** a color-difference key (how far the key channel rises above the other two) in an alpha `CIColorCube`, plus spill suppression.
@@ -329,6 +344,7 @@ A 15-minute recording is about 2,300 words, or roughly 5k input tokens with word
 | ElevenLabs Scribe v2 (BYOK) | $0.22 / h ≈ $0.055 per 15 min | ✅ | **✅ by default** (best verbatim score in a vendor benchmark) | ✅ | Best optional upgrade for fillers and stutters; ships in the BYOK work (PRD AI-5). **Sends audio.** |
 | AssemblyAI Universal-3.5 Pro (BYOK) | $0.21 / h | ✅ | partly (the docs conflict) | ✅ | Second choice. |
 | Groq Whisper large-v3-turbo (BYOK) | $0.04 / h | ✅ | ❌ | ✅ | Cheap, but no help with fillers. |
+| OpenRouter speech-to-text (BYOK) | the model's price (Scribe v2 $0.22 / h) | ✅ for Scribe, AssemblyAI, Whisper, Parakeet, Deepgram; ❌ GPT Transcribe, Chirp 3, Voxtral *(probe, 2026-10-27)* | Scribe and AssemblyAI ✅; Parakeet kept "um"; Whisper and Deepgram ❌ | ✅ | One key for language models and several transcribers (ADR-45). **Sends audio.** |
 | WhisperKit, whisper.cpp, Parakeet v3 (FluidAudio) | free, local, **dependency** | ✅ | mostly drop fillers | ✅ | Doesn't beat the built-in engine on the problem that matters. Breaks ADR-10. |
 | CrisperWhisper (verbatim) | — | ✅ | ✅ | not confirmed | Weights have a **non-commercial license**. Excluded. |
 
@@ -342,15 +358,15 @@ A 15-minute recording is about 2,300 words, or roughly 5k input tokens with word
   - Stored in the **Keychain** (a generic password per provider), never in `UserDefaults`, never logged, never in project files.
   - A "Test connection" button checks a key.
   - The app isn't sandboxed (ADR-7), so it needs no network entitlement.
-- **Settings ▸ AI (new pane):** provider preset, model, key or base URL, and an "Off" default.
-  - The auto-edit panel shows "Mistakes: needs a provider" when none is configured, rather than hiding the feature.
+- **Settings ▸ AI:** the added providers, each with its key or base URL, Add Provider, and the defaults (model, effort, transcription). Nothing is used until a provider is added (ADR-45, PRD AI-8).
+  - The Auto-Edit pane picks the model, effort and transcription for that recording, with prices, and says when the built-in rules judge because no provider is added.
 - **Every network call is user-initiated**, and the UI states what is sent: "transcript text" or "audio, for cloud transcription".
 
 ---
 
 ## 6. Architecture changes
 
-- **New modules** (built in phase 1; ARCHITECTURE §3, ADR-30–33):
+- **New modules** (built in phase 1; ARCHITECTURE §3, ADR-31–34):
   - **`Transcription`** (→ AppCore): the transcript model and `OnDeviceTranscriber` (locale choice, model install, word timings).
   - **`AIProviders`** (→ AppCore): presets, `LanguageModelClient` (Anthropic + OpenAI-compatible), `APIKeyStore` (Keychain), `JSONValue`.
   - **`AutoEdit`** (→ AppCore, Transcription, AIProviders): `MicrophoneAudio`, `LoudnessEnvelope`, `PauseDetector`, `ScreenActivityProbe`, `RuleBasedEditor` + `Lexicon`, `ModelPass`, `AutoEditAnalyzer`. It's its own module rather than a folder in `VideoEditor`, so the evaluation harness doesn't pull in the editor UI.

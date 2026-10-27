@@ -21,6 +21,19 @@ public struct CameraTrackInfo: Sendable, Equatable {
     public let size: CGSize
     public let orientation: CGImagePropertyOrientation
     public let timeRange: TimeRange
+    /// Where the first frame is. Recordings made before CAM-7 start the
+    /// camera a moment after the screen (an empty edit before it); the
+    /// editor shows this frame from the start instead of nothing.
+    public let firstFrameTime: Double
+
+    public init(trackID: CMPersistentTrackID, size: CGSize, orientation: CGImagePropertyOrientation,
+                timeRange: TimeRange, firstFrameTime: Double? = nil) {
+        self.trackID = trackID
+        self.size = size
+        self.orientation = orientation
+        self.timeRange = timeRange
+        self.firstFrameTime = firstFrameTime ?? timeRange.start
+    }
 }
 
 /// The source's tracks, resolved for one composition build. Not `Sendable`
@@ -145,15 +158,17 @@ public struct SourceMedia: Sendable {
 
         var camera: CameraTrackInfo?
         if let cameraTrack {
-            let (size, transform, range) = try await cameraTrack.load(.naturalSize, .preferredTransform, .timeRange)
+            let (size, transform, range, segments) = try await cameraTrack.load(.naturalSize, .preferredTransform, .timeRange, .segments)
             let orientation = Self.orientation(for: transform)
             let upright: CGSize = switch orientation {
             case .left, .right, .leftMirrored, .rightMirrored: CGSize(width: size.height, height: size.width)
             default: size
             }
+            let firstFrame = segments.first { !$0.isEmpty }?.timeMapping.target.start.seconds
             camera = CameraTrackInfo(
                 trackID: cameraTrack.trackID, size: upright, orientation: orientation,
-                timeRange: TimeRange(start: range.start.seconds, end: range.end.seconds)
+                timeRange: TimeRange(start: range.start.seconds, end: range.end.seconds),
+                firstFrameTime: firstFrame.flatMap { $0.isFinite ? $0 : nil }
             )
         }
 

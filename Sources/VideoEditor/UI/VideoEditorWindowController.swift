@@ -24,6 +24,9 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
     }
 
     private var entries: [URL: Entry] = [:]
+    /// An editor was built in this launch (or `warmUp()` ran), so building
+    /// another is quick and the window can skip the skeleton.
+    private static var isEditorWarm = false
 
     override public init() {
         super.init()
@@ -42,16 +45,22 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             show(entry.window)
             return
         }
+        let signpost = Log.signposter.beginInterval("openVideoEditor")
+        defer { Log.signposter.endInterval("openVideoEditor", signpost) }
 
         let model = VideoEditorModel(url: key)
         model.onExportFinished = { [weak self] result in self?.onExportFinished?(result) }
+        model.isEditorMounted = Self.isEditorWarm
 
-        let hosting = NSHostingController(rootView: EditorView(model: model))
+        let hosting = NSHostingController(rootView: EditorWindowContent(model: model))
         hosting.sceneBridgingOptions = [.toolbars, .title]
 
         let window = NSWindow(contentViewController: hosting)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.toolbarStyle = .unified
+        // A toolbar from the start, so the title bar doesn't grow when the
+        // editor's own toolbar arrives after the skeleton.
+        if window.toolbar == nil { window.toolbar = NSToolbar(identifier: "videoEditor.placeholder") }
         window.title = key.deletingPathExtension().lastPathComponent
         window.representedURL = key
         window.isReleasedWhenClosed = false
@@ -71,7 +80,48 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
         model.onUnsavedChangesChanged = { [weak window] edited in window?.isDocumentEdited = edited }
         entries[key] = Entry(window: window, model: model, keyMonitor: installKeyMonitor(window: window, model: model))
         show(window)
+        if !model.isEditorMounted { mountEditor(model) }
         Log.editor.info("Editor opened for \(key.lastPathComponent, privacy: .public)")
+    }
+
+    /// Builds the editor once its skeleton is on screen (VE-18).
+    private func mountEditor(_ model: VideoEditorModel) {
+        Task { @MainActor in
+            // A couple of frames for the window to draw the skeleton: building
+            // the first editor of a launch holds the main thread for a moment.
+            try? await Task.sleep(for: .milliseconds(50))
+            model.isEditorMounted = true
+            Self.isEditorWarm = true
+        }
+    }
+
+    /// Builds an editor off screen, once, so the first one the user opens
+    /// comes up at once. The first editor of a launch loads frameworks and
+    /// sets up every view type for the first time, which takes a second or
+    /// two; later ones take about a tenth of a second (ADR-42). Call it while
+    /// the app is idle: it holds the main thread for that second or two.
+    public func warmUp() {
+        guard !Self.isEditorWarm, entries.isEmpty else { return }
+        let signpost = Log.signposter.beginInterval("warmUpVideoEditor")
+        defer { Log.signposter.endInterval("warmUpVideoEditor", signpost) }
+        let start = ContinuousClock.now
+
+        // Never loaded: it only lends the views something to show.
+        let model = VideoEditorModel(url: URL(fileURLWithPath: "/dev/null"))
+        model.isEditorMounted = true
+        let hosting = NSHostingController(rootView: EditorView(model: model))
+        hosting.sceneBridgingOptions = [.toolbars, .title]
+        let window = NSWindow(contentViewController: hosting)
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.toolbarStyle = .unified
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 1200, height: 780))
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.close()
+        model.close()
+        Self.isEditorWarm = true
+        let elapsed = ContinuousClock.now - start
+        Log.editor.info("Video editor warmed up in \(elapsed.formatted(.units(allowed: [.milliseconds])), privacy: .public)")
     }
 
     /// The window and model editing `url` (internal: tests and diagnostics).

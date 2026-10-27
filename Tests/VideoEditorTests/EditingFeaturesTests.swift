@@ -437,6 +437,30 @@ struct ExportSizeTests {
         #expect(plan.renderSize == CGSize(width: 3840, height: 2160))
     }
 
+    @Test func percentagesScaleTheCanvasToEvenSizes() {
+        #expect(ExportScale.allCases.map(\.title) == ["Original", "75%", "50%", "33%", "25%", "20%", "10%"])
+        let retina = CGSize(width: 3024, height: 1794)
+        let sizes = ExportScale.allCases.map { CanvasLayout.scaled(retina, scale: $0.factor) }
+        #expect(sizes == [
+            CGSize(width: 3024, height: 1794), CGSize(width: 2268, height: 1346), CGSize(width: 1512, height: 898),
+            CGSize(width: 998, height: 592), CGSize(width: 756, height: 448), CGSize(width: 604, height: 358),
+            CGSize(width: 302, height: 180),
+        ])
+        #expect(CanvasLayout.scaled(retina, scale: nil) == retina)
+    }
+
+    @Test func sharingCapAppliesAfterTheSizePick() {
+        let project = VideoEditProject(sourceURL: URL(fileURLWithPath: "/tmp/x.mp4"), sourceDuration: 1)
+        let source = CGSize(width: 3024, height: 1794)
+        let scaled = RenderPlan(project: project, sourceSize: source, shortSideCap: 1080, scale: 0.75)
+        #expect(scaled.renderSize == CGSize(width: 1820, height: 1080))
+        let upscaled = RenderPlan(project: project, sourceSize: CGSize(width: 1920, height: 1080), shortSideCap: 1080, shortSide: 2160)
+        #expect(upscaled.renderSize == CGSize(width: 1920, height: 1080))
+        // Below the cap, the pick stands.
+        let small = RenderPlan(project: project, sourceSize: source, shortSideCap: 1080, scale: 0.5)
+        #expect(small.renderSize == CGSize(width: 1512, height: 898))
+    }
+
     @Test func silentTracksAreDetected() async throws {
         let directory = try TestMovie.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

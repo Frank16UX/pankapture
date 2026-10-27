@@ -65,7 +65,7 @@ struct TranscriptPanel: View {
         HStack(spacing: PK.Spacing.s) {
             VStack(alignment: .leading, spacing: 0) {
                 Text("\(transcript.words.count) words").font(.callout.weight(.medium))
-                Text("\(transcript.language.title) · \(transcript.engine == Transcript.onDeviceEngine ? "On this Mac" : transcript.engine)")
+                Text("\(transcript.language.title) · \(transcript.engine == Transcript.onDeviceEngine ? "On this Mac" : AIProvider.transcriptSource(transcript.engine) ?? transcript.engine)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

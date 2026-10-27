@@ -119,7 +119,9 @@ public enum ProviderError: LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .missingKey(let provider): "\(provider) needs an API key."
+        case .missingKey(let provider): "\(provider) needs an API key: save one in Settings ▸ AI, and allow Pankapture to use it if macOS asks."
+        case let .http(status, _) where status == 401 || status == 403:
+            "The provider rejected the API key (\(status)). It may be mistyped, expired, or revoked: save a new one in Settings ▸ AI."
         case let .http(status, message): "The provider answered \(status): \(message)"
         case .invalidResponse(let detail): "The provider's answer couldn't be read: \(detail)"
         case .refused(let detail): "The model declined the request\(detail.isEmpty ? "" : ": \(detail)")."

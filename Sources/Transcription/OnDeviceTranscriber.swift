@@ -4,7 +4,7 @@ import Foundation
 import Speech
 
 /// Transcribes an audio file on device with `SpeechAnalyzer` + `SpeechTranscriber`
-/// (macOS 26+, ADR-30): word timings and confidence, no permission prompt,
+/// (macOS 26+, ADR-31): word timings and confidence, no permission prompt,
 /// nothing leaves the Mac. Language models download on first use and are
 /// shared with other apps.
 @available(macOS 26, *)

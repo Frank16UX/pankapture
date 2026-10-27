@@ -123,4 +123,13 @@ struct LanguageModelClientTests {
         #expect(ProviderConfiguration(preset: .openAI, reasoningEffort: "none").displayName == "OpenAI gpt-6-luna (none)")
         #expect(!ProviderConfiguration(preset: .openAI).isLocal)
     }
+
+    /// A rejected key says so and where to fix it, not just the status.
+    @Test func rejectedKeyIsExplained() {
+        for status in [401, 403] {
+            let message = ProviderError.http(status: status, message: "invalid x-api-key").errorDescription ?? ""
+            #expect(message.contains("rejected the API key") && message.contains("Settings ▸ AI"))
+        }
+        #expect(ProviderError.http(status: 500, message: "overloaded").errorDescription == "The provider answered 500: overloaded")
+    }
 }

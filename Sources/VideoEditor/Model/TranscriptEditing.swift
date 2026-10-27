@@ -1,7 +1,7 @@
 import Foundation
 import Transcription
 
-/// Corrections to the transcript's words (PRD CAP-2, ADR-35). Words the
+/// Corrections to the transcript's words (PRD CAP-2, ADR-36). Words the
 /// user didn't touch keep their times; new words share the time of the
 /// words they replace, in proportion to their length, so captions stay in
 /// sync. The video is never changed.

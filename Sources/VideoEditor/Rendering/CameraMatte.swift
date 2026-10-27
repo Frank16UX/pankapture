@@ -1,3 +1,4 @@
+import AppCore
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import Foundation
@@ -6,12 +7,14 @@ import Synchronization
 import Vision
 
 /// Separates the person from the background in camera frames and draws the
-/// chosen background behind them (PRD CAM-1, CAM-2, ADR-38).
+/// chosen background behind them (PRD CAM-1, CAM-2, ADR-39).
 ///
 /// Called by the compositor from several queues, out of order while
-/// scrubbing, so segmentation is stateless: a new Vision request per frame
-/// (the model itself is loaded once by Vision). The only state, the chroma
-/// cube and the replacement picture, is cached behind `Mutex`es.
+/// scrubbing, so each frame gets a new Vision request (the model itself is
+/// loaded once by Vision). Steadying the mask over time is the compositor's
+/// `MatteSmoother`, which knows the order its frames come in. The other
+/// state, the chroma cube and the replacement picture, is cached behind
+/// `Mutex`es.
 public enum CameraMatte {
     /// Segmentation detail: fast in the preview, balanced for exports.
     public enum Quality: Sendable, Equatable {
@@ -21,7 +24,10 @@ public enum CameraMatte {
 
     /// `image` (extent at the origin) with `background` applied, or `nil`
     /// when the person couldn't be found (the frame is then drawn as is).
-    static func apply(_ background: CameraBackground, to image: CIImage, quality: Quality) -> CIImage? {
+    /// `smoother` steadies the person's outline against the frame before,
+    /// at source `time`.
+    static func apply(_ background: CameraBackground, to image: CIImage, quality: Quality,
+                      smoother: MatteSmoother? = nil, time: Double = 0) -> CIImage? {
         let extent = image.extent
         guard background.isActive, extent.width >= 2, extent.height >= 2 else { return nil }
 
@@ -29,11 +35,11 @@ public enum CameraMatte {
         let person: CIImage
         switch background.effectiveMatte {
         case .person:
-            guard let mask = personMask(for: image, quality: quality) else { return nil }
+            guard let mask = personMask(for: image, quality: quality, smoother: smoother, time: time) else { return nil }
             if background.effect == .blur {
                 let blend = CIFilter.blendWithMask()
                 blend.inputImage = image
-                blend.backgroundImage = blurred(image, amount: background.blurAmount)
+                blend.backgroundImage = blurredBackground(image, mask: mask, amount: background.blurAmount)
                 blend.maskImage = mask
                 return blend.outputImage?.cropped(to: extent)
             }
@@ -64,8 +70,49 @@ public enum CameraMatte {
 
     // MARK: Person segmentation
 
-    /// White where the person is, scaled to `image`'s extent and softened a little.
-    static func personMask(for image: CIImage, quality: Quality) -> CIImage? {
+    /// White where the person is, at `image`'s size.
+    ///
+    /// Vision's mask is small (256×192 fast, 512×384 balanced). Scaling it up
+    /// and blurring it left a wide half-transparent band where the old
+    /// background showed through: a halo. Instead it's upsampled guided by
+    /// the frame, so its edge follows the person's, then the soft band is
+    /// narrowed and only lightly feathered (ADR-39). `smoother` steadies it
+    /// against the frame before.
+    static func personMask(for image: CIImage, quality: Quality, smoother: MatteSmoother? = nil, time: Double = 0) -> CIImage? {
+        guard let mask = coverage(of: image, quality: quality, smoother: smoother, time: time) else { return nil }
+        let extent = image.extent
+        guard mask.extent.width > 0, mask.extent.height > 0 else { return nil }
+
+        let upsample = CIFilter.edgePreserveUpsample()
+        upsample.inputImage = image
+        upsample.smallImage = mask
+        guard let upsampled = upsample.outputImage?.cropped(to: extent) else { return nil }
+        let sigma = Double(min(extent.width, extent.height)) * 0.0012
+        return narrowedEdge(upsampled).clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: extent)
+    }
+
+    /// Coverage below 25 % becomes none and above 75 % full; a ramp between.
+    static func narrowedEdge(_ mask: CIImage) -> CIImage {
+        let ramp = CIFilter.colorMatrix()
+        ramp.inputImage = mask
+        ramp.rVector = CIVector(x: 2, y: 0, z: 0, w: 0)
+        ramp.gVector = CIVector(x: 0, y: 2, z: 0, w: 0)
+        ramp.bVector = CIVector(x: 0, y: 0, z: 2, w: 0)
+        ramp.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        ramp.biasVector = CIVector(x: -0.5, y: -0.5, z: -0.5, w: 0)
+        let clamp = CIFilter.colorClamp()
+        clamp.inputImage = ramp.outputImage
+        return clamp.outputImage ?? mask
+    }
+
+    /// Vision's mask at its own size (256×192 fast, 512×384 balanced),
+    /// steadied against the frame before when there's a `smoother`.
+    private static func coverage(of image: CIImage, quality: Quality, smoother: MatteSmoother?, time: Double) -> CIImage? {
+        let interval = Log.signposter.beginInterval("cameraMatte", id: Log.signposter.makeSignpostID())
+        defer { Log.signposter.endInterval("cameraMatte", interval) }
+        if let smoother, let reused = smoother.reusableMask(at: time, luma: { luminance(of: image, width: $0, height: $1) }) {
+            return maskImage(reused.mask, width: reused.width, height: reused.height)
+        }
         let request = VNGeneratePersonSegmentationRequest()
         request.qualityLevel = quality == .fast ? .fast : .balanced
         request.outputPixelFormat = kCVPixelFormatType_OneComponent8
@@ -77,20 +124,100 @@ public enum CameraMatte {
         }
         guard let buffer = request.results?.first?.pixelBuffer else { return nil }
         // Raw coverage, not a gray picture to color-manage.
-        let mask = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: NSNull()])
+        let raw = CIImage(cvPixelBuffer: buffer, options: [.colorSpace: NSNull()])
+        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer)
+        guard let smoother, let values = values(of: buffer), let luma = luminance(of: image, width: width, height: height) else { return raw }
+        return maskImage(smoother.smooth(values, luma: luma, width: width, height: height, time: time), width: width, height: height)
+    }
+
+    /// A one-byte-per-pixel buffer's values, 0…1, top row first.
+    static func values(of buffer: CVPixelBuffer) -> [Float]? {
+        guard CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_OneComponent8 else { return nil }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(buffer)?.assumingMemoryBound(to: UInt8.self) else { return nil }
+        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer)
+        let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
+        var values = [Float](repeating: 0, count: width * height)
+        for y in 0..<height {
+            for x in 0..<width { values[y * width + x] = Float(base[y * rowBytes + x]) / 255 }
+        }
+        return values
+    }
+
+    /// `image`'s luminance shrunk to `width` × `height` (stretched like
+    /// Vision's mask), 0…1, top row first.
+    static func luminance(of image: CIImage, width: Int, height: Int) -> [Float]? {
         let extent = image.extent
-        guard mask.extent.width > 0, mask.extent.height > 0 else { return nil }
-        let scaled = mask.transformed(by: CGAffineTransform(scaleX: extent.width / mask.extent.width,
-                                                            y: extent.height / mask.extent.height))
-        let sigma = Double(min(extent.width, extent.height)) * 0.004
-        return scaled.clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: extent)
+        guard width > 0, height > 0, extent.width > 0, extent.height > 0 else { return nil }
+        let scaleY = CGFloat(height) / extent.height
+        let shrink = CIFilter.lanczosScaleTransform()
+        shrink.inputImage = image.clampedToExtent()
+        shrink.scale = Float(scaleY)
+        shrink.aspectRatio = Float((CGFloat(width) / extent.width) / scaleY)
+        guard let small = shrink.outputImage else { return nil }
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        VideoEditCompositor.ciContext.render(small, toBitmap: &pixels, rowBytes: width * 4,
+                                             bounds: CGRect(x: extent.minX * CGFloat(width) / extent.width, y: extent.minY * scaleY,
+                                                            width: CGFloat(width), height: CGFloat(height)),
+                                             format: .RGBA8, colorSpace: sRGB)
+        var luma = [Float](repeating: 0, count: width * height)
+        for index in luma.indices {
+            let pixel = index * 4
+            luma[index] = (0.2126 * Float(pixels[pixel]) + 0.7152 * Float(pixels[pixel + 1]) + 0.0722 * Float(pixels[pixel + 2])) / 255
+        }
+        return luma
+    }
+
+    /// Coverage values as an image Core Image reads as is (no color management).
+    static func maskImage(_ values: [Float], width: Int, height: Int) -> CIImage {
+        let bytes = values.map { UInt8((min(1, max(0, $0)) * 255).rounded()) }
+        return CIImage(bitmapData: Data(bytes), bytesPerRow: width, size: CGSize(width: width, height: height), format: .L8, colorSpace: nil)
+    }
+
+    /// Loads Vision's segmentation model, so the first frame that needs it
+    /// doesn't wait for it (about 0.2 s). Call it off the main actor.
+    public static func prepare(quality: Quality) {
+        let blank = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5)).cropped(to: CGRect(x: 0, y: 0, width: 64, height: 64))
+        _ = personMask(for: blank, quality: quality)
     }
 
     // MARK: Blur
 
+    static func blurSigma(for extent: CGRect, amount: Double) -> Double {
+        Double(min(extent.width, extent.height)) * (0.008 + 0.042 * amount.clamped(to: 0...1))
+    }
+
     static func blurred(_ image: CIImage, amount: Double) -> CIImage {
-        let sigma = Double(min(image.extent.width, image.extent.height)) * (0.008 + 0.042 * amount.clamped(to: 0...1))
-        return image.clampedToExtent().applyingGaussianBlur(sigma: sigma).cropped(to: image.extent)
+        image.clampedToExtent().applyingGaussianBlur(sigma: blurSigma(for: image.extent, amount: amount)).cropped(to: image.extent)
+    }
+
+    /// The background blurred without the person in it, so their colors don't
+    /// smear into it as a dark outline: the background is cut out (alpha
+    /// 1 − mask), blurred with its alpha, then divided by that blurred alpha
+    /// (unpremultiplied). A little of the whole frame keeps the division
+    /// defined where no background is near.
+    static func blurredBackground(_ image: CIImage, mask: CIImage, amount: Double) -> CIImage {
+        let extent = image.extent
+        let floor: CGFloat = 0.02
+        let weight = CIFilter.colorMatrix()
+        weight.inputImage = mask
+        weight.rVector = CIVector(x: -(1 - floor), y: 0, z: 0, w: 0)
+        weight.gVector = CIVector(x: 0, y: -(1 - floor), z: 0, w: 0)
+        weight.bVector = CIVector(x: 0, y: 0, z: -(1 - floor), w: 0)
+        weight.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+        weight.biasVector = CIVector(x: 1, y: 1, z: 1, w: 0)
+        let cut = CIFilter.blendWithMask()
+        cut.inputImage = image
+        cut.backgroundImage = CIImage.empty()
+        cut.maskImage = weight.outputImage
+        guard let background = cut.outputImage?.cropped(to: extent) else { return blurred(image, amount: amount) }
+        return background
+            .clampedToExtent()
+            .applyingGaussianBlur(sigma: blurSigma(for: extent, amount: amount))
+            .cropped(to: extent)
+            .applyingFilter("CIUnpremultiply")
+            .settingAlphaOne(in: extent)
     }
 
     // MARK: Chroma key (CAM-2)

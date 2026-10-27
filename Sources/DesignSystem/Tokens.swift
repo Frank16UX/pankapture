@@ -39,6 +39,10 @@ public enum PK {
         public static let railItemHeight: CGFloat = 46
         /// Content width of a trailing inspector pane.
         public static let inspectorWidth: CGFloat = 320
+        /// A floating options panel beside a canvas (image editor background).
+        public static let floatingPanelWidth: CGFloat = 248
+        /// A sheet listing many rows to choose from (the model browser).
+        public static let listSheetSize = CGSize(width: 640, height: 520)
     }
 
     public enum Motion {

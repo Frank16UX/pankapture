@@ -13,6 +13,9 @@ struct PlayerSurface: NSViewRepresentable {
         view.videoGravity = .resizeAspect
         view.showsFullScreenToggleButton = false
         view.allowsPictureInPicturePlayback = false
+        // No Live Text on the preview: it loads Visual Intelligence and
+        // analyzes paused frames for nothing.
+        view.allowsVideoFrameAnalysis = false
         view.setAccessibilityLabel("Video preview")
         return view
     }
@@ -32,13 +35,13 @@ struct PreviewArea: View {
             PlayerSurface(player: model.player)
             if let zoom = model.selectedZoom, let plan = model.previewPlan {
                 ZoomRectEditor(model: model, zoom: zoom, plan: plan)
-            } else if let camera = model.project.camera, camera.isVisible, let plan = model.previewPlan, plan.camera != nil {
+            } else if let camera = model.project.camera, model.isCameraInUsualPlace, let plan = model.previewPlan, plan.camera != nil {
                 CameraLayerEditor(model: model, camera: camera, plan: plan)
             }
             if let error = model.loadError {
                 ContentUnavailableView("Can't Open Video", systemImage: "exclamationmark.triangle", description: Text(error))
             } else if model.media == nil {
-                ProgressView().controlSize(.large)
+                LoadingStatus(model: model)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: PK.Radius.thumbnail, style: .continuous))
@@ -341,7 +344,7 @@ struct TransportBar: View {
     }
 }
 
-/// Timeline zoom (VE-14): out, a slider, in, and fit. ⌘-scroll or pinch
+/// Timeline zoom (VE-16): out, a slider, in, and fit. ⌘-scroll or pinch
 /// over the timeline does the same around the pointer.
 private struct TimelineZoomControl: View {
     @Bindable var model: VideoEditorModel

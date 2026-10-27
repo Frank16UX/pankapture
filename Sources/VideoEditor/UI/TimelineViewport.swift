@@ -1,7 +1,7 @@
 import AppCore
 import Foundation
 
-/// The part of the source the timeline shows (VE-14). At zoom 1 it shows the
+/// The part of the source the timeline shows (VE-16). At zoom 1 it shows the
 /// whole source; at zoom `z` it shows `duration / z` seconds starting at
 /// `start`. View state only: not saved and not undoable.
 struct TimelineViewport: Equatable {
@@ -90,7 +90,7 @@ struct TimelineViewport: Equatable {
     }
 }
 
-/// Timeline zoom and scrolling (VE-14).
+/// Timeline zoom and scrolling (VE-16).
 extension VideoEditorModel {
     /// Zooms around `time`, or around the playhead (the middle when it's off screen).
     func zoomTimeline(by factor: Double, around time: Double? = nil) {

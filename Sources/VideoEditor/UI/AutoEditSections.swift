@@ -118,37 +118,65 @@ struct AutoEditSection: View {
         }
     }
 
+    /// What transcribes and what judges this recording (PRD AI-8): this
+    /// editor's choice, starting from Settings ▸ AI's defaults.
     @ViewBuilder private var providerNote: some View {
-        if let cloud = CloudTranscriptionSettings.active() {
-            Label {
-                VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
-                    Text("Transcribed by \(cloud.service.name)")
-                    Text("Sends the microphone audio when you analyze. Change it in Settings ▸ AI.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } icon: {
-                Image(systemName: "waveform.badge.mic").foregroundStyle(.orange)
+        let settings = model.aiSettings
+        Group {
+            TranscriberPicker("Transcription", transcriber: Binding(
+                get: { model.autoEditTranscriber },
+                set: { model.transcriberOverride = $0 }
+            ), settings: settings)
+            if let note = transcriptionNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-        }
-        if let provider = model.autoEditProvider {
-            Label {
-                VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
-                    Text(provider.displayName)
-                    Text(provider.isLocal
-                         ? "Runs on this Mac. Only the transcript text is used."
-                         : "Sends the transcript text and pause timings to \(provider.preset?.name ?? "the provider"), never audio or video.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } icon: {
-                Image(systemName: "sparkles").foregroundStyle(Color.accentColor)
+
+            JudgePicker("Judged by", judge: Binding(
+                get: { model.autoEditJudge },
+                set: { model.judgeOverride = $0 }
+            ), settings: settings) { info, providerID in
+                model.pickAutoEditModel(info, providerID: providerID)
             }
-        } else {
-            Text("Built-in rules judge pauses and mistakes on this Mac. An AI provider in Settings ▸ AI judges them better.")
+            Text(judgeNote)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .disabled(model.isAutoEditRunning)
+        .onAppear { settings.refreshCatalogIfNeeded() }
+    }
+
+    private var transcriptionNote: String? {
+        let settings = model.aiSettings
+        var parts: [String] = []
+        if let cloud = settings.cloudService(for: model.autoEditTranscriber) {
+            parts.append("Sends the microphone audio to \(cloud.service.name) when you analyze.")
+        }
+        if let transcript = model.transcript, transcript.engine != engineName {
+            parts.append("This transcript came from \(transcript.engine == Transcript.onDeviceEngine ? "this Mac" : transcript.engine): Transcribe Again to use the choice above.")
+        }
+        if settings.transcriptionProviders.isEmpty {
+            parts.append("Add ElevenLabs, OpenRouter, OpenAI, or Groq in Settings ▸ AI to transcribe in the cloud, keeping filler words and stutters.")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
+
+    /// The engine name a transcript made with the current choice would carry.
+    private var engineName: String {
+        guard let cloud = model.aiSettings.cloudService(for: model.autoEditTranscriber) else { return Transcript.onDeviceEngine }
+        return CloudTranscription(service: cloud.service, model: cloud.model, apiKey: "").displayName
+    }
+
+    private var judgeNote: String {
+        guard let provider = model.autoEditProvider else {
+            return model.aiSettings.chatProviders.isEmpty
+                ? "Built-in rules judge pauses and mistakes on this Mac. Add an AI provider in Settings ▸ AI to judge them better."
+                : "Built-in rules judge pauses and mistakes on this Mac."
+        }
+        return provider.isLocal
+            ? "Runs on this Mac. Only the transcript text is used."
+            : "Sends the transcript text and pause timings to \(provider.preset?.name ?? "the provider"), never audio or video."
     }
 }
 

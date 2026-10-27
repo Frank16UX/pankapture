@@ -95,7 +95,7 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
 
     /// Bottom-left of the video, when the recording didn't say.
     public static let standard = CameraOverlay(center: CGPoint(x: 0.12, y: 0.8), size: 0.25)
-    public static let sizeRange: ClosedRange<Double> = 0.08...0.6
+    public static let sizeRange: ClosedRange<Double> = 0.08...1
     public static let roundnessRange: ClosedRange<Double> = 0...0.5
     public static let defaultRoundness = 0.18
 

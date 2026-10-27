@@ -13,9 +13,7 @@ public enum BackgroundLibrary {
         case video
     }
 
-    public static var directory: URL {
-        AppPaths.applicationSupport.appendingPathComponent("Backgrounds", isDirectory: true)
-    }
+    public static var directory: URL { BackgroundFiles.directory }
 
     /// Whether `url` is a picture or a movie we can use, by file type.
     public static func kind(of url: URL) -> Kind? {
@@ -28,13 +26,7 @@ public enum BackgroundLibrary {
     /// Copies `url` into the library and returns the fill for it.
     public static func importFile(_ url: URL) throws -> VideoBackground.Fill {
         guard let kind = kind(of: url) else { throw VideoEditorError.unsupportedBackground }
-        if url.deletingLastPathComponent().standardizedFileURL == directory.standardizedFileURL {
-            return fill(kind, url)
-        }
-        try AppPaths.ensure(directory)
-        let copy = directory.appendingPathComponent(UUID().uuidString).appendingPathExtension(url.pathExtension.lowercased())
-        try FileManager.default.copyItem(at: url, to: copy)
-        return fill(kind, copy)
+        return fill(kind, try BackgroundFiles.copyIn(url))
     }
 
     private static func fill(_ kind: Kind, _ url: URL) -> VideoBackground.Fill {

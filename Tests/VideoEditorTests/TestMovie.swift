@@ -21,6 +21,9 @@ enum TestMovie {
         /// Adds a disabled second video track titled "Camera" in this color,
         /// like the recorder's webcam track.
         var cameraColor: (b: UInt8, g: UInt8, r: UInt8)?
+        /// When the camera's first frame is (seconds): later than zero leaves
+        /// an empty start, like recordings made before CAM-7.
+        var cameraStart: Double = 0
         /// Tags the video Rec. 709, like the recorder's files.
         var tagsRec709 = false
     }
@@ -113,7 +116,8 @@ enum TestMovie {
                 CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
                 guard let buffer else { throw CocoaError(.fileWriteUnknown) }
                 fill(buffer, color: cameraColor, rightColor: nil)
-                cameraAdaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(nextCamera), timescale: spec.fps))
+                let time = CMTime(value: CMTimeValue(nextCamera), timescale: spec.fps) + CMTime(seconds: spec.cameraStart, preferredTimescale: 600)
+                cameraAdaptor.append(buffer, withPresentationTime: time)
                 nextCamera += 1
                 if nextCamera == frameCount { cameraAdaptor.assetWriterInput.markAsFinished() }
                 progressed = true

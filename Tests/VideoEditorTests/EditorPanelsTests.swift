@@ -59,6 +59,28 @@ struct TimelineViewportTests {
         #expect(scale.isVisible(TimeRange(start: 30, end: 41)))
         #expect(!scale.isVisible(TimeRange(start: 60, end: 61)))
     }
+
+    /// Zoomed in, a block running far past the lane is drawn only a little
+    /// past its ends, so it can't widen the timeline; grips show only on
+    /// the ends that are on screen.
+    @Test func blocksAreCutAtTheLaneEnds() {
+        let scale = TimelineScale(duration: 100, width: 1016, inset: 8, viewport: TimelineViewport(zoom: 10, start: 40))
+        func close(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) < 1e-6 }
+
+        let long = scale.block(TimeRange(start: 0, end: 100))
+        #expect(close(long.x, 8 - 24) && close(long.width, 1000 + 48))
+        #expect(!long.showsStart && !long.showsEnd)
+        #expect(close(long.hidden, 24))
+
+        let inside = scale.block(TimeRange(start: 42, end: 43))
+        #expect(close(inside.x, 208) && close(inside.width, 100) && close(inside.hidden, 0))
+        #expect(inside.showsStart && inside.showsEnd)
+        let tiny = scale.block(TimeRange(start: 42, end: 42.01), minimumWidth: 20)
+        #expect(close(tiny.x, 208) && tiny.width == 20)
+        let leftOff = scale.block(TimeRange(start: 39.9, end: 41))
+        #expect(close(leftOff.x, -2) && close(leftOff.hidden, 10))
+        #expect(!leftOff.showsStart && leftOff.showsEnd)
+    }
 }
 
 @Suite("Transcript editing")

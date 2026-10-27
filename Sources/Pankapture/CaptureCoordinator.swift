@@ -72,6 +72,33 @@ final class CaptureCoordinator {
                 self?.recordingSaved(at: url, videoSize: .zero)
             }
         }
+        warmUpEditors()
+    }
+
+    /// Builds the editors off screen once the app has settled, so the first
+    /// one the user opens comes up at once (VE-18, ADR-42). Each holds the
+    /// main thread for a second or so, so it waits for a quiet moment.
+    private func warmUpEditors() {
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            for _ in 0..<12 {
+                guard let self else { return }
+                if self.isIdle {
+                    self.videoEditor.warmUp()
+                    try? await Task.sleep(for: .milliseconds(500))
+                    if self.isIdle { ImageEditorWindowController.warmUp() }
+                    return
+                }
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
+    }
+
+    /// Nothing on screen the user is working with: no capture or recording,
+    /// no window of ours in use, no menu open.
+    private var isIdle: Bool {
+        !isCapturing && OverlayController.current == nil && !recording.isRecording
+            && NSApp.keyWindow == nil && RunLoop.main.currentMode == .default
     }
 
     // MARK: Shortcuts
@@ -394,7 +421,7 @@ final class CaptureCoordinator {
     func openEditor(original: CGImage, scale: CGFloat, annotations: AnnotationDocument, libraryID: UUID?) {
         // The editor may produce several outputs; the first one records the item.
         let session = EditSession(libraryID: libraryID)
-        ImageEditorWindowController.open(image: original, scale: scale, annotations: annotations) { [weak self] action, edited in
+        ImageEditorWindowController.open(image: original, scale: scale, annotations: annotations, documentID: libraryID) { [weak self] action, edited in
             guard let self else { return }
             let capture = Capture(image: edited.image, original: edited.original, annotations: edited.annotations,
                                   scale: edited.scale, screenRect: nil, libraryID: session.libraryID)

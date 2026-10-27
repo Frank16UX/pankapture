@@ -21,14 +21,22 @@ struct ExportSheet: View {
 
                 switch model.exportSettings.format {
                 case .mp4:
-                    Picker("Resolution", selection: settings.resolution) {
-                        ForEach(ExportResolution.allCases) { Text($0.title).tag($0) }
+                    FittingSegmentedPicker("Size", selection: settings.sizeMode) {
+                        ForEach(ExportSizeMode.allCases) { Text($0.title).tag($0) }
                     }
-                    Picker("Quality", selection: settings.quality) {
-                        ForEach(ExportQuality.allCases) { Text($0.title).tag($0) }
-                    }
-                    Picker("Frame Rate", selection: settings.frameRate) {
-                        ForEach(ExportFrameRate.allCases) { Text($0.title).tag($0) }
+                    switch model.exportSettings.sizeMode {
+                    case .resolution:
+                        Picker("Resolution", selection: settings.resolution) {
+                            ForEach(ExportResolution.allCases) { option in
+                                Text(sizeLabel(option.title) { $0.sizeMode = .resolution; $0.resolution = option }).tag(option)
+                            }
+                        }
+                    case .percentage:
+                        Picker("Percentage", selection: settings.scale) {
+                            ForEach(ExportScale.allCases) { option in
+                                Text(sizeLabel(option.title) { $0.sizeMode = .percentage; $0.scale = option }).tag(option)
+                            }
+                        }
                     }
                 case .gif:
                     Picker("Width", selection: settings.gif.width) {
@@ -42,6 +50,23 @@ struct ExportSheet: View {
                     LabeledContent("Loop", value: "Forever")
                 }
 
+                if model.exportSettings.format == .mp4 {
+                    Section {
+                        Toggle(isOn: settings.optimizeForSharing) {
+                            Text("Optimize for Sharing")
+                            Text("A smaller file that uploads quickly and plays inline in chat apps and email: up to 1080p and 30 fps, at a bitrate tuned for screen recordings.")
+                        }
+                        if !model.exportSettings.optimizeForSharing {
+                            Picker("Quality", selection: settings.quality) {
+                                ForEach(ExportQuality.allCases) { Text($0.title).tag($0) }
+                            }
+                            Picker("Frame Rate", selection: settings.frameRate) {
+                                ForEach(ExportFrameRate.allCases) { Text($0.title).tag($0) }
+                            }
+                        }
+                    }
+                }
+
                 Section {
                     let size = model.exportRenderSize
                     LabeledContent("Output", value: "\(Int(size.width)) × \(Int(size.height)) · \(model.exportFrameRate) fps · \(Format.time(model.outputDuration))")
@@ -49,7 +74,7 @@ struct ExportSheet: View {
                     LabeledContent("Estimated Size", value: "≈ \(Format.bytes(model.estimatedExportBytes))")
                         .monospacedDigit()
                         .help(model.exportSettings.format == .mp4
-                              ? "Based on the recording's data rate, capped by the quality's target bitrate."
+                              ? "Based on the recording's data rate, capped by the encoder's target bitrate."
                               : "A rough guess: GIF size depends heavily on the content.")
                 }
                 if case let .failed(message) = model.exportState {
@@ -75,6 +100,17 @@ struct ExportSheet: View {
         }
         .frame(width: 420)
         .onAppear { model.resetExport() }
+    }
+
+    /// "1080p (1820 × 1080)": a size option with the output it makes, before
+    /// the sharing cap (the Output row shows the final size).
+    private func sizeLabel(_ title: String, _ option: (inout ExportSettings) -> Void) -> String {
+        var settings = model.exportSettings
+        settings.optimizeForSharing = false
+        option(&settings)
+        let size = model.mp4RenderSize(for: settings)
+        guard size.width > 0 else { return title }
+        return "\(title) (\(Int(size.width)) × \(Int(size.height)))"
     }
 }
 

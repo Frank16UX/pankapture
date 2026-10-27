@@ -98,6 +98,9 @@ public actor RecordingWriter {
     private var microphoneInput: AVAssetWriterInput?
     private var cameraInput: AVAssetWriterInput?
     private var lastCameraTime: CMTime = .negativeInfinity
+    /// The newest camera frame from before the first screen frame. The camera
+    /// track starts with it, so the camera shows from the very first frame.
+    private var cameraLeadIn: CMSampleBuffer?
 
     private var timeline = PauseTimeline()
     /// Host time of the first written video frame; the output timeline starts here.
@@ -201,14 +204,33 @@ public actor RecordingWriter {
     }
 
     /// Appends a camera frame (host-clock timestamps) to the camera track.
-    /// Frames before the first screen frame are dropped.
+    /// The track starts at zero, with the screen (CAM-7): its first frame is
+    /// the newest one from before the first screen frame, or, if none came,
+    /// the first one after it, held back to zero.
     public func appendCamera(_ sampleBuffer: CMSampleBuffer) {
-        guard !isFinishing, failure == nil, let sessionStart, let cameraInput,
+        guard !isFinishing, failure == nil, settings.cameraSize != nil,
               CMSampleBufferIsValid(sampleBuffer) else { return }
         let hostTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        guard hostTime >= sessionStart, let outputTime = timeline.outputTime(for: hostTime),
-              outputTime > lastCameraTime, cameraInput.isReadyForMoreMediaData,
-              let retimed = AudioBuffers.retimed(sampleBuffer, by: hostTime - outputTime) else { return }
+        guard let sessionStart, hostTime >= sessionStart else {
+            cameraLeadIn = sampleBuffer
+            return
+        }
+        guard let cameraInput, let outputTime = timeline.outputTime(for: hostTime),
+              outputTime > lastCameraTime, cameraInput.isReadyForMoreMediaData else { return }
+
+        if lastCameraTime == .negativeInfinity, outputTime > .zero {
+            let first = cameraLeadIn ?? sampleBuffer
+            cameraLeadIn = nil
+            let firstHostTime = CMSampleBufferGetPresentationTimeStamp(first)
+            guard let atZero = AudioBuffers.retimed(first, by: firstHostTime), cameraInput.append(atZero) else {
+                checkWriterStatus()
+                return
+            }
+            lastCameraTime = .zero
+            guard first !== sampleBuffer, cameraInput.isReadyForMoreMediaData else { return }
+        }
+
+        guard let retimed = AudioBuffers.retimed(sampleBuffer, by: hostTime - outputTime) else { return }
         if cameraInput.append(retimed) {
             lastCameraTime = outputTime
         } else {

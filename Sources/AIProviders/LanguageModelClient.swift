@@ -198,3 +198,27 @@ public struct LanguageModelClient: Sendable {
         return text.isEmpty ? "no details" : text
     }
 }
+
+public extension LanguageModelClient {
+    /// Sends a tiny structured request to check the URL, key, and model
+    /// (Settings ▸ AI ▸ Test Connection). Returns the round-trip time.
+    func testConnection(configuration: ProviderConfiguration, apiKey: String?) async throws -> Double {
+        let request = StructuredRequest(
+            system: "Answer with JSON only.",
+            user: "Reply with ok set to true.",
+            schemaName: "connection_test",
+            schema: [
+                "type": "object",
+                "properties": ["ok": ["type": "boolean"]],
+                "required": ["ok"],
+                "additionalProperties": false,
+            ],
+            maxOutputTokens: 2_000
+        )
+        let response = try await complete(request, configuration: configuration, apiKey: apiKey)
+        guard (try? JSONValue.parse(Data(response.content.utf8)))?["ok"] != nil else {
+            throw ProviderError.invalidResponse("the model didn't follow the JSON schema")
+        }
+        return response.latency
+    }
+}

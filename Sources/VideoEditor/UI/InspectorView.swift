@@ -3,7 +3,7 @@ import DesignSystem
 import ImageIO
 import SwiftUI
 
-/// The inspector's panes (PRD VE-15). One is on screen at a time, so each
+/// The inspector's panes (PRD VE-17). One is on screen at a time, so each
 /// edit is scanned and applied on its own; a rail on the trailing edge
 /// switches them.
 enum InspectorSection: String, CaseIterable, Identifiable {
@@ -61,7 +61,8 @@ extension VideoEditorModel {
     func hasEdits(in section: InspectorSection) -> Bool {
         switch section {
         case .autoEdit: project.autoEdit != nil
-        case .transcript, .camera: false
+        case .transcript: false
+        case .camera: !project.cameraLayouts.isEmpty || project.camera?.background.isActive == true
         case .captions: project.captions?.isEnabled == true
         case .background: project.background.hasFill
         case .zoom: !project.zooms.isEmpty
@@ -605,6 +606,10 @@ private struct CameraSection: View {
     @Bindable var model: VideoEditorModel
 
     private var camera: CameraOverlay { model.project.camera ?? .standard }
+    /// Shown somewhere: as usual, or where a layout fills the frame with it.
+    private var showsCamera: Bool {
+        CameraLayoutMath.showsCamera(segments: model.project.cameraLayouts, isVisible: camera.isVisible)
+    }
 
     private func set(_ change: @escaping (inout CameraOverlay) -> Void) {
         model.edit { project in
@@ -618,6 +623,7 @@ private struct CameraSection: View {
         Section {
             Toggle("Show Camera", isOn: Binding(get: { camera.isVisible }, set: { value in set { $0.isVisible = value } }))
         }
+        CameraLayoutSection(model: model)
         Section("Look") {
             Group {
                 FittingSegmentedPicker("Shape", selection: Binding(get: { camera.shape }, set: { shape in set { $0.shape = shape } })) {
@@ -637,9 +643,10 @@ private struct CameraSection: View {
                     camera.size = size
                     project.camera = camera
                 }
-                Toggle("Mirror", isOn: Binding(get: { camera.isMirrored }, set: { value in set { $0.isMirrored = value } }))
             }
             .disabled(!camera.isVisible)
+            Toggle("Mirror", isOn: Binding(get: { camera.isMirrored }, set: { value in set { $0.isMirrored = value } }))
+                .disabled(!showsCamera)
         }
         if model.isAutoEditAvailable {
             Section("Background") {
@@ -654,7 +661,7 @@ private struct CameraSection: View {
                     onEditingChanged: { began in began ? model.beginContinuousEdit() : model.endContinuousEdit() }
                 )
             }
-            .disabled(!camera.isVisible)
+            .disabled(!showsCamera)
         }
         Section("Position") {
             Group {
@@ -667,6 +674,40 @@ private struct CameraSection: View {
                     .foregroundStyle(.secondary)
             }
             .disabled(!camera.isVisible)
+        }
+    }
+}
+
+/// Camera Only and Screen Only stretches (CAM-6): add at the playhead, or
+/// change the one selected on the timeline.
+private struct CameraLayoutSection: View {
+    @Bindable var model: VideoEditorModel
+
+    var body: some View {
+        Section {
+            if let segment = model.selectedCameraLayout {
+                FittingSegmentedPicker("Layout", selection: Binding(get: { segment.layout }, set: { model.setSelectedCameraLayout($0) })) {
+                    ForEach(CameraLayoutSegment.Layout.allCases) { Text($0.title).tag($0) }
+                }
+                LabeledContent("Time") {
+                    Text("\(Format.time(segment.range.start)) – \(Format.time(segment.range.end))").monospacedDigit()
+                }
+                Button("Remove Layout", systemImage: "trash", role: .destructive, action: model.removeSelectedCameraLayout)
+                    .help("Remove this layout — ⌫")
+            } else {
+                HStack(spacing: PK.Spacing.s) {
+                    ForEach(CameraLayoutSegment.Layout.allCases) { layout in
+                        Button(layout.title, systemImage: layout.symbol) { model.addCameraLayoutAtPlayhead(layout) }
+                            .help("\(layout.title) from the playhead")
+                    }
+                }
+            }
+        } header: {
+            Text("Layout")
+        } footer: {
+            Text("Fill the frame with the camera, or show only the screen, from the playhead. The camera eases between layouts; drag a layout on the timeline to move it or change its length.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }

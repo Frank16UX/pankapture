@@ -132,6 +132,9 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
     public var splits: [Double]
     /// The webcam layer, for recordings with a camera track (ADR-25).
     public var camera: CameraOverlay?
+    /// Where the camera fills the frame or is hidden (PRD CAM-6), sorted,
+    /// never overlapping.
+    public var cameraLayouts: [CameraLayoutSegment]
     /// Auto-edit's suggestions (PRD §5.11), on their own layer: the
     /// timeline removes what's enabled there on top of `cuts`.
     public var autoEdit: AutoEditLayer?
@@ -155,6 +158,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         zoomFillsFrame: Bool = false,
         splits: [Double] = [],
         camera: CameraOverlay? = nil,
+        cameraLayouts: [CameraLayoutSegment] = [],
         autoEdit: AutoEditLayer? = nil,
         transcript: Transcript? = nil,
         captions: CaptionSettings? = nil,
@@ -172,6 +176,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         self.zoomFillsFrame = zoomFillsFrame
         self.splits = splits
         self.camera = camera
+        self.cameraLayouts = cameraLayouts
         self.autoEdit = autoEdit
         self.transcript = transcript
         self.captions = captions
@@ -180,7 +185,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case version, sourceURL, sourceDuration, trim, cuts, zooms, speedSegments, background, trackVolumes
-        case zoomFillsFrame, splits, camera, autoEdit, transcript, captions, voice
+        case zoomFillsFrame, splits, camera, cameraLayouts, autoEdit, transcript, captions, voice
     }
 
     /// Keys added after version 1 are optional, so older saved projects open.
@@ -198,6 +203,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         zoomFillsFrame = try container.decodeIfPresent(Bool.self, forKey: .zoomFillsFrame) ?? false
         splits = try container.decodeIfPresent([Double].self, forKey: .splits) ?? []
         camera = try container.decodeIfPresent(CameraOverlay.self, forKey: .camera)
+        cameraLayouts = try container.decodeIfPresent([CameraLayoutSegment].self, forKey: .cameraLayouts) ?? []
         autoEdit = try container.decodeIfPresent(AutoEditLayer.self, forKey: .autoEdit)
         transcript = try container.decodeIfPresent(Transcript.self, forKey: .transcript)
         captions = try container.decodeIfPresent(CaptionSettings.self, forKey: .captions)
@@ -244,7 +250,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
 
     /// True when nothing was changed (export can be a straight copy).
     public var isUnedited: Bool {
-        cuts.isEmpty && zooms.isEmpty && speedSegments.isEmpty && camera?.isVisible != true
+        cuts.isEmpty && zooms.isEmpty && speedSegments.isEmpty && camera?.isVisible != true && cameraLayouts.isEmpty
             && (autoEdit.map { $0.cuts.isEmpty && $0.speedSegments.isEmpty } ?? true)
             && !(captions?.isEnabled == true && transcript != nil)
             && voice?.isActive != true
@@ -292,6 +298,12 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         }
         speedSegments = speedSegments.compactMap { segment in
             guard let range = segment.range.clamped(to: full) else { return nil }
+            var segment = segment
+            segment.range = range
+            return segment
+        }
+        cameraLayouts = cameraLayouts.compactMap { segment in
+            guard let range = segment.range.clamped(to: full), range.duration > 0 else { return nil }
             var segment = segment
             segment.range = range
             return segment

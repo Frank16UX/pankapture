@@ -58,10 +58,11 @@ SF Symbols only, hierarchical rendering, medium weight, 15 pt in toolbars (`PK.M
 | `Metrics.toolbarOffset` | 8 | gap between selection and toolbars |
 | `Metrics.railWidth` / `railItemHeight` | 64 / 46 | inspector pane rail and its items |
 | `Metrics.inspectorWidth` | 320 | inspector pane content |
+| `Metrics.floatingPanelWidth` | 248 | floating options panel beside a canvas |
 
 All rounded shapes use `.continuous` corners (squircles), like the system.
 
-Segmented pickers in fixed-width panels (inspector, recording options, toolbar popovers) use `FittingSegmentedPicker`, which falls back to a menu when the segments don't fit. A segmented control never shrinks below its natural size, and the system draws segments larger on newer releases, so one that fits today can overflow and clip on the next.
+Segmented pickers in fixed-width panels (inspector, recording options, toolbar popovers, sheets) use `FittingSegmentedPicker`, which steps down to the small control size when the regular segments don't fit, so every option stays visible. A segmented control never shrinks below its minimum size, and the system draws segments larger on newer releases, so one that fits today can overflow and clip on the next. Don't fall back to a menu: it hides the options.
 
 ## 6. Motion
 
@@ -101,10 +102,19 @@ The spatial model users already know, with modern visuals:
 - Selection: 1 pt white stroke + 0.5 pt dark outer hairline (visible on any background), 8 square handles (`Overlay.handleSize`).
 - Loupe (during drag): 120 pt circle, 8× pixel grid, center pixel outlined, hex color and coordinates below.
 
+### Image editor
+The canvas fills the window under a full-width toolbar; two `pkSurface()` panels float on it, top-aligned with `Spacing.m` margins: the tools bar on the leading edge and the background panel (`Metrics.floatingPanelWidth`) on the trailing edge. The background panel shows only its Background switch while the background is off and grows to its Fill and Layout options when it's on (`Motion.standard`). Inside, options are plain rows (label on the leading edge, control on the trailing edge) in one grid, so every label lines up, under small secondary section titles, split by dividers: no grouped `Form`, so there are no cards inside the panel. Fill has the same styles as the video editor's background (Color with Transparent first, Gradient with editable colors and angle, Media for a picture, also by drop); switching styles restores the last fill of that style. The canvas stays fitted to the window as the background, padding, aspect, or window size change, until the user zooms by hand.
+
 ### Video editor inspector
 One pane at a time, so each kind of edit is scanned and applied on its own. A rail on the trailing edge (`Metrics.railWidth`) lists the panes as an SF Symbol over a short label; the current one is tinted with the accent color, and a small accent dot marks panes with edits in the video. The pane (`Metrics.inspectorWidth`) has a title bar and a grouped `Form` split into small titled sections (Fill / Frame, Selected Zoom / Add Zooms…). Selecting something on the timeline opens the pane that edits it.
 
 Auto-Edit has two steps, Setup and Review, in a segmented control in the title bar. The review is a list of cards: kind icon in its group color, title, time, and the words around the suggestion with the removed part struck through. Only the selected card opens up (reason, choices, Play); the rest stay one or two lines. Filter chips by kind and up / down arrows step through them one at a time.
+
+### Loading and opening
+A window opens at once, as a skeleton of what it will show: the editor's layout in `.quaternary` rounded shapes (radius `Radius.control`), the preview black like the player. Content replaces it without a transition. A wait under a second shows nothing more; past 400 ms a single spinner with a one-line status ("Loading the recording…") fades in (`Motion.standard`) where the content will appear, in the preview, never as a separate sheet or alert. A screenshot shows the capture itself instead of a skeleton. Choosing something that's already open brings its window forward.
+
+### Camera layouts
+The camera lane sits under the zoom lane and uses its block style: Camera Only in teal, Screen Only in gray, each with its symbol and title. In the preview the camera eases between its bubble and the full frame over 0.4 s with the zoom curve: the rect, corner radius and shadow change together, so it reads as one object growing, not a cut.
 
 ### Quick-access thumbnail
 A rounded (`Radius.thumbnail`) image card with a soft shadow, sliding in from the chosen corner (`Motion.emphasized`). On hover: material scrim with icon buttons. It's draggable as a file.
@@ -113,7 +123,9 @@ A rounded (`Radius.thumbnail`) image card with a soft shadow, sliding in from th
 A compact horizontal `pkSurface()` bar: red record dot + monospaced timer, pause, restart, mic mute, stop. It's excluded from the recording. The menu bar icon mirrors the timer.
 
 ### Settings
-A native `Settings` scene with `Form` and `.formStyle(.grouped)` (System Settings look). Tabs: General, Shortcuts, Permissions, then Screenshots, Recording, and History as features land.
+A native `Settings` scene with `Form` and `.formStyle(.grouped)` (System Settings look). Tabs: General, Shortcuts, Permissions, then Screenshots, Recording, History, and AI as features land.
+
+The AI tab is a list of the added providers, one grouped section (card) each: the name and what it offers, Remove, the key ("Saved in your Keychain" with Replace) or server URL, and Test Connection. **Add Provider…** is the tab's one prominent button and opens a sheet: a provider picker, the key or URL, and a link to get a key. A Defaults section at the end holds the same Judged by, Reasoning effort and Transcription pickers as the editor's Auto-Edit pane. Model menus list names only; the chosen model's price is the Price row under its picker (input and output per 1M tokens, or per hour of audio, and an estimate per 15-minute recording). More Models… compares prices: a sortable table (model, input, output, per 15 minutes) with search and a field for any model ID.
 
 ### Library
 `NavigationSplitView`: sidebar filters (All, Screenshots, Recordings, GIFs, date groups), adaptive grid of thumbnails, `.searchable` for OCR search, inspector for metadata.

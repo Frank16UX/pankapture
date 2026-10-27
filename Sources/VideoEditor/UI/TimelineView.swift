@@ -5,7 +5,7 @@ import DesignSystem
 import SwiftUI
 
 /// Maps source seconds ↔ x positions across the timeline's width, for the
-/// part of the source on screen (`start` and `span`, VE-14).
+/// part of the source on screen (`start` and `span`, VE-16).
 struct TimelineScale {
     var duration: Double
     var width: CGFloat
@@ -54,6 +54,37 @@ struct TimelineScale {
     func isVisible(_ range: TimeRange) -> Bool {
         range.end >= start && range.start <= end
     }
+
+    /// Where a lane draws a block for `range`, cut a little past the lane's
+    /// ends: zoomed in, a block can run far off screen, and drawn whole it
+    /// would be thousands of points wide (VE-16).
+    func block(_ range: TimeRange, minimumWidth: CGFloat = 0) -> LaneBlock {
+        let margin: CGFloat = 24
+        let left = x(range.start), right = x(range.end)
+        let shownLeft = max(left, inset - margin)
+        let shownRight = min(right, inset + usableWidth + margin)
+        return LaneBlock(
+            x: shownLeft,
+            width: max(minimumWidth, shownRight - shownLeft),
+            hidden: max(0, inset - shownLeft),
+            showsStart: left >= inset - 0.5,
+            showsEnd: right <= inset + usableWidth + 0.5
+        )
+    }
+}
+
+/// A block as drawn on a lane (`TimelineScale.block`).
+struct LaneBlock: Equatable {
+    var x: CGFloat
+    var width: CGFloat
+    /// How much of its left side is off the lane: labels move past it.
+    var hidden: CGFloat
+    /// Whether its ends are on screen, and so get grips.
+    var showsStart: Bool
+    var showsEnd: Bool
+
+    /// The part on the lane.
+    var visibleWidth: CGFloat { width - hidden }
 }
 
 /// Hides what a zoomed lane draws past its ends. Unzoomed, `pad` leaves
@@ -84,23 +115,29 @@ struct TimelineView: View {
     static let rulerHeight: CGFloat = 22
     static let filmstripHeight: CGFloat = 56
     static let zoomLaneHeight: CGFloat = 30
+    static let cameraLaneHeight: CGFloat = 30
     static let audioLaneHeight: CGFloat = 34
     static let autoEditLaneHeight: CGFloat = 22
     static let scrollerHeight: CGFloat = 8
 
+    private var hasCameraLane: Bool { model.media?.camera != nil }
+
     private var totalHeight: CGFloat {
         let audio = CGFloat(model.visibleAudioTracks.count)
         let autoEdit: CGFloat = model.project.autoEdit == nil ? 0 : 1
+        let camera: CGFloat = hasCameraLane ? 1 : 0
         let lanes = Self.rulerHeight + Self.filmstripHeight + Self.zoomLaneHeight + audio * Self.audioLaneHeight
-            + autoEdit * Self.autoEditLaneHeight + Self.scrollerHeight
-        return lanes + PK.Spacing.xs * (3 + audio + autoEdit)
+            + autoEdit * Self.autoEditLaneHeight + camera * Self.cameraLaneHeight + Self.scrollerHeight
+        return lanes + PK.Spacing.xs * (3 + audio + autoEdit + camera)
     }
 
     var body: some View {
         GeometryReader { geometry in
             let scale = TimelineScale(duration: model.duration, width: geometry.size.width, inset: Self.inset,
                                       viewport: model.timelineViewport)
-            VStack(spacing: PK.Spacing.xs) {
+            // Leading-aligned and exactly as wide as the timeline, so a lane
+            // drawing past its ends can't center (shift) the others.
+            VStack(alignment: .leading, spacing: PK.Spacing.xs) {
                 RulerLane(model: model, scale: scale)
                     .frame(height: Self.rulerHeight)
                 FilmstripLane(model: model, scale: scale)
@@ -111,6 +148,10 @@ struct TimelineView: View {
                 }
                 ZoomLane(model: model, scale: scale)
                     .frame(height: Self.zoomLaneHeight)
+                if hasCameraLane {
+                    CameraLayoutLane(model: model, scale: scale)
+                        .frame(height: Self.cameraLaneHeight)
+                }
                 ForEach(model.visibleAudioTracks) { track in
                     WaveformLane(model: model, scale: scale, track: track)
                         .frame(height: Self.audioLaneHeight)
@@ -118,6 +159,7 @@ struct TimelineView: View {
                 TimelineScroller(model: model, scale: scale)
                     .frame(height: Self.scrollerHeight)
             }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
             .overlay(alignment: .topLeading) {
                 Playhead(model: model, scale: scale, height: geometry.size.height - Self.scrollerHeight - PK.Spacing.xs)
                     .allowsHitTesting(false)
@@ -138,7 +180,7 @@ struct TimelineView: View {
     }
 
     /// ⌘-scroll (or pinch) zooms around the pointer; once zoomed, plain
-    /// scrolling pans (VE-14). Returns whether the event was used.
+    /// scrolling pans (VE-16). Returns whether the event was used.
     private func handleScroll(_ event: NSEvent, x: CGFloat, scale: TimelineScale) -> Bool {
         let anchor = scale.time(x)
         switch event.type {
@@ -169,7 +211,7 @@ struct TimelineView: View {
 }
 
 /// Where the zoomed timeline is within the whole source: drag the thumb or
-/// click the track to scroll (VE-14). Empty when the whole source shows.
+/// click the track to scroll (VE-16). Empty when the whole source shows.
 private struct TimelineScroller: View {
     @Bindable var model: VideoEditorModel
     let scale: TimelineScale
@@ -381,30 +423,36 @@ private struct FilmstripLane: View {
             }
 
             ForEach(model.project.cuts.filter(scale.isVisible), id: \.self) { cut in
-                CutMarker(isSelected: model.selectedCut == cut)
-                    .frame(width: max(2, scale.width(cut)), height: TimelineView.filmstripHeight)
-                    .offset(x: scale.x(cut.start))
+                let shown = scale.block(cut, minimumWidth: 2)
+                CutMarker(isSelected: model.selectedCut == cut, hatchPhase: shown.x - scale.x(cut.start))
+                    .frame(width: shown.width, height: TimelineView.filmstripHeight)
+                    .offset(x: shown.x)
                     .allowsHitTesting(false)
             }
 
             // The selected cut's edges move (AE-8).
             if let cut = model.selectedCut {
-                CutEdgeHandle()
-                    .offset(x: scale.x(cut.start) - CutEdgeHandle.width / 2)
-                    .gesture(cutEdgeGesture(cut, isStart: true))
-                    .accessibilityLabel("Cut start")
-                CutEdgeHandle()
-                    .offset(x: scale.x(cut.end) - CutEdgeHandle.width / 2)
-                    .gesture(cutEdgeGesture(cut, isStart: false))
-                    .accessibilityLabel("Cut end")
+                if scale.isVisible(cut.start) {
+                    CutEdgeHandle()
+                        .offset(x: scale.x(cut.start) - CutEdgeHandle.width / 2)
+                        .gesture(cutEdgeGesture(cut, isStart: true))
+                        .accessibilityLabel("Cut start")
+                }
+                if scale.isVisible(cut.end) {
+                    CutEdgeHandle()
+                        .offset(x: scale.x(cut.end) - CutEdgeHandle.width / 2)
+                        .gesture(cutEdgeGesture(cut, isStart: false))
+                        .accessibilityLabel("Cut end")
+                }
             }
 
-            if let selection = model.selection {
+            if let selection = model.selection, scale.isVisible(selection) {
+                let shown = scale.block(selection, minimumWidth: 2)
                 RoundedRectangle(cornerRadius: 3)
                     .fill(Color.accentColor.opacity(0.22))
                     .strokeBorder(Color.accentColor, lineWidth: 1.5)
-                    .frame(width: max(2, scale.width(selection)), height: TimelineView.filmstripHeight)
-                    .offset(x: scale.x(selection.start))
+                    .frame(width: shown.width, height: TimelineView.filmstripHeight)
+                    .offset(x: shown.x)
                     .allowsHitTesting(false)
             }
 
@@ -555,6 +603,9 @@ private struct SplitMarker: View {
 /// Removed segment: hatched, tinted red.
 private struct CutMarker: View {
     let isSelected: Bool
+    /// How far right of the cut's start the marker begins (when its start
+    /// is off screen), so the hatching scrolls with the footage.
+    var hatchPhase: CGFloat = 0
 
     var body: some View {
         Canvas { context, size in
@@ -562,7 +613,7 @@ private struct CutMarker: View {
             context.fill(Path(rect), with: .color(Color(nsColor: .windowBackgroundColor).opacity(0.75)))
             context.fill(Path(rect), with: .color(.red.opacity(0.18)))
             var hatch = Path()
-            var x = -size.height
+            var x = -size.height - hatchPhase.truncatingRemainder(dividingBy: 7)
             while x < size.width {
                 hatch.move(to: CGPoint(x: x, y: size.height))
                 hatch.addLine(to: CGPoint(x: x + size.height, y: 0))
@@ -672,19 +723,19 @@ private struct AutoEditLane: View {
 
     private func blockView(_ block: Block) -> some View {
         let isSelected = model.selectedAutoItem == block.item
-        let width = max(3, scale.width(block.range))
+        let shown = scale.block(block.range, minimumWidth: 3)
         return RoundedRectangle(cornerRadius: 3, style: .continuous)
             .fill(block.group.color.opacity(block.applies ? (isSelected ? 0.95 : 0.7) : 0.12))
             .strokeBorder(isSelected ? Color.primary : block.group.color.opacity(block.applies ? 0 : 0.7), lineWidth: isSelected ? 1.5 : 1)
-            .frame(width: width, height: TimelineView.autoEditLaneHeight - 6)
+            .frame(width: shown.width, height: TimelineView.autoEditLaneHeight - 6)
             .overlay(alignment: .leading) {
-                if isSelected { edgeHandle(block, isStart: true).offset(x: -4) }
+                if isSelected, shown.showsStart { edgeHandle(block, isStart: true).offset(x: -4) }
             }
             .overlay(alignment: .trailing) {
-                if isSelected { edgeHandle(block, isStart: false).offset(x: 4) }
+                if isSelected, shown.showsEnd { edgeHandle(block, isStart: false).offset(x: 4) }
             }
             .contentShape(Rectangle().inset(by: -2))
-            .offset(x: scale.x(block.range.start), y: 3)
+            .offset(x: shown.x, y: 3)
             .onTapGesture { model.selectAutoItem(block.item) }
             .help(help(for: block))
             .accessibilityElement()
@@ -772,32 +823,33 @@ private struct ZoomLane: View {
 
     private func zoomBlock(_ zoom: ZoomSegment) -> some View {
         let isSelected = model.selectedZoomID == zoom.id
-        let width = max(EdgeHandle.width * 2, scale.width(zoom.range))
+        let isActive = isSelected || hoveredZoomID == zoom.id
+        let shown = scale.block(zoom.range, minimumWidth: EdgeHandle.width * 2)
         return RoundedRectangle(cornerRadius: 5, style: .continuous)
             .fill(Color.purple.opacity(isSelected ? 0.95 : 0.6))
             .strokeBorder(isSelected ? Color.white : .clear, lineWidth: 2)
             .overlay(alignment: .leading) {
-                if width > 56 {
+                if shown.visibleWidth > 56 {
                     Label(String(format: "%.1f×", zoom.scale), systemImage: zoom.isAutomatic ? "cursorarrow.click" : "plus.magnifyingglass")
                         .font(.caption2.weight(.semibold).monospacedDigit())
                         .foregroundStyle(.white)
                         .lineLimit(1)
-                        .padding(.leading, EdgeHandle.width + PK.Spacing.xxs)
+                        .padding(.leading, shown.hidden + EdgeHandle.width + PK.Spacing.xxs)
                         .allowsHitTesting(false)
                 }
             }
             .shadow(color: isSelected ? Color.purple.opacity(0.6) : .clear, radius: 4)
-            .frame(width: width, height: TimelineView.zoomLaneHeight - 4)
+            .frame(width: shown.width, height: TimelineView.zoomLaneHeight - 4)
             // Blocks are never narrower than both grips, so a short zoom can
             // still be resized.
             .overlay(alignment: .leading) {
-                if isSelected || hoveredZoomID == zoom.id { edgeHandle(zoom, isStart: true) }
+                if isActive, shown.showsStart { edgeHandle(zoom, isStart: true) }
             }
             .overlay(alignment: .trailing) {
-                if isSelected || hoveredZoomID == zoom.id { edgeHandle(zoom, isStart: false) }
+                if isActive, shown.showsEnd { edgeHandle(zoom, isStart: false) }
             }
             .contentShape(Rectangle())
-            .offset(x: scale.x(zoom.range.start), y: 2)
+            .offset(x: shown.x, y: 2)
             .onHover { hovering in
                 if hovering { hoveredZoomID = zoom.id } else if hoveredZoomID == zoom.id { hoveredZoomID = nil }
             }
@@ -878,7 +930,147 @@ private struct ZoomLane: View {
     }
 }
 
-/// Grip at either end of a zoom block: drag to change when it starts or stops.
+// MARK: Camera layout lane
+
+/// Where the camera fills the frame or is hidden (CAM-6).
+private struct CameraLayoutLane: View {
+    @Bindable var model: VideoEditorModel
+    let scale: TimelineScale
+
+    @State private var dragStart: CameraLayoutSegment?
+    @State private var hoveredID: CameraLayoutSegment.ID?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: PK.Radius.control, style: .continuous)
+                .fill(.quaternary.opacity(0.6))
+                .frame(width: scale.usableWidth, height: TimelineView.cameraLaneHeight)
+                .offset(x: scale.inset)
+                .overlay(alignment: .leading) {
+                    if model.project.cameraLayouts.isEmpty {
+                        Label("Camera — double-click for Camera Only at the playhead", systemImage: "person.crop.rectangle")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, scale.inset + PK.Spacing.s)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .onTapGesture(count: 2) { model.addCameraLayoutAtPlayhead(.fullFrame) }
+                .onTapGesture { model.selectedCameraLayoutID = nil }
+
+            ForEach(model.project.cameraLayouts.filter { scale.isVisible($0.range) }) { segment in
+                block(segment)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .mask(alignment: .topLeading) { LaneMask(scale: scale) }
+        .accessibilityLabel("Camera layouts")
+    }
+
+    private func color(_ layout: CameraLayoutSegment.Layout) -> Color {
+        layout == .fullFrame ? .teal : .gray
+    }
+
+    private func block(_ segment: CameraLayoutSegment) -> some View {
+        let isSelected = model.selectedCameraLayoutID == segment.id
+        let isActive = isSelected || hoveredID == segment.id
+        let shown = scale.block(segment.range, minimumWidth: EdgeHandle.width * 2)
+        let tint = color(segment.layout)
+        return RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(tint.opacity(isSelected ? 0.95 : 0.6))
+            .strokeBorder(isSelected ? Color.white : .clear, lineWidth: 2)
+            .overlay(alignment: .leading) {
+                if shown.visibleWidth > 56 {
+                    Label(segment.layout.title, systemImage: segment.layout.symbol)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .padding(.leading, shown.hidden + EdgeHandle.width + PK.Spacing.xxs)
+                        .allowsHitTesting(false)
+                }
+            }
+            .shadow(color: isSelected ? tint.opacity(0.6) : .clear, radius: 4)
+            .frame(width: shown.width, height: TimelineView.cameraLaneHeight - 4)
+            .overlay(alignment: .leading) {
+                if isActive, shown.showsStart { edgeHandle(segment, isStart: true) }
+            }
+            .overlay(alignment: .trailing) {
+                if isActive, shown.showsEnd { edgeHandle(segment, isStart: false) }
+            }
+            .contentShape(Rectangle())
+            .offset(x: shown.x, y: 2)
+            .onHover { hovering in
+                if hovering { hoveredID = segment.id } else if hoveredID == segment.id { hoveredID = nil }
+            }
+            .gesture(moveGesture(segment))
+            .simultaneousGesture(TapGesture().onEnded { select(segment) })
+            .help("Drag to move. Drag the ends to change the duration. ⌫ removes it.")
+            .accessibilityElement()
+            .accessibilityLabel("\(segment.layout.title) from \(Format.time(segment.range.start)) to \(Format.time(segment.range.end))")
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { select(segment) }
+            .accessibilityAction(named: "Remove") {
+                select(segment)
+                model.removeSelectedCameraLayout()
+            }
+    }
+
+    private func select(_ segment: CameraLayoutSegment) {
+        model.selectCameraLayout(segment.id)
+        // Show the layout in effect, past its transition.
+        model.seek(toSource: segment.range.start + min(CameraLayoutSegment.transition, segment.range.duration / 2))
+    }
+
+    private func edgeHandle(_ segment: CameraLayoutSegment, isStart: Bool) -> some View {
+        EdgeHandle(isStart: isStart)
+            .gesture(
+                DragGesture(minimumDistance: 1, coordinateSpace: .named(TimelineView.space))
+                    .onChanged { value in
+                        if dragStart == nil {
+                            dragStart = segment
+                            model.selectCameraLayout(segment.id)
+                            model.beginContinuousEdit()
+                        }
+                        guard let start = dragStart else { return }
+                        // Relative to where the edge was grabbed (no jump on click).
+                        let edge = isStart ? start.range.start : start.range.end
+                        let time = scale.time(scale.x(edge) + value.translation.width)
+                        var updated = start
+                        if isStart {
+                            updated.range.start = min(time, start.range.end - CameraLayoutSegment.minimumDuration)
+                        } else {
+                            updated.range.end = max(time, start.range.start + CameraLayoutSegment.minimumDuration)
+                        }
+                        model.edit { $0.updateCameraLayout(updated) }
+                    }
+                    .onEnded { _ in
+                        dragStart = nil
+                        model.endContinuousEdit()
+                    }
+            )
+            .accessibilityLabel(isStart ? "Layout start" : "Layout end")
+    }
+
+    private func moveGesture(_ segment: CameraLayoutSegment) -> some Gesture {
+        DragGesture(minimumDistance: 3)
+            .onChanged { value in
+                if dragStart == nil {
+                    dragStart = segment
+                    model.beginContinuousEdit()
+                }
+                guard let start = dragStart else { return }
+                let delta = scale.seconds(value.translation.width)
+                model.edit { $0.moveCameraLayout(start, by: delta) }
+            }
+            .onEnded { _ in
+                dragStart = nil
+                model.endContinuousEdit()
+            }
+    }
+}
+
+/// Grip at either end of a zoom or layout block: drag to change when it
+/// starts or stops.
 private struct EdgeHandle: View {
     static let width: CGFloat = 10
     let isStart: Bool

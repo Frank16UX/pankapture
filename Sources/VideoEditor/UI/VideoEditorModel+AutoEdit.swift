@@ -7,7 +7,7 @@ import Transcription
 /// Auto-edit actions (PRD §5.11): analysis, review toggles, pacing, and
 /// adjusting items. Every change is an undoable project edit.
 extension VideoEditorModel {
-    /// Smart editing needs macOS 26 (ADR-30).
+    /// Smart editing needs macOS 26 (ADR-31).
     var isAutoEditAvailable: Bool {
         if #available(macOS 26, *) { return true }
         return false
@@ -18,9 +18,37 @@ extension VideoEditorModel {
         return false
     }
 
-    /// The provider the next analysis will ask (Settings ▸ AI), if any.
+    var aiSettings: AISettings { .shared }
+
+    /// What the next analysis is judged by: this editor's choice, else
+    /// Settings ▸ AI's default; the rules when that provider isn't ready.
+    var autoEditJudge: Judge {
+        aiSettings.usable(judgeOverride ?? aiSettings.defaultJudge)
+    }
+
+    /// What the next analysis transcribes with (when it transcribes).
+    var autoEditTranscriber: Transcriber {
+        aiSettings.usable(transcriberOverride ?? aiSettings.defaultTranscriber)
+    }
+
+    /// The provider the next analysis will ask, if any.
     var autoEditProvider: ProviderConfiguration? {
-        ProviderSettings.active()?.configuration
+        guard case .model(let choice) = autoEditJudge else { return nil }
+        return aiSettings.configuration(for: choice)
+    }
+
+    /// Sets this editor's reasoning effort for its current model.
+    func setAutoEditEffort(_ effort: String?) {
+        guard case .model(var choice) = autoEditJudge else { return }
+        choice.effort = effort
+        judgeOverride = .model(choice)
+    }
+
+    /// Picks a model for this editor, with the effort recommended for it.
+    func pickAutoEditModel(_ model: ModelInfo, providerID: String) {
+        guard let provider = AIProvider.provider(id: providerID) else { return }
+        judgeOverride = .model(ModelChoice(providerID: providerID, model: model.id,
+                                           effort: aiSettings.recommendedEffort(model, provider: provider)))
     }
 
     // MARK: Analysis
@@ -33,8 +61,9 @@ extension VideoEditorModel {
         let url = sourceURL
         let language = autoEditLanguage
         UserDefaults.standard.set(language.rawValue, forKey: PreferenceKey.autoEditLanguage)
-        let provider = ProviderSettings.active()
-        let cloud = CloudTranscriptionSettings.active()
+        let provider = autoEditProvider
+        let cloudService = aiSettings.cloudService(for: autoEditTranscriber)
+        let cloudProviderID: String? = if case .cloud(let id, _) = autoEditTranscriber { id } else { nil }
         let corrected = project.transcript?.language == language ? project.transcript : nil
         let cached = retranscribe ? nil : (corrected ?? TranscriptStore.load(for: url, language: language))
         autoEditGeneration += 1
@@ -44,6 +73,16 @@ extension VideoEditorModel {
 
         // Detached: reading and analyzing audio blocks its thread.
         let work = Task.detached(priority: .userInitiated) { [weak self] () async throws -> AutoEditResult in
+            // Keys are read here, off the main actor: the first read after an
+            // update can wait on a Keychain prompt (ADR-41).
+            let cloud: CloudTranscription? = if let cloudService, let cloudProviderID {
+                AISettings.cloudTranscription(service: cloudService.service, model: cloudService.model, providerID: cloudProviderID)
+            } else {
+                nil
+            }
+            if cloudService != nil, cloud == nil, cached == nil {
+                throw ProviderError.missingKey(cloudService?.service.name ?? "The transcription service")
+            }
             let prepared = try await AutoEditAnalyzer.prepare(recordingAt: url, language: language, transcript: cached, cloud: cloud) { progress in
                 Task { @MainActor in self?.showAutoEditProgress(progress, language: language, generation: generation) }
             }
@@ -57,12 +96,12 @@ extension VideoEditorModel {
             guard let provider else {
                 return AutoEditResult(analysis: AutoEditAnalysis(rulesOnly: prepared.input), envelope: prepared.envelope, judgedBy: "Built-in rules", notice: nil)
             }
-            let name = provider.configuration.displayName
+            let name = provider.displayName
             await MainActor.run {
                 guard let self, self.autoEditGeneration == generation else { return }
                 self.autoEditState = .running(stage: "Asking \(name)…", fraction: nil)
             }
-            let outcome = try await ModelPass.run(prepared.input, configuration: provider.configuration, apiKey: provider.apiKey)
+            let outcome = try await ModelPass.run(prepared.input, configuration: provider, apiKey: AISettings.apiKey(for: provider.presetID))
             if let error = outcome.error {
                 return AutoEditResult(analysis: outcome.analysis, envelope: prepared.envelope, judgedBy: "Built-in rules",
                                       notice: "\(name) couldn't be used, so the built-in rules made these suggestions. \(error)")
@@ -113,7 +152,7 @@ extension VideoEditorModel {
         let stage = switch progress.stage {
         case .readingAudio: "Reading the microphone…"
         case .downloadingSpeechModel: "Downloading the \(language.englishName) speech model…"
-        case .transcribing: CloudTranscriptionSettings.active().map { "Transcribing with \($0.service.name)…" } ?? "Transcribing on this Mac…"
+        case .transcribing: aiSettings.cloudService(for: autoEditTranscriber).map { "Transcribing with \($0.service.name)…" } ?? "Transcribing on this Mac…"
         case .analyzing: "Finding pauses and mistakes…"
         case .askingModel: "Asking the AI provider…"
         }
@@ -180,6 +219,7 @@ extension VideoEditorModel {
         selection = nil
         selectedCut = nil
         selectedZoomID = nil
+        selectedCameraLayoutID = nil
         selectedAutoItem = item
         inspectorSection = .autoEdit
         autoEditPage = .review

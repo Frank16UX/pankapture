@@ -44,7 +44,7 @@ public enum AutoEditAnalyzer {
         language: TranscriptLanguage,
         transcript cached: Transcript? = nil,
         clicks: [Double]? = nil,
-        cloud: (service: CloudTranscriptionService, apiKey: String)? = nil,
+        cloud: CloudTranscription? = nil,
         progress: @escaping @Sendable (Progress) -> Void = { _ in }
     ) async throws -> Prepared {
         let signpostID = Log.signposter.makeSignpostID()
@@ -63,7 +63,7 @@ public enum AutoEditAnalyzer {
         } else if let cloud {
             progress(Progress(stage: .transcribing, fraction: 0))
             transcript = try await CloudTranscriber.transcribe(
-                audioFileAt: audio.url, language: language, service: cloud.service, apiKey: cloud.apiKey, timeOffset: audio.startTime
+                audioFileAt: audio.url, language: language, cloud: cloud, timeOffset: audio.startTime
             )
         } else {
             guard let locale = await OnDeviceTranscriber.locale(for: language) else {
