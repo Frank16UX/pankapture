@@ -11,7 +11,7 @@ import Transcription
 /// recording, so the views are exercised without a window on screen. Set
 /// `PK_SNAPSHOT_DIR` to also write the images there for a look.
 @MainActor
-@Suite("Auto-edit views")
+@Suite("Auto-edit views", .timeLimit(.minutes(2)))
 struct AutoEditViewTests {
     @Test func inspectorAndTimelineRender() async throws {
         let directory = try TestMovie.temporaryDirectory()
@@ -56,17 +56,17 @@ struct AutoEditViewTests {
             for (section, page) in [(InspectorSection.autoEdit, AutoEditPage.review), (.autoEdit, .setup), (.background, .setup), (.zoom, .setup)] {
                 model.inspectorSection = section
                 model.autoEditPage = page
-                let inspector = try render(InspectorView(model: model), size: CGSize(width: 390, height: 900),
-                                           appearance: appearance, name: "inspector-\(section.rawValue)-\(page)")
+                let inspector = try await render(InspectorView(model: model), size: CGSize(width: 390, height: 900),
+                                                 appearance: appearance, name: "inspector-\(section.rawValue)-\(page)")
                 #expect(Self.distinctColors(inspector) > 20)
             }
             model.timelineViewport = TimelineViewport(zoom: 3, start: 4)
-            let zoomed = try render(TimelineView(model: model).padding(16), size: CGSize(width: 900, height: 270),
-                                    appearance: appearance, name: "timeline-zoomed")
+            let zoomed = try await render(TimelineView(model: model).padding(16), size: CGSize(width: 900, height: 270),
+                                          appearance: appearance, name: "timeline-zoomed")
             #expect(Self.distinctColors(zoomed) > 20)
             model.timelineViewport = TimelineViewport()
-            let timeline = try render(TimelineView(model: model).padding(16), size: CGSize(width: 900, height: 272),
-                                      appearance: appearance, name: "timeline")
+            let timeline = try await render(TimelineView(model: model).padding(16), size: CGSize(width: 900, height: 272),
+                                            appearance: appearance, name: "timeline")
             #expect(Self.distinctColors(timeline) > 20)
         }
         model.close()
@@ -146,12 +146,12 @@ struct AutoEditViewTests {
         model.undo()
 
         model.transcriptSelection = 2...3
-        let panel = try render(TranscriptPanel(model: model), size: CGSize(width: 340, height: 420), appearance: .aqua, name: "transcript")
+        let panel = try await render(TranscriptPanel(model: model), size: CGSize(width: 340, height: 420), appearance: .aqua, name: "transcript")
         #expect(Self.distinctColors(panel) > 3)
         model.close()
     }
 
-    @Test func cameraBackgroundControlsRender() throws {
+    @Test func cameraBackgroundControlsRender() async throws {
         let states: [(String, CameraBackground)] = [
             ("camera-background-blur", CameraBackground(effect: .blur)),
             ("camera-background-green-screen", CameraBackground(effect: .replace, matte: .greenScreen)),
@@ -162,21 +162,23 @@ struct AutoEditViewTests {
             for appearance in [NSAppearance.Name.aqua, .darkAqua] {
                 let form = Form { Section("Camera") { CameraBackgroundControls(background: .constant(background)) } }
                     .formStyle(.grouped)
-                let rep = try render(form, size: CGSize(width: 320, height: 380), appearance: appearance, name: name)
+                let rep = try await render(form, size: CGSize(width: 320, height: 380), appearance: appearance, name: name)
                 #expect(Self.distinctColors(rep) > 8)
             }
         }
     }
 
-    private func render(_ view: some View, size: CGSize, appearance: NSAppearance.Name, name: String) throws -> NSBitmapImageRep {
+    private func render(_ view: some View, size: CGSize, appearance: NSAppearance.Name, name: String) async throws -> NSBitmapImageRep {
         let host = NSHostingView(rootView: view.frame(width: size.width, height: size.height))
         host.frame = CGRect(origin: .zero, size: size)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.appearance = NSAppearance(named: appearance)
         window.contentView = host
         host.layoutSubtreeIfNeeded()
-        // Let SwiftUI apply state and the filmstrip load.
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        // Let SwiftUI apply state and the filmstrip load. Suspend rather than
+        // spin the run loop: spinning it from a main-actor test runs other
+        // main-queue work re-entrantly and deadlocked the suite on CI.
+        try await Task.sleep(for: .milliseconds(300))
         host.layoutSubtreeIfNeeded()
         let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: rep)
