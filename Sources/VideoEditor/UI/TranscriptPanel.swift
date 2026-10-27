@@ -4,55 +4,115 @@ import DesignSystem
 import SwiftUI
 import Transcription
 
-/// The transcript next to the preview (PRD AE-10): click a word to jump
-/// there; select words to cut, restore, zoom, or correct them (CAP-2).
-/// Removed words are struck through, tinted by why.
+/// The transcript pane (PRD AE-10, CAP-2): click a word to jump there;
+/// select words to cut, restore, zoom, or correct them. Double-click a word
+/// (or press Return on a selection) to fix it in place, or switch to Edit
+/// Text to rewrite freely. Removed words are struck through, tinted by why.
 struct TranscriptPanel: View {
     @Bindable var model: VideoEditorModel
 
-    @State private var correction = ""
-    @State private var correcting: ClosedRange<Int>?
+    @State private var isEditingText = false
+    @State private var draft = ""
 
     var body: some View {
         VStack(spacing: 0) {
             if let transcript = model.transcript {
                 header(transcript)
                 Divider()
-                TranscriptTextView(
-                    words: transcript.words,
-                    states: model.wordStates(),
-                    currentWord: model.wordIndex(atSource: model.playhead),
-                    followsPlayhead: model.isPlaying,
-                    selection: model.transcriptSelection,
-                    onClickWord: { model.seek(toWord: $0) },
-                    onSelect: { model.transcriptSelection = $0 }
-                )
-                Divider()
-                actionBar
+                if isEditingText {
+                    textEditor
+                } else {
+                    TranscriptTextView(
+                        words: transcript.words,
+                        states: model.wordStates(),
+                        currentWord: model.wordIndex(atSource: model.playhead),
+                        followsPlayhead: model.isPlaying,
+                        selection: model.transcriptSelection,
+                        correcting: model.wordsBeingCorrected,
+                        actions: actions
+                    )
+                    Divider()
+                    actionBar
+                }
             } else {
                 placeholder
             }
         }
-        .sheet(item: Binding(get: { correcting.map(Correction.init) }, set: { correcting = $0?.range })) { item in
-            correctionSheet(item.range)
-        }
+        .onChange(of: model.transcript == nil) { _, isGone in if isGone { isEditingText = false } }
     }
 
-    private struct Correction: Identifiable {
-        var range: ClosedRange<Int>
-        var id: Int { range.lowerBound * 100_000 + range.upperBound }
+    private var actions: TranscriptTextView.Actions {
+        TranscriptTextView.Actions(
+            clickWord: { model.seek(toWord: $0) },
+            select: { model.transcriptSelection = $0 },
+            beginCorrecting: { model.beginCorrecting($0) },
+            endCorrecting: { model.wordsBeingCorrected = nil },
+            cut: { model.cutWords($0) },
+            zoom: { model.zoomWords($0) },
+            isRemoved: { model.areWordsRemoved($0) },
+            correction: { range in
+                CorrectionPopover(
+                    original: model.transcript?.text(of: range) ?? "",
+                    otherOccurrences: model.otherOccurrences(of: range),
+                    onCorrect: { text, everywhere in model.correctWords(range, to: text, everywhere: everywhere) },
+                    onCancel: { model.wordsBeingCorrected = nil }
+                )
+            }
+        )
     }
 
     private func header(_ transcript: Transcript) -> some View {
-        HStack {
-            Text("\(transcript.words.count) words").font(.callout.weight(.medium))
+        HStack(spacing: PK.Spacing.s) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("\(transcript.words.count) words").font(.callout.weight(.medium))
+                Text("\(transcript.language.title) · \(transcript.engine == Transcript.onDeviceEngine ? "On this Mac" : transcript.engine)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
-            Text("\(transcript.language.title) · \(transcript.engine == Transcript.onDeviceEngine ? "On this Mac" : transcript.engine)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if isEditingText {
+                // No Return or Escape shortcuts: the text editor needs both.
+                Button("Cancel", role: .cancel) { isEditingText = false }
+                    .help("Discard the changes to the text")
+                Button("Done") {
+                    model.applyTranscriptText(draft)
+                    isEditingText = false
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .buttonStyle(.borderedProminent)
+                .help("Save the corrected text — ⌘↩")
+            } else {
+                Button("Edit Text", systemImage: "character.cursor.ibeam") {
+                    draft = TranscriptEditing.text(of: transcript.words, paragraphPause: TranscriptTextView.paragraphPause)
+                    model.transcriptSelection = nil
+                    isEditingText = true
+                }
+                .help("Rewrite the transcript where it misheard you. The video isn't changed; captions use the new words.")
+            }
         }
+        .controlSize(.small)
         .padding(.horizontal, PK.Spacing.m)
         .padding(.vertical, PK.Spacing.s)
+    }
+
+    /// Free editing (CAP-2): words you don't touch keep their timing; changed
+    /// words take the time of the words they replace.
+    private var textEditor: some View {
+        VStack(spacing: 0) {
+            TextEditor(text: $draft)
+                .font(.system(size: NSFont.systemFontSize + 1))
+                .scrollContentBackground(.hidden)
+                .padding(PK.Spacing.s)
+                .accessibilityLabel("Transcript text")
+            Divider()
+            Label("Fix misheard words. Cutting happens in the video, not here: deleting text only removes it from the captions.",
+                  systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, PK.Spacing.m)
+                .padding(.vertical, PK.Spacing.s)
+        }
     }
 
     @ViewBuilder private var actionBar: some View {
@@ -66,21 +126,17 @@ struct TranscriptPanel: View {
                 Button(removed ? "Restore" : "Cut", systemImage: removed ? "arrow.uturn.backward" : "scissors") {
                     model.cutWords(range)
                 }
-                .help(removed ? "Bring these words back — ⌫" : "Cut these words — ⌫")
+                .help(removed ? "Bring these words back — ⌫" : "Cut these words from the video — ⌫")
                 Button("Zoom", systemImage: "plus.magnifyingglass") { model.zoomWords(range) }
                     .help("Zoom in while these words play")
-                Button("Correct…", systemImage: "pencil") {
-                    correction = model.transcript?.text(of: range) ?? ""
-                    correcting = range
-                }
-                .help("Fix the transcript text (captions use it)")
+                Button("Correct", systemImage: "pencil") { model.beginCorrecting(range) }
+                    .help("Fix the words (captions use them) — ↩")
             }
-            .labelStyle(.iconOnly)
             .controlSize(.small)
             .padding(.horizontal, PK.Spacing.m)
             .padding(.vertical, PK.Spacing.s)
         } else {
-            Text("Click a word to jump there. Select words to cut, zoom, or correct them.")
+            Text("Click a word to jump there; double-click to correct it. Select words to cut, zoom, or correct them.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -100,50 +156,86 @@ struct TranscriptPanel: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             if model.isAutoEditAvailable {
-                Button("Analyze Recording", systemImage: "wand.and.sparkles") { model.runAutoEdit() }
-                    .disabled(model.isAutoEditRunning || model.media == nil)
+                Button("Analyze Recording", systemImage: "wand.and.sparkles") {
+                    model.inspectorSection = .autoEdit
+                    model.runAutoEdit()
+                }
+                .disabled(model.isAutoEditRunning || model.media == nil)
             }
         }
         .padding(PK.Spacing.l)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
 
-    private func correctionSheet(_ range: ClosedRange<Int>) -> some View {
-        VStack(alignment: .leading, spacing: PK.Spacing.m) {
-            Text("Correct the Transcript").font(.headline)
-            Text("Captions use the corrected words. The video isn't changed.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            TextField("Words", text: $correction, axis: .vertical)
-                .lineLimit(2...6)
+/// Fixes the selected words in place, anchored to them (CAP-2). "Correct
+/// All" also fixes every other place that reads the same, for a name the
+/// recognizer keeps mishearing.
+struct CorrectionPopover: View {
+    let original: String
+    let otherOccurrences: Int
+    let onCorrect: (String, Bool) -> Void
+    let onCancel: () -> Void
+
+    @State private var text = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PK.Spacing.s) {
+            Text("Correct").font(.headline)
+            TextField("Words", text: $text)
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 360)
+                .focused($isFocused)
+                .frame(width: 280)
+                .accessibilityLabel("Corrected words")
+            Text("Captions use the corrected words. The video isn't changed.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
             HStack {
-                Spacer()
-                Button("Cancel", role: .cancel) { correcting = nil }
+                Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Save") {
-                    model.correctWords(range, to: correction)
-                    correcting = nil
+                Spacer()
+                if otherOccurrences > 0 {
+                    Button("Correct All \(otherOccurrences + 1)") { onCorrect(text, true) }
+                        .help("Also correct the \(otherOccurrences) other place\(otherOccurrences == 1 ? "" : "s") that read “\(original)”")
                 }
-                .keyboardShortcut(.defaultAction)
+                Button("Correct") { onCorrect(text, false) }
+                    .keyboardShortcut(.defaultAction)
             }
+            .controlSize(.small)
         }
-        .padding(PK.Spacing.l)
+        .padding(PK.Spacing.m)
+        .onAppear {
+            text = original
+            isFocused = true
+        }
     }
 }
 
 /// A read-only `NSTextView` (TextKit 1) of the words: native selection and
 /// hit-testing, fast for thousands of words. The current word is a
-/// temporary attribute, so playback doesn't rebuild the text.
+/// temporary attribute, so playback doesn't rebuild the text. Corrections
+/// open in a popover anchored to the words.
 struct TranscriptTextView: NSViewRepresentable {
+    struct Actions {
+        var clickWord: (Int) -> Void
+        var select: (ClosedRange<Int>?) -> Void
+        var beginCorrecting: (ClosedRange<Int>) -> Void
+        var endCorrecting: () -> Void
+        var cut: (ClosedRange<Int>) -> Void
+        var zoom: (ClosedRange<Int>) -> Void
+        var isRemoved: (ClosedRange<Int>) -> Bool
+        var correction: (ClosedRange<Int>) -> CorrectionPopover
+    }
+
     var words: [TranscriptWord]
     var states: [VideoEditorModel.WordState]
     var currentWord: Int?
     var followsPlayhead: Bool
     var selection: ClosedRange<Int>?
-    var onClickWord: (Int) -> Void
-    var onSelect: (ClosedRange<Int>?) -> Void
+    /// Words whose correction popover is open.
+    var correcting: ClosedRange<Int>?
+    var actions: Actions
 
     /// A pause this long starts a new paragraph.
     static let paragraphPause = 1.5
@@ -181,6 +273,8 @@ struct TranscriptTextView: NSViewRepresentable {
         coordinator.parent = self
         guard let textView = coordinator.textView else { return }
         textView.onClick = { [weak coordinator] index in coordinator?.clicked(characterIndex: index) }
+        textView.onDoubleClick = { [weak coordinator] index in coordinator?.doubleClicked(characterIndex: index) }
+        textView.menuProvider = { [weak coordinator] index in coordinator?.menu(atCharacter: index) }
 
         if coordinator.words != words || coordinator.states != states {
             coordinator.rebuild(words: words, states: states)
@@ -190,10 +284,15 @@ struct TranscriptTextView: NSViewRepresentable {
             coordinator.highlight(currentWord, scroll: followsPlayhead)
         }
         coordinator.show(selection)
+        coordinator.showCorrection(correcting)
+    }
+
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        coordinator.showCorrection(nil)
     }
 
     @MainActor
-    final class Coordinator: NSObject, NSTextViewDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate, NSPopoverDelegate {
         var parent: TranscriptTextView?
         weak var textView: WordTextView?
         var words: [TranscriptWord] = []
@@ -286,7 +385,83 @@ struct TranscriptTextView: NSViewRepresentable {
 
         func clicked(characterIndex: Int) {
             guard let index = word(atCharacter: characterIndex) else { return }
-            parent?.onClickWord(index)
+            parent?.actions.clickWord(index)
+        }
+
+        func doubleClicked(characterIndex: Int) {
+            guard let index = word(atCharacter: characterIndex) else { return }
+            parent?.actions.beginCorrecting(index...index)
+        }
+
+        // MARK: Context menu
+
+        /// Correct, cut and zoom for the selected words, or for the word
+        /// under the pointer when it's outside the selection.
+        func menu(atCharacter characterIndex: Int) -> NSMenu? {
+            guard let parent, let clicked = word(atCharacter: characterIndex) else { return nil }
+            var range = clicked...clicked
+            if let selection = parent.selection, selection.contains(clicked) {
+                range = selection
+            } else {
+                parent.actions.select(range)
+            }
+            let actions = parent.actions
+            let removed = actions.isRemoved(range)
+            let menu = NSMenu()
+            menu.addItem(ClosureMenuItem(title: "Correct…", symbol: "pencil") { actions.beginCorrecting(range) })
+            menu.addItem(.separator())
+            menu.addItem(ClosureMenuItem(title: removed ? "Restore" : "Cut", symbol: removed ? "arrow.uturn.backward" : "scissors") {
+                actions.cut(range)
+            })
+            menu.addItem(ClosureMenuItem(title: "Zoom", symbol: "plus.magnifyingglass") { actions.zoom(range) })
+            return menu
+        }
+
+        // MARK: Correction popover
+
+        private var popover: NSPopover?
+        private var popoverRange: ClosedRange<Int>?
+        /// Set while the popover is closed on the model's behalf, so closing
+        /// doesn't report back.
+        private var isClosingPopover = false
+
+        func showCorrection(_ range: ClosedRange<Int>?) {
+            guard range != popoverRange else { return }
+            if let popover {
+                isClosingPopover = true
+                popover.close()
+                isClosingPopover = false
+                self.popover = nil
+            }
+            popoverRange = range
+            guard let range, let parent, let textView, let layout = textView.layoutManager, let container = textView.textContainer,
+                  let first = ranges[safe: range.lowerBound], let last = ranges[safe: range.upperBound] else { return }
+            let characters = NSRange(location: first.location, length: NSMaxRange(last) - first.location)
+            let glyphs = layout.glyphRange(forCharacterRange: characters, actualCharacterRange: nil)
+            // The first line of the words, so a long selection anchors at its start.
+            var lineRange = NSRange()
+            layout.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: &lineRange)
+            var rect = layout.boundingRect(forGlyphRange: NSIntersectionRange(glyphs, lineRange), in: container)
+            rect.origin.x += textView.textContainerOrigin.x
+            rect.origin.y += textView.textContainerOrigin.y
+            textView.scrollToVisible(rect)
+
+            let popover = NSPopover()
+            popover.behavior = .transient
+            popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            let host = NSHostingController(rootView: parent.actions.correction(range))
+            host.sizingOptions = .preferredContentSize
+            popover.contentViewController = host
+            popover.delegate = self
+            popover.show(relativeTo: rect, of: textView, preferredEdge: .maxY)
+            self.popover = popover
+        }
+
+        func popoverDidClose(_ notification: Notification) {
+            guard (notification.object as? NSPopover) === popover else { return }
+            popover = nil
+            popoverRange = nil
+            if !isClosingPopover { parent?.actions.endCorrecting() }
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -294,17 +469,20 @@ struct TranscriptTextView: NSViewRepresentable {
             let selected = textView.selectedRange()
             guard selected.length > 0, let first = word(atCharacter: selected.location),
                   let last = word(atCharacter: max(selected.location, NSMaxRange(selected) - 1)) else {
-                parent?.onSelect(nil)
+                parent?.actions.select(nil)
                 return
             }
-            parent?.onSelect(first...max(first, last))
+            parent?.actions.select(first...max(first, last))
         }
     }
 }
 
-/// Reports a click (no drag) on a word; selection works as usual.
+/// Reports a click (no drag) or a double-click on a word, and asks for the
+/// context menu; selection works as usual.
 final class WordTextView: NSTextView {
     var onClick: ((Int) -> Void)?
+    var onDoubleClick: ((Int) -> Void)?
+    var menuProvider: ((Int) -> NSMenu?)?
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
@@ -312,6 +490,37 @@ final class WordTextView: NSTextView {
         // `super` tracks the drag; a plain click leaves an empty selection.
         if selectedRange().length == 0, event.clickCount == 1 {
             onClick?(characterIndexForInsertion(at: point))
+        } else if event.clickCount == 2 {
+            onDoubleClick?(characterIndex(at: point))
         }
     }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        return menuProvider?(characterIndex(at: point)) ?? super.menu(for: event)
+    }
+
+    /// The character under `point` (not the insertion point between two).
+    private func characterIndex(at point: NSPoint) -> Int {
+        guard let layout = layoutManager, let container = textContainer else { return characterIndexForInsertion(at: point) }
+        let local = NSPoint(x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        return layout.characterIndex(for: local, in: container, fractionOfDistanceBetweenInsertionPoints: nil)
+    }
+}
+
+/// A menu item that runs a closure.
+private final class ClosureMenuItem: NSMenuItem {
+    private let handler: () -> Void
+
+    init(title: String, symbol: String, handler: @escaping () -> Void) {
+        self.handler = handler
+        super.init(title: title, action: #selector(run), keyEquivalent: "")
+        target = self
+        image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+    }
+
+    @available(*, unavailable)
+    required init(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    @objc private func run() { handler() }
 }

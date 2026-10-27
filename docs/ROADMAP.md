@@ -128,14 +128,19 @@ Auto-edit, captions, voice cleanup, and camera backgrounds (PRD §5.11–5.12), 
    - [x] Transcript panel: seek, select to cut, zoom from selection (AE-10)
    - [x] Stutters found from the audio (AE-5)
    - [x] Optional cloud transcription (AI-5)
+   - [x] Correct in a popover, Correct All, Edit Text mode (CAP-2) (needs QA: the popover's placement with a real mouse; Edit Text on a 15 min transcript)
 4. **Captions** ✅ (ADR-36)
    - [x] Cues, corrections, burned-in styles (CAP-1–CAP-3); .srt / .vtt (CAP-4)
 5. **Audio** ✅ (ADR-37) (needs QA: the presets by ear on a noisy real recording; a 15 min recording's processing time)
    - [x] Noise removal presets and normalization (AU-1–AU-3)
-6. **Camera** ✅ (ADR-38) (needs QA: a real person on camera in the preview and an export; edge flicker; preview speed on the M1)
+6. **Editor panels** ✅ (ADR-39) (needs QA: ⌘-scroll with a real mouse wheel and a trackpad; a 15 min recording zoomed in)
+   - [x] Timeline zoom: ⌘-scroll, pinch, slider, scroller, paging (VE-14)
+   - [x] One inspector pane at a time, rail with labels (VE-15)
+   - [x] Review inside Auto-Edit, synced with the timeline (AE-7)
+7. **Camera** ✅ (ADR-38) (needs QA: a real person on camera in the preview and an export; edge flicker; preview speed on the M1)
    - [x] Blur, replace, remove; green screen (CAM-1, CAM-2)
    - [x] Default background; Video Effects button (CAM-3, CAM-4)
-7. **Decide**
+8. **Decide**
    - [ ] Pick the default provider from the test split (PRD §11.7); record it as an ADR
 
 **QA:** a 15 min recording with about 400 cuts plays smoothly; joins don't click; deliberate pauses survive Tight pacing; a camera background on the M1 preview.

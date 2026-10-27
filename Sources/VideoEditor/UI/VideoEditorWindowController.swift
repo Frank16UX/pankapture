@@ -56,7 +56,7 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
         window.representedURL = key
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.minSize = NSSize(width: 900, height: 600)
+        window.minSize = NSSize(width: 1000, height: 600)
         window.setContentSize(NSSize(width: 1200, height: 780))
         // The autosave name can be used by one window at a time; extra editor
         // windows cascade from the first instead.
@@ -172,6 +172,10 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
 
         if flags == .command {
             switch key {
+            case "=", "+": model.zoomTimeline(by: 1.5)
+            case "-": model.zoomTimeline(by: 1 / 1.5)
+            case "0": model.fitTimeline()
+            case "1", "2", "3", "4", "5", "6", "7", "8", "9": model.showInspectorSection(number: Int(key) ?? 0)
             case "z": model.undo()
             case "s": model.save()
             case "x": model.cutSelection()
@@ -185,6 +189,11 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             model.redo()
             return true
         }
+        // ⌘+ arrives with Shift on most layouts.
+        if flags == [.command, .shift], key == "+" || key == "=" {
+            model.zoomTimeline(by: 1.5)
+            return true
+        }
         guard flags.subtracting(.shift).isEmpty else { return false }
 
         switch Int(event.keyCode) {
@@ -193,6 +202,9 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
         case kVK_RightArrow: flags.contains(.shift) ? model.jump(by: 1) : model.stepFrames(1)
         case kVK_Delete, kVK_ForwardDelete: model.deleteSelected()
         case kVK_Escape: model.clearSelection()
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            guard model.inspectorSection == .transcript, let words = model.transcriptSelection, !flags.contains(.shift) else { return false }
+            model.beginCorrecting(words)
         default:
             switch key {
             case "i": model.setTrimInAtPlayhead()

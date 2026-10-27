@@ -1,3 +1,4 @@
+import AppCore
 import AutoEdit
 import DesignSystem
 import SwiftUI
@@ -15,14 +16,15 @@ extension AutoEditGroup {
     }
 }
 
-/// Inspector section: run auto-edit and choose what applies (PRD AE-1–AE-3, AE-7).
+/// Auto-Edit's setup step: run the analysis and choose what applies (PRD
+/// AE-1–AE-3, AE-7). Reviewing the suggestions is the next step.
 struct AutoEditSection: View {
     @Bindable var model: VideoEditorModel
 
     private var layer: AutoEditLayer? { model.project.autoEdit }
 
     var body: some View {
-        Section {
+        Section("Analyze") {
             Picker("Language", selection: $model.autoEditLanguage) {
                 ForEach(TranscriptLanguage.allCases) { Text($0.title).tag($0) }
             }
@@ -64,8 +66,10 @@ struct AutoEditSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+        }
 
-            if let layer {
+        if let layer {
+            Section {
                 ForEach(AutoEditGroup.allCases) { group in
                     Toggle(isOn: Binding(
                         get: { layer.groups.contains(group) },
@@ -91,24 +95,25 @@ struct AutoEditSection: View {
                     Text("4× faster").tag(Double?.some(4))
                 }
                 .disabled(!layer.groups.contains(.pauses))
+            } header: {
+                Text("Apply")
+            } footer: {
+                Text("Kinds switched off stay in the review, dimmed, so you can still look at them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
+            Section("Result") {
                 LabeledContent("Removes") {
                     let removed = layer.removedDuration
                     let share = model.duration > 0 ? removed / model.duration : 0
                     Text("\(Format.time(removed)) (\(Format.percent(share)))").monospacedDigit()
                 }
                 LabeledContent("Judged by", value: layer.judgedBy)
-
+                Button("Review Suggestions", systemImage: "checklist") { model.autoEditPage = .review }
+                    .help("Go through the suggestions one at a time")
                 Button("Remove Auto-Edit", systemImage: "xmark.circle", role: .destructive, action: model.clearAutoEdit)
                     .help("Remove every suggestion. Your own cuts stay.")
-            }
-        } header: {
-            Text("Auto-Edit")
-        } footer: {
-            if layer != nil {
-                Text("Suggestions sit on their own layer. Click one on the timeline or below to review it, drag its edges to adjust it, or press ⌫ to restore it. [ and ] move the selected cut's edges to the playhead.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -162,13 +167,22 @@ struct CaptionsSection: View {
     }
 
     var body: some View {
-        Section("Captions") {
-            if model.transcript == nil {
+        if model.transcript == nil {
+            Section {
                 Text("Analyze the recording to get its transcript; captions are made from it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else {
+                Button("Analyze Recording", systemImage: "wand.and.sparkles") {
+                    model.inspectorSection = .autoEdit
+                    model.runAutoEdit()
+                }
+                .disabled(model.isAutoEditRunning)
+            }
+        } else {
+            Section {
                 Toggle("Show Captions", isOn: Binding(get: { settings.isEnabled }, set: { value in set { $0.isEnabled = value } }))
+            }
+            Section("Style") {
                 Group {
                     FittingSegmentedPicker("Style", selection: Binding(get: { settings.style }, set: { value in set { $0.style = value } })) {
                         ForEach(CaptionSettings.Style.allCases) { Text($0.title).tag($0) }
@@ -183,23 +197,32 @@ struct CaptionsSection: View {
                         ForEach(CaptionSettings.FileFormat.allCases) { Text($0.title).tag($0) }
                     }
                     .help("Also save the captions as a file next to exported MP4s")
-                    Text("Captions are burned into exports. Fix any word in the Transcript panel.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
                 .disabled(!settings.isEnabled)
+            }
+            Section {
+                Text("Captions are burned into exports. Fix a misheard word in the transcript.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Edit Transcript", systemImage: "text.quote") { model.inspectorSection = .transcript }
             }
         }
     }
 }
 
-/// Every suggestion, to check one by one (PRD AE-7). Removals switch on
-/// and off; pauses take a kind or "keep as is" (AE-8).
-struct AutoEditReviewSection: View {
+/// Auto-Edit's review step (PRD AE-7, AE-8): every suggestion as a card, in
+/// time order. The selected card opens up with the words around it, why it
+/// was suggested, and its choices; the rest stay one or two lines, so the
+/// list scans quickly. Picking a suggestion here or on the timeline selects
+/// it in both, and the arrows step through them one at a time.
+struct AutoEditReviewPane: View {
     @Bindable var model: VideoEditorModel
     let layer: AutoEditLayer
 
-    private enum Row: Identifiable {
+    @State private var filter: AutoEditGroup?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    enum Row: Identifiable {
         case removal(AutoEditLayer.Removal)
         case pause(AutoEditLayer.PauseItem)
 
@@ -216,108 +239,289 @@ struct AutoEditReviewSection: View {
             case .pause(let pause): pause.pause.range.start
             }
         }
+
+        var group: AutoEditGroup {
+            switch self {
+            case .removal(let removal): removal.group
+            case .pause: .pauses
+            }
+        }
     }
 
     /// Removals, and the pauses worth a decision: long ones, or ones the
-    /// pacing would cut.
-    private var rows: [Row] {
+    /// user already changed.
+    static func rows(_ layer: AutoEditLayer) -> [Row] {
         let removals = layer.removals.map(Row.removal)
         let pauses = layer.pauses.filter { $0.pause.duration >= ModelPass.minimumJudgedPause || $0.isUserEdited }.map(Row.pause)
         return (removals + pauses).sorted { $0.start < $1.start }
     }
 
+    static func itemCount(_ layer: AutoEditLayer) -> Int { rows(layer).count }
+
     var body: some View {
-        Section("Review") {
-            ForEach(rows) { row in
-                switch row {
-                case .removal(let removal): removalRow(removal)
-                case .pause(let pause): pauseRow(pause)
-                }
+        let all = Self.rows(layer)
+        let rows = filter.map { group in all.filter { $0.group == group } } ?? all
+        VStack(spacing: 0) {
+            summary(rows)
+            filterBar(all)
+            Divider()
+            if rows.isEmpty {
+                emptyState
+            } else {
+                list(rows)
             }
         }
     }
 
-    private func removalRow(_ removal: AutoEditLayer.Removal) -> some View {
-        let isSelected = model.selectedAutoItem == .removal(removal.id)
-        let applies = removal.isEnabled && layer.groups.contains(removal.group)
-        return HStack(alignment: .top, spacing: PK.Spacing.s) {
-            Image(systemName: removal.group.systemImage)
-                .foregroundStyle(removal.group.color)
-                .frame(width: 16)
-            VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
-                HStack {
-                    Text(removal.suggestion.kind.title).font(.callout.weight(.medium))
-                    Spacer()
-                    Text(Format.time(removal.range.start)).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }
-                if !removal.text.isEmpty {
-                    Text("“\(removal.text)”")
-                        .font(.caption)
-                        .strikethrough(applies)
-                        .lineLimit(2)
-                }
-                Text(removal.suggestion.reason)
-                    .font(.caption2)
+    // MARK: Header
+
+    private func summary(_ rows: [Row]) -> some View {
+        let ids = rows.map(\.id)
+        let position = model.selectedAutoItem.flatMap(ids.firstIndex(of:))
+        let removed = layer.removedDuration
+        let share = model.duration > 0 ? removed / model.duration : 0
+        return HStack(spacing: PK.Spacing.s) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Removes \(Format.time(removed))")
+                    .font(.callout.weight(.medium).monospacedDigit())
+                Text("\(Format.percent(share)) of the recording")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
             }
-            Toggle("Remove", isOn: Binding(get: { removal.isEnabled }, set: { model.setRemoval(removal.id, isEnabled: $0) }))
-                .labelsHidden()
-                .toggleStyle(.checkbox)
-                .help(removal.isEnabled ? "Keep this part instead" : "Remove this part")
+            Spacer(minLength: PK.Spacing.s)
+            Text(position.map { "\($0 + 1) of \(ids.count)" } ?? "\(ids.count) to review")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+            ControlGroup {
+                Button("Previous", systemImage: "chevron.up") { model.selectAutoItem(after: -1, in: ids) }
+                    .disabled(ids.isEmpty || position == 0)
+                    .help("Previous suggestion")
+                Button("Next", systemImage: "chevron.down") { model.selectAutoItem(after: 1, in: ids) }
+                    .disabled(ids.isEmpty || position == ids.count - 1)
+                    .help("Next suggestion")
+            }
+            .labelStyle(.iconOnly)
+            .controlSize(.small)
+            .fixedSize()
         }
-        .padding(.vertical, 2)
-        .listRowBackground(isSelected ? Color.accentColor.opacity(0.15) : nil)
-        .opacity(layer.groups.contains(removal.group) ? 1 : 0.5)
-        .contentShape(Rectangle())
-        .onTapGesture { model.selectAutoItem(.removal(removal.id)) }
-        .accessibilityElement(children: .combine)
-        .accessibilityAction(named: removal.isEnabled ? "Keep" : "Remove") { model.setRemoval(removal.id, isEnabled: !removal.isEnabled) }
+        .padding(.horizontal, PK.Spacing.l)
+        .padding(.vertical, PK.Spacing.s)
     }
 
-    private func pauseRow(_ item: AutoEditLayer.PauseItem) -> some View {
-        let isSelected = model.selectedAutoItem == .pause(item.id)
-        let cut = item.cut(pacing: layer.pacing)
-        return HStack(alignment: .top, spacing: PK.Spacing.s) {
-            Image(systemName: AutoEditGroup.pauses.systemImage)
-                .foregroundStyle(AutoEditGroup.pauses.color)
-                .frame(width: 16)
-            VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
-                HStack {
-                    Text(String(format: "%.1f s pause", item.pause.duration))
-                        .font(.callout.weight(.medium))
-                        .fixedSize()
-                    Spacer()
-                    Text(Format.time(item.pause.range.start))
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                        .fixedSize()
+    /// Filter by kind: all, or one group, with how many each holds.
+    private func filterBar(_ all: [Row]) -> some View {
+        HStack(spacing: PK.Spacing.xs) {
+            chip(nil, count: all.count)
+            ForEach(AutoEditGroup.allCases) { group in
+                let count = all.filter { $0.group == group }.count
+                if count > 0 { chip(group, count: count) }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, PK.Spacing.l)
+        .padding(.bottom, PK.Spacing.s)
+    }
+
+    private func chip(_ group: AutoEditGroup?, count: Int) -> some View {
+        let isOn = filter == group
+        return Button {
+            filter = group
+        } label: {
+            HStack(spacing: PK.Spacing.xxs) {
+                if let group {
+                    Image(systemName: group.systemImage)
+                        .foregroundStyle(group.color)
+                } else {
+                    Text("All")
                 }
-                HStack {
-                    Picker("Kind", selection: Binding(get: { item.pause.kind }, set: { model.setPauseKind(item.id, kind: $0) })) {
-                        ForEach(PauseKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                Text("\(count)").monospacedDigit()
+            }
+            .font(.caption.weight(isOn ? .semibold : .regular))
+            .padding(.horizontal, PK.Spacing.s)
+            .padding(.vertical, PK.Spacing.xxs + 1)
+            .background(Capsule().fill(isOn ? AnyShapeStyle(Color.accentColor.opacity(0.18)) : AnyShapeStyle(.quinary)))
+            .overlay(Capsule().strokeBorder(isOn ? Color.accentColor : .clear, lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .help(group.map { "Show only \($0.title.lowercased())" } ?? "Show every suggestion")
+        .accessibilityLabel("\(group?.title ?? "All"), \(count)")
+        .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: PK.Spacing.s) {
+            Image(systemName: "checkmark.circle")
+                .font(.title)
+                .foregroundStyle(.secondary)
+            Text(filter == nil ? "Nothing to review" : "None of this kind")
+                .font(.headline)
+            Text("Auto-Edit found no pauses or mistakes worth a decision here.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .padding(PK.Spacing.xl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: List
+
+    private func list(_ rows: [Row]) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: PK.Spacing.xs) {
+                    ForEach(rows) { row in
+                        ReviewCard(model: model, layer: layer, row: row, isSelected: model.selectedAutoItem == row.id)
+                            .id(row.id)
                     }
-                    .labelsHidden()
-                    .controlSize(.small)
-                    .fixedSize()
-                    .help(item.pause.kindSource == .user ? "Your choice" : "Judged by \(item.pause.kindSource == .model ? layer.judgedBy : "the built-in rules")")
-                    Spacer()
-                    Toggle("Keep as is", isOn: Binding(get: { item.keepsLength }, set: { model.setPause(item.id, keepsLength: $0) }))
-                        .toggleStyle(.checkbox)
-                        .controlSize(.small)
-                        .help("Keep this pause as recorded")
                 }
-                Text(item.keepsLength ? "Kept as recorded" : cut.map { String(format: "Shortened by %.1f s", $0.duration) } ?? "Kept")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                .padding(PK.Spacing.m)
+            }
+            // A pick on the timeline shows here: the filter makes room for
+            // it and the list scrolls it into view.
+            .onChange(of: model.selectedAutoItem, initial: true) { _, item in
+                guard let item else { return }
+                if let filter, rows.first(where: { $0.id == item })?.group != filter {
+                    self.filter = nil
+                }
+                withAnimation(reduceMotion ? nil : PK.Motion.standard) {
+                    proxy.scrollTo(item, anchor: .center)
+                }
             }
         }
-        .padding(.vertical, 2)
-        .listRowBackground(isSelected ? Color.accentColor.opacity(0.15) : nil)
-        .opacity(layer.groups.contains(.pauses) ? 1 : 0.5)
+    }
+}
+
+/// One suggestion in the review.
+private struct ReviewCard: View {
+    @Bindable var model: VideoEditorModel
+    let layer: AutoEditLayer
+    let row: AutoEditReviewPane.Row
+    let isSelected: Bool
+
+    private var groupApplies: Bool { layer.groups.contains(row.group) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PK.Spacing.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: PK.Spacing.s) {
+                Image(systemName: row.group.systemImage)
+                    .foregroundStyle(row.group.color)
+                    .frame(width: 16)
+                Text(title)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                Spacer(minLength: PK.Spacing.xs)
+                Text(Format.time(row.start))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                if case .removal(let removal) = row {
+                    Toggle("Remove", isOn: Binding(get: { removal.isEnabled }, set: { model.setRemoval(removal.id, isEnabled: $0) }))
+                        .labelsHidden()
+                        .toggleStyle(.checkbox)
+                        .help(removal.isEnabled ? "Keep this part instead" : "Remove this part")
+                }
+            }
+            context
+                .font(.callout)
+                .lineLimit(isSelected ? nil : 2)
+                .padding(.leading, 16 + PK.Spacing.s)
+            if isSelected { details.padding(.leading, 16 + PK.Spacing.s) }
+        }
+        .padding(PK.Spacing.s)
+        .background {
+            RoundedRectangle(cornerRadius: PK.Radius.thumbnail, style: .continuous)
+                .fill(isSelected ? AnyShapeStyle(Color.accentColor.opacity(0.12)) : AnyShapeStyle(.quinary))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: PK.Radius.thumbnail, style: .continuous)
+                .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 1.5)
+        }
+        .opacity(groupApplies ? 1 : 0.55)
         .contentShape(Rectangle())
-        .onTapGesture { model.selectAutoItem(.pause(item.id)) }
+        .onTapGesture { if !isSelected { model.selectAutoItem(row.id) } }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(String(format: "%.1f second pause, %@", item.pause.duration, item.pause.kind.title))
+        .accessibilityLabel("\(title) at \(Format.time(row.start))")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAction(named: "Select") { model.selectAutoItem(row.id) }
+    }
+
+    private var title: String {
+        switch row {
+        case .removal(let removal): removal.suggestion.kind.title
+        case .pause(let item): String(format: "%.1f s pause", item.pause.duration)
+        }
+    }
+
+    /// The words around the suggestion; what it removes is struck through.
+    private var context: Text {
+        let range: TimeRange
+        let inside: Text
+        switch row {
+        case .removal(let removal):
+            range = removal.range
+            let applies = removal.isEnabled && groupApplies
+            let words = removal.text.isEmpty ? "(no words)" : removal.text
+            inside = Text(words).strikethrough(applies, color: row.group.color).foregroundStyle(applies ? .secondary : .primary)
+        case .pause(let item):
+            range = item.pause.range
+            let cut = item.keepsLength ? nil : item.cut(pacing: layer.pacing)
+            let label = cut.map { String(format: "%.1f s → %.1f s", item.pause.duration, item.pause.duration - $0.duration) } ?? "kept"
+            inside = Text(" ⏸ \(label) ").foregroundStyle(row.group.color)
+        }
+        let around = model.words(around: range, count: isSelected ? 8 : 4)
+        let before = around.before.isEmpty ? Text("") : Text("…\(around.before) ").foregroundStyle(.secondary)
+        let after = around.after.isEmpty ? Text("") : Text(" \(around.after)…").foregroundStyle(.secondary)
+        return Text("\(before)\(inside)\(after)")
+    }
+
+    @ViewBuilder private var details: some View {
+        switch row {
+        case .removal(let removal):
+            Text(removal.suggestion.reason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: PK.Spacing.s) {
+                playButton(removal.range)
+                Spacer()
+                Button(removal.isEnabled ? "Keep It" : "Remove It",
+                       systemImage: removal.isEnabled ? "arrow.uturn.backward" : "scissors") {
+                    model.setRemoval(removal.id, isEnabled: !removal.isEnabled)
+                }
+                .help(removal.isEnabled ? "Keep this part — ⌫" : "Remove this part")
+            }
+            .controlSize(.small)
+        case .pause(let item):
+            HStack {
+                Picker("Kind", selection: Binding(get: { item.pause.kind }, set: { model.setPauseKind(item.id, kind: $0) })) {
+                    ForEach(PauseKind.allCases, id: \.self) { Text($0.title).tag($0) }
+                }
+                .fixedSize()
+                .help(item.pause.kindSource == .user ? "Your choice" : "Judged by \(item.pause.kindSource == .model ? layer.judgedBy : "the built-in rules")")
+                Spacer()
+                Toggle("Keep as is", isOn: Binding(get: { item.keepsLength }, set: { model.setPause(item.id, keepsLength: $0) }))
+                    .toggleStyle(.checkbox)
+                    .help("Keep this pause as recorded — ⌫")
+            }
+            .controlSize(.small)
+            HStack {
+                playButton(item.pause.range)
+                Spacer()
+            }
+            .controlSize(.small)
+        }
+        if !groupApplies {
+            Text("\(row.group.title) are switched off in Setup, so this isn't applied.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func playButton(_ range: TimeRange) -> some View {
+        Button("Play", systemImage: "play.fill") {
+            model.seek(toSource: max(0, range.start - 1.5))
+            model.play()
+        }
+        .help("Play from just before it — Space")
     }
 }

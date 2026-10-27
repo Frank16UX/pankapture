@@ -85,6 +85,7 @@ extension VideoEditorModel {
                 self.transcriptSelection = nil
                 self.autoEditNotice = result.notice
                 self.autoEditState = .idle
+                if !result.analysis.suggestions.isEmpty || !result.analysis.pauses.isEmpty { self.autoEditPage = .review }
                 let count = result.analysis.suggestions.count
                 Log.editor.info("Auto-edit: \(count) suggestions, \(result.analysis.pauses.count) pauses (\(result.judgedBy, privacy: .public))")
             } catch {
@@ -123,6 +124,7 @@ extension VideoEditorModel {
     /// Removes auto-edit's layer: every suggestion goes; the user's own cuts stay.
     func clearAutoEdit() {
         selectedAutoItem = nil
+        autoEditPage = .setup
         edit { $0.autoEdit = nil }
     }
 
@@ -171,15 +173,28 @@ extension VideoEditorModel {
         }
     }
 
-    /// Selects an item and plays from just before it.
+    /// Selects an item and moves the playhead to just before it. Wherever
+    /// it was picked (timeline or review list), the other one shows it too:
+    /// the inspector opens Auto-Edit's review, the timeline scrolls to it.
     func selectAutoItem(_ item: AutoEditItem) {
         selection = nil
         selectedCut = nil
         selectedZoomID = nil
         selectedAutoItem = item
+        inspectorSection = .autoEdit
+        autoEditPage = .review
         if let range = project.autoEdit?.range(of: item) {
+            revealOnTimeline(range)
             seek(toSource: max(0, range.start - 0.6))
         }
+    }
+
+    /// Selects the suggestion `offset` places after (or before) the selected
+    /// one in `items`, for stepping through the review one at a time.
+    func selectAutoItem(after offset: Int, in items: [AutoEditItem]) {
+        guard !items.isEmpty else { return }
+        let index = selectedAutoItem.flatMap(items.firstIndex(of:)).map { $0 + offset } ?? (offset > 0 ? 0 : items.count - 1)
+        selectAutoItem(items[index.clamped(to: 0...(items.count - 1))])
     }
 
     /// ⌫ on an item: brings back what it removed.

@@ -117,12 +117,13 @@ Answers are checked: schema, word ranges, overlaps, and a cap of 35% removed. An
 - **Re-running the analysis** replaces only items the user hasn't changed.
 - **Rebuilds:** the editor decides whether to rebuild the preview by comparing `Timeline`s, since the layer's derived cuts and speeds aren't stored.
 
-**ADR-35: The transcript is part of the project; the panel is a read-only text view.**
+**ADR-35: The transcript is part of the project; the panel is a read-only text view with in-place corrections.**
 - **Where it lives:** the working transcript (recognized words plus the user's corrections, CAP-2) is stored in `VideoEditProject.transcript`. Corrections therefore follow Save, drafts and undo (ADR-24). Arrays are copy-on-write, so undo snapshots share the words.
 - **Re-runs:** auto-edit reuses the project's transcript, so a re-run keeps corrections. "Transcribe again" ignores it.
 - **Corrections:** a corrected phrase keeps its time span. Each new word gets a share of the span in proportion to its length, so captions stay in sync.
 - **The panel:** an `NSTextView` with TextKit 1, not a SwiftUI flow of thousands of views. Selection and hit-testing come for free; word ranges map characters to words; the playing word is a temporary attribute, so playback never rebuilds the text.
-- **Keys:** the editor's key monitor treats the read-only text view as not editing text, so space, ⌫ and undo keep working; ⌫ on selected words cuts them, or restores them if they're already removed.
+- **Keys:** the editor's key monitor treats the read-only text view as not editing text, so space, ⌫ and undo keep working; ⌫ on selected words cuts them, or restores them if they're already removed. Return on selected words opens the correction popover.
+- **Correcting (CAP-2):** double-click, Return or the context menu opens an `NSPopover` anchored to the words' first line. **Correct All** finds every other run that reads the same (`TranscriptWord.bare`, so case and punctuation don't matter) and keeps each one's own trailing punctuation. **Edit Text** swaps in a plain text editor; on Done, `TranscriptEditing` diffs the old and new words (`CollectionDifference`): unchanged words keep their times, each changed run takes the span of the run it replaced, and added words go into the silence beside them or share the previous word's time. Deleting text removes words from the transcript, never footage. Either way it's one undo step.
 - **Cloud transcription (AI-5):** `CloudTranscriber` compresses the microphone track to 16 kHz AAC and posts it to ElevenLabs (`scribe_v2`, verbatim by default) or an OpenAI-compatible Whisper endpoint. Whisper's word list lacks punctuation, so punctuation is aligned back from its full text.
 - **Stutters from audio (AE-5):** short words the recognizer stretched far beyond the speaker's pace, with a silence inside, are offered (switched off) as possible merged repeats.
 
@@ -159,6 +160,13 @@ Answers are checked: schema, word ranges, overlaps, and a cap of 35% removed. An
 - **Default (CAM-3):** `PreferenceKey.recordingCameraBackground` holds a JSON `CameraBackground`. `VideoEditProject.initial` seeds the camera with it, so the automatic camera composite (ADR-25) gets it too.
 - **Camera saved in the video:** post effects are impossible. The recording options open the system's Video Effects menu instead (CAM-4).
 - **Fallback if it's too slow on the M1:** precompute a time-smoothed matte track once, cached like the processed voice, and have the compositor only read it.
+
+**ADR-39: The inspector shows one pane at a time; the timeline has its own viewport.**
+- **Panes (VE-15):** `InspectorSection` lists the panes; `VideoEditorModel.inspectorSection` is the one on screen, chosen from a labeled icon rail on the trailing edge. Labels make the panes readable at a glance; the rail replaces the long stack of form sections and the old Inspector / Transcript switch. A dot marks panes with edits in the video.
+- **Selection opens its pane:** the timeline's gestures set the pane (zoom → Zoom, cut → Cuts, auto-edit item → Auto-Edit's review). `selectAutoItem` is the single path for both the lane and the review list, so each shows what the other picked: the review scrolls to the card, and the timeline reveals the item.
+- **Review is a step of Auto-Edit (AE-7):** `autoEditPage` switches Setup and Review; a finished analysis opens Review. The review is a lazy list of cards (hundreds of items stay cheap) with the words around each suggestion, found by binary search over the transcript.
+- **Timeline viewport (VE-14):** `TimelineViewport` (zoom, start) is view state, not part of the project or undo. `TimelineScale` maps the visible window, so every lane and drag keeps working in seconds; lanes skip and mask items outside it. Scroll-wheel and pinch events come from a local event monitor owned by a background view of the timeline, because SwiftUI has no modifier-aware scroll hook and an overlay would take clicks and drags from the lanes. ⌘-scroll zooms by the physical direction (`isDirectionInvertedFromDevice`), so "away from you" zooms in whatever the scrolling setting.
+- **Playback paging:** the player's time observer moves the viewport only when the playhead leaves it, so the lanes don't re-render 30 times a second.
 
 **ADR-33: Prompts and the default provider are chosen by an offline evaluation.** `pankapture-eval` (`make eval`) is a separate executable target, not part of the app bundle. It runs the app's analysis and prompt over labeled recordings kept outside the repo (PRD §11), caching each sample's transcript. It scores mistakes (by overlap, ±0.3 s), content lost, false positives on controls, and pause intent against a pass bar. The report carries a fingerprint of the prompt and schema, so runs can be compared.
 

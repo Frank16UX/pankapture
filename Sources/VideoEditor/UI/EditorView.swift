@@ -1,17 +1,10 @@
 import DesignSystem
 import SwiftUI
 
-/// Root of the editor window: preview + transport + timeline, inspector on the
-/// trailing side, actions in the window toolbar.
+/// Root of the editor window: preview + transport + timeline, inspector (with
+/// its pane rail) on the trailing side, actions in the window toolbar.
 struct EditorView: View {
     @Bindable var model: VideoEditorModel
-
-    private enum TrailingPanel: String, CaseIterable {
-        case inspector = "Inspector"
-        case transcript = "Transcript"
-    }
-
-    @State private var trailing = TrailingPanel.inspector
 
     var body: some View {
         HStack(spacing: 0) {
@@ -26,24 +19,9 @@ struct EditorView: View {
 
             Divider()
 
-            VStack(spacing: 0) {
-                if model.isAutoEditAvailable {
-                    Picker("Panel", selection: $trailing) {
-                        ForEach(TrailingPanel.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .padding(PK.Spacing.s)
-                    Divider()
-                }
-                switch trailing {
-                case .inspector: InspectorView(model: model)
-                case .transcript: TranscriptPanel(model: model)
-                }
-            }
-            .frame(width: trailing == .transcript ? 340 : 300)
+            InspectorView(model: model)
         }
-        .frame(minWidth: 900, minHeight: 600)
+        .frame(minWidth: 1000, minHeight: 600)
         .navigationTitle(model.sourceURL.deletingPathExtension().lastPathComponent)
         .toolbar { toolbarContent }
         .sheet(isPresented: $model.isShowingExportSheet) {

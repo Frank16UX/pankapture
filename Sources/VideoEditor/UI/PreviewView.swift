@@ -332,7 +332,52 @@ struct TransportBar: View {
                 .labelStyle(.iconOnly)
                 .buttonStyle(PKToolButtonStyle())
                 .help("Trim End at Playhead — O")
+
+            Divider().frame(height: 16)
+
+            TimelineZoomControl(model: model)
         }
         .controlSize(.small)
+    }
+}
+
+/// Timeline zoom (VE-14): out, a slider, in, and fit. ⌘-scroll or pinch
+/// over the timeline does the same around the pointer.
+private struct TimelineZoomControl: View {
+    @Bindable var model: VideoEditorModel
+
+    /// The slider moves on a log scale, so each step zooms by the same factor.
+    private var position: Binding<Double> {
+        Binding {
+            let maximum = TimelineViewport.maximumZoom(duration: model.duration)
+            return maximum > 1 ? log(model.timelineViewport.zoom) / log(maximum) : 0
+        } set: { value in
+            let maximum = TimelineViewport.maximumZoom(duration: model.duration)
+            model.setTimelineZoom(exp(value * log(maximum)))
+        }
+    }
+
+    var body: some View {
+        let viewport = model.timelineViewport
+        let canZoom = TimelineViewport.maximumZoom(duration: model.duration) > 1
+        HStack(spacing: PK.Spacing.xxs) {
+            Button("Zoom Out", systemImage: "minus.magnifyingglass") { model.zoomTimeline(by: 1 / 1.5) }
+                .disabled(!viewport.isZoomed)
+                .help("Zoom Out the Timeline — ⌘−")
+            Slider(value: position, in: 0...1)
+                .frame(width: 80)
+                .accessibilityLabel("Timeline zoom")
+                .accessibilityValue(String(format: "%.1f×", viewport.zoom))
+                .help("Zoom the timeline. ⌘-scroll or pinch over it to zoom around the pointer.")
+            Button("Zoom In", systemImage: "plus.magnifyingglass") { model.zoomTimeline(by: 1.5) }
+                .disabled(viewport.zoom >= TimelineViewport.maximumZoom(duration: model.duration) - 0.001)
+                .help("Zoom In the Timeline — ⌘=")
+            Button("Zoom to Fit", systemImage: "arrow.left.and.right") { model.fitTimeline() }
+                .disabled(!viewport.isZoomed)
+                .help("Show the Whole Timeline — ⌘0")
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(PKToolButtonStyle())
+        .disabled(!canZoom || model.media == nil)
     }
 }

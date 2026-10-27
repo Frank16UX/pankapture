@@ -56,6 +56,8 @@ SF Symbols only, hierarchical rendering, medium weight, 15 pt in toolbars (`PK.M
 | `Radius.panel` | 16 | panels, pinned image corners |
 | `Metrics.toolButton` | 28 | toolbar hit target |
 | `Metrics.toolbarOffset` | 8 | gap between selection and toolbars |
+| `Metrics.railWidth` / `railItemHeight` | 64 / 46 | inspector pane rail and its items |
+| `Metrics.inspectorWidth` | 320 | inspector pane content |
 
 All rounded shapes use `.continuous` corners (squircles), like the system.
 
@@ -98,6 +100,11 @@ The spatial model users already know, with modern visuals:
 - **Smart placement:** prefer right/below; flip to left/above or inside the selection when there's no room; never cross a display edge.
 - Selection: 1 pt white stroke + 0.5 pt dark outer hairline (visible on any background), 8 square handles (`Overlay.handleSize`).
 - Loupe (during drag): 120 pt circle, 8× pixel grid, center pixel outlined, hex color and coordinates below.
+
+### Video editor inspector
+One pane at a time, so each kind of edit is scanned and applied on its own. A rail on the trailing edge (`Metrics.railWidth`) lists the panes as an SF Symbol over a short label; the current one is tinted with the accent color, and a small accent dot marks panes with edits in the video. The pane (`Metrics.inspectorWidth`) has a title bar and a grouped `Form` split into small titled sections (Fill / Frame, Selected Zoom / Add Zooms…). Selecting something on the timeline opens the pane that edits it.
+
+Auto-Edit has two steps, Setup and Review, in a segmented control in the title bar. The review is a list of cards: kind icon in its group color, title, time, and the words around the suggestion with the removed part struck through. Only the selected card opens up (reason, choices, Play); the rest stay one or two lines. Filter chips by kind and up / down arrows step through them one at a time.
 
 ### Quick-access thumbnail
 A rounded (`Radius.thumbnail`) image card with a soft shadow, sliding in from the chosen corner (`Motion.emphasized`). On hover: material scrim with icon buttons. It's draggable as a file.

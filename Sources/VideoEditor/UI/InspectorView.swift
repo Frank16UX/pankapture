@@ -3,33 +3,209 @@ import DesignSystem
 import ImageIO
 import SwiftUI
 
-/// Trailing inspector: auto-edit (PRD §5.11), background (VE-6), zoom
-/// (VE-4/5), speed (VE-11), audio (VE-7), and the list of cuts (VE-3).
+/// The inspector's panes (PRD VE-15). One is on screen at a time, so each
+/// edit is scanned and applied on its own; a rail on the trailing edge
+/// switches them.
+enum InspectorSection: String, CaseIterable, Identifiable {
+    case autoEdit, transcript, captions, background, zoom, speed, camera, audio, cuts
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .autoEdit: "Auto-Edit"
+        case .transcript: "Transcript"
+        case .captions: "Captions"
+        case .background: "Background"
+        case .zoom: "Zoom"
+        case .speed: "Speed"
+        case .camera: "Camera"
+        case .audio: "Audio"
+        case .cuts: "Cuts"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .autoEdit: "wand.and.sparkles"
+        case .transcript: "text.quote"
+        case .captions: "captions.bubble"
+        case .background: "square.on.square"
+        case .zoom: "plus.magnifyingglass"
+        case .speed: "gauge.with.dots.needle.67percent"
+        case .camera: "web.camera"
+        case .audio: "waveform"
+        case .cuts: "scissors"
+        }
+    }
+}
+
+/// Auto-Edit's two steps: set up and run the analysis, then review it.
+enum AutoEditPage: Hashable {
+    case setup, review
+}
+
+extension VideoEditorModel {
+    /// The panes this recording offers, in rail order.
+    var inspectorSections: [InspectorSection] {
+        InspectorSection.allCases.filter { section in
+            switch section {
+            case .autoEdit, .transcript, .captions: isAutoEditAvailable
+            case .camera: media?.camera != nil
+            default: true
+            }
+        }
+    }
+
+    /// Whether a pane holds edits that change the video (the rail's dot).
+    func hasEdits(in section: InspectorSection) -> Bool {
+        switch section {
+        case .autoEdit: project.autoEdit != nil
+        case .transcript, .camera: false
+        case .captions: project.captions?.isEnabled == true
+        case .background: project.background.hasFill
+        case .zoom: !project.zooms.isEmpty
+        case .speed: !project.speedSegments.isEmpty
+        case .audio: project.voice?.isActive == true
+        case .cuts: !project.cuts.isEmpty
+        }
+    }
+
+    /// ⌘1…⌘9: the pane at that place on the rail.
+    func showInspectorSection(number: Int) {
+        guard let section = inspectorSections[safe: number - 1] else { return }
+        inspectorSection = section
+    }
+}
+
+/// Trailing inspector: the chosen pane, with the rail beside it.
 struct InspectorView: View {
     @Bindable var model: VideoEditorModel
 
     var body: some View {
-        Form {
-            if model.isAutoEditAvailable {
-                AutoEditSection(model: model)
-                CaptionsSection(model: model)
-                if let layer = model.project.autoEdit {
-                    AutoEditReviewSection(model: model, layer: layer)
+        let sections = model.inspectorSections
+        let current = sections.contains(model.inspectorSection) ? model.inspectorSection : (sections.first ?? .background)
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                header(current)
+                Divider()
+                pane(current)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(width: PK.Metrics.inspectorWidth)
+            .disabled(model.media == nil)
+            Divider()
+            InspectorRail(model: model, sections: sections, current: current)
+        }
+    }
+
+    private func header(_ section: InspectorSection) -> some View {
+        HStack(spacing: PK.Spacing.s) {
+            Text(section.title)
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: PK.Spacing.s)
+            if section == .autoEdit, let layer = model.project.autoEdit {
+                Picker("Step", selection: $model.autoEditPage) {
+                    Text("Setup").tag(AutoEditPage.setup)
+                    Text("Review \(AutoEditReviewPane.itemCount(layer))").tag(AutoEditPage.review)
                 }
-            }
-            BackgroundSection(model: model)
-            ZoomSection(model: model)
-            SpeedSection(model: model)
-            if model.media?.camera != nil {
-                CameraSection(model: model)
-            }
-            AudioSection(model: model)
-            if !model.project.cuts.isEmpty {
-                CutsSection(model: model)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .controlSize(.small)
             }
         }
-        .formStyle(.grouped)
-        .disabled(model.media == nil)
+        .padding(.horizontal, PK.Spacing.l)
+        .frame(height: 40)
+    }
+
+    @ViewBuilder private func pane(_ section: InspectorSection) -> some View {
+        switch section {
+        case .autoEdit:
+            if let layer = model.project.autoEdit, model.autoEditPage == .review {
+                AutoEditReviewPane(model: model, layer: layer)
+            } else {
+                form { AutoEditSection(model: model) }
+            }
+        case .transcript: TranscriptPanel(model: model)
+        case .captions: form { CaptionsSection(model: model) }
+        case .background: form { BackgroundSection(model: model) }
+        case .zoom: form { ZoomSection(model: model) }
+        case .speed: form { SpeedSection(model: model) }
+        case .camera: form { CameraSection(model: model) }
+        case .audio: form { AudioSection(model: model) }
+        case .cuts: form { CutsSection(model: model) }
+        }
+    }
+
+    private func form<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        Form(content: content).formStyle(.grouped)
+    }
+}
+
+/// The pane switcher: an icon with a short label per pane, so the panes
+/// read at a glance. A dot marks panes with edits in the video.
+private struct InspectorRail: View {
+    @Bindable var model: VideoEditorModel
+    let sections: [InspectorSection]
+    let current: InspectorSection
+
+    @State private var hovered: InspectorSection?
+
+    var body: some View {
+        VStack(spacing: PK.Spacing.xxs) {
+            ForEach(Array(sections.enumerated()), id: \.element) { index, section in
+                item(section, shortcut: index < 9 ? index + 1 : nil)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, PK.Spacing.s)
+        .frame(width: PK.Metrics.railWidth)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Inspector panes")
+    }
+
+    private func item(_ section: InspectorSection, shortcut: Int?) -> some View {
+        let isCurrent = section == current
+        return Button {
+            model.inspectorSection = section
+        } label: {
+            VStack(spacing: PK.Spacing.xxs) {
+                Image(systemName: section.systemImage)
+                    .font(.system(size: PK.Metrics.toolIcon))
+                    .frame(height: 20)
+                Text(section.title)
+                    .font(.system(size: 10, weight: isCurrent ? .semibold : .regular))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(isCurrent ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.secondary))
+            .frame(width: PK.Metrics.railWidth - PK.Spacing.s, height: PK.Metrics.railItemHeight)
+            .background {
+                RoundedRectangle(cornerRadius: PK.Radius.control, style: .continuous)
+                    .fill(isCurrent ? AnyShapeStyle(Color.accentColor.opacity(0.14))
+                          : hovered == section ? AnyShapeStyle(.quaternary) : AnyShapeStyle(.clear))
+            }
+            .overlay(alignment: .topTrailing) {
+                if model.hasEdits(in: section) {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 5, height: 5)
+                        .padding(PK.Spacing.xs + 2)
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering { hovered = section } else if hovered == section { hovered = nil }
+        }
+        .help(shortcut.map { "\(section.title) — ⌘\($0)" } ?? section.title)
+        .accessibilityLabel(section.title)
+        .accessibilityValue(model.hasEdits(in: section) ? "Has edits" : "")
+        .accessibilityAddTraits(isCurrent ? [.isButton, .isSelected] : .isButton)
     }
 }
 
@@ -105,7 +281,7 @@ private struct BackgroundSection: View {
     }
 
     var body: some View {
-        Section("Background") {
+        Section("Fill") {
             FittingSegmentedPicker("Style", selection: style) {
                 ForEach(Style.allCases) { Text($0.title).tag($0) }
             }
@@ -132,9 +308,26 @@ private struct BackgroundSection: View {
             case let .video(url):
                 mediaRow(url: url, isVideo: true)
             case .none:
-                EmptyView()
+                Text("The video fills the frame. Choose a fill to frame it with padding, corners and a shadow.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard let url = urls.first(where: { BackgroundLibrary.kind(of: $0) != nil }) else { return false }
+            model.setBackgroundMedia(url)
+            return true
+        } isTargeted: { isDropTargeted = $0 }
+        .alert("Can't Use This File", isPresented: Binding(
+            get: { model.mediaImportError != nil },
+            set: { if !$0 { model.mediaImportError = nil } }
+        )) {
+            Button("OK") { model.mediaImportError = nil }
+        } message: {
+            Text(model.mediaImportError ?? "")
+        }
 
+        Section("Frame") {
             Group {
                 EditSlider(model: model, title: "Padding", value: background.padding, range: VideoBackground.paddingRange,
                            format: { Format.percent($0) }) { $0.background.padding = $1 }
@@ -153,19 +346,6 @@ private struct BackgroundSection: View {
             )) {
                 ForEach(OutputAspect.allCases) { Text($0.title).tag($0) }
             }
-        }
-        .dropDestination(for: URL.self) { urls, _ in
-            guard let url = urls.first(where: { BackgroundLibrary.kind(of: $0) != nil }) else { return false }
-            model.setBackgroundMedia(url)
-            return true
-        } isTargeted: { isDropTargeted = $0 }
-        .alert("Can't Use This File", isPresented: Binding(
-            get: { model.mediaImportError != nil },
-            set: { if !$0 { model.mediaImportError = nil } }
-        )) {
-            Button("OK") { model.mediaImportError = nil }
-        } message: {
-            Text(model.mediaImportError ?? "")
         }
     }
 
@@ -316,15 +496,8 @@ private struct ZoomSection: View {
     @Bindable var model: VideoEditorModel
 
     var body: some View {
-        Section("Zoom") {
-            Toggle(isOn: Binding(
-                get: { model.project.zoomFillsFrame },
-                set: { value in model.edit { $0.zoomFillsFrame = value } }
-            )) {
-                Text("Zoom Fills the Frame")
-                Text("Zoom past the padding and background until the zoomed area fills the whole video.")
-            }
-            if let zoom = model.selectedZoom {
+        if let zoom = model.selectedZoom {
+            Section("Selected Zoom") {
                 EditSlider(model: model, title: "Scale", value: zoom.scale, range: ZoomSegment.scaleRange,
                            format: { String(format: "%.1f×", $0) }) { project, scale in
                     var updated = zoom
@@ -352,6 +525,8 @@ private struct ZoomSection: View {
                 Button("Remove Zoom", systemImage: "trash", role: .destructive, action: model.removeSelectedZoom)
                     .help("Remove Zoom — ⌫")
             }
+        }
+        Section("Add Zooms") {
             Button("Add Zoom at Playhead", systemImage: "plus.magnifyingglass", action: model.addZoomAtPlayhead)
                 .help("Add Zoom — Z")
             Button("Auto Zoom from Clicks", systemImage: "wand.and.stars", action: model.applyAutoZoom)
@@ -360,6 +535,20 @@ private struct ZoomSection: View {
             Text(model.clickCount == 0 ? "No click data was recorded with this video." : "\(model.clickCount) recorded clicks.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if model.selectedZoom == nil, !model.project.zooms.isEmpty {
+                Text("Click a zoom on the timeline to edit it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        Section {
+            Toggle(isOn: Binding(
+                get: { model.project.zoomFillsFrame },
+                set: { value in model.edit { $0.zoomFillsFrame = value } }
+            )) {
+                Text("Zoom Fills the Frame")
+                Text("Zoom past the padding and background until the zoomed area fills the whole video.")
+            }
         }
     }
 }
@@ -370,7 +559,7 @@ private struct SpeedSection: View {
     @Bindable var model: VideoEditorModel
 
     var body: some View {
-        Section("Speed") {
+        Section("Selection") {
             if model.selection != nil {
                 HStack(spacing: PK.Spacing.xs) {
                     ForEach(SpeedSegment.presets, id: \.self) { rate in
@@ -381,6 +570,13 @@ private struct SpeedSection: View {
                 .controlSize(.small)
             } else {
                 Text("Select a range on the timeline to speed it up or slow it down.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        Section("Speed Changes") {
+            if model.project.speedSegments.isEmpty {
+                Text("None yet.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -419,8 +615,10 @@ private struct CameraSection: View {
     }
 
     var body: some View {
-        Section("Camera") {
+        Section {
             Toggle("Show Camera", isOn: Binding(get: { camera.isVisible }, set: { value in set { $0.isVisible = value } }))
+        }
+        Section("Look") {
             Group {
                 FittingSegmentedPicker("Shape", selection: Binding(get: { camera.shape }, set: { shape in set { $0.shape = shape } })) {
                     ForEach(CameraOverlay.Shape.allCases) { Text($0.title).tag($0) }
@@ -440,18 +638,26 @@ private struct CameraSection: View {
                     project.camera = camera
                 }
                 Toggle("Mirror", isOn: Binding(get: { camera.isMirrored }, set: { value in set { $0.isMirrored = value } }))
-                if model.isAutoEditAvailable {
-                    CameraBackgroundControls(
-                        background: Binding(get: { camera.background }, set: { value in
-                            model.edit(coalescingKey: "cameraBackground") { project in
-                                var camera = project.camera ?? .standard
-                                camera.background = value
-                                project.camera = camera
-                            }
-                        }),
-                        onEditingChanged: { began in began ? model.beginContinuousEdit() : model.endContinuousEdit() }
-                    )
-                }
+            }
+            .disabled(!camera.isVisible)
+        }
+        if model.isAutoEditAvailable {
+            Section("Background") {
+                CameraBackgroundControls(
+                    background: Binding(get: { camera.background }, set: { value in
+                        model.edit(coalescingKey: "cameraBackground") { project in
+                            var camera = project.camera ?? .standard
+                            camera.background = value
+                            project.camera = camera
+                        }
+                    }),
+                    onEditingChanged: { began in began ? model.beginContinuousEdit() : model.endContinuousEdit() }
+                )
+            }
+            .disabled(!camera.isVisible)
+        }
+        Section("Position") {
+            Group {
                 Button("Reset Position", systemImage: "arrow.counterclockwise") {
                     let recorded = model.sidecar?.camera.map(CameraOverlay.init) ?? .standard
                     set { $0.center = recorded.center; $0.size = recorded.size }
@@ -471,7 +677,7 @@ private struct AudioSection: View {
     @Bindable var model: VideoEditorModel
 
     var body: some View {
-        Section("Audio") {
+        Section("Tracks") {
             if model.audioTracks.isEmpty {
                 Text("This video has no audio.")
                     .font(.caption)
@@ -496,13 +702,15 @@ private struct AudioSection: View {
                         .disabled(volume.isMuted)
                 }
             }
-            if model.isAutoEditAvailable, model.microphoneTrack != nil {
-                VoiceControls(model: model)
-            }
             if !model.silentAudioTracks.isEmpty {
                 Text("\(ListFormatter.localizedString(byJoining: model.silentAudioTracks.map(\.label))) recorded only silence and is hidden.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+        }
+        if model.isAutoEditAvailable, model.microphoneTrack != nil {
+            Section("Voice") {
+                VoiceControls(model: model)
             }
         }
     }
@@ -547,7 +755,12 @@ private struct CutsSection: View {
     @Bindable var model: VideoEditorModel
 
     var body: some View {
-        Section("Cuts") {
+        Section {
+            if model.project.cuts.isEmpty {
+                Text("No cuts yet. Drag across the filmstrip and press ⌫, or split at the playhead (S) and delete a part.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             ForEach(model.project.cuts, id: \.self) { cut in
                 HStack {
                     Image(systemName: "scissors").foregroundStyle(.red)
@@ -560,8 +773,10 @@ private struct CutsSection: View {
                         .help("Restore this part")
                 }
                 .contentShape(Rectangle())
+                .listRowBackground(model.selectedCut == cut ? Color.accentColor.opacity(0.15) : nil)
                 .onTapGesture {
                     model.selectedCut = cut
+                    model.revealOnTimeline(cut)
                     model.seek(toSource: cut.start)
                 }
             }

@@ -57,6 +57,28 @@ extension VideoEditorModel {
         return words[low].start <= time ? low : nil
     }
 
+    /// Up to `count` words just before and just after `range` (the review's
+    /// context around a suggestion).
+    func words(around range: TimeRange, count: Int) -> (before: String, after: String) {
+        guard let words = project.transcript?.words, !words.isEmpty else { return ("", "") }
+        let firstInside = firstWord(in: words) { $0.range.midpoint >= range.start }
+        let firstAfter = firstWord(in: words) { $0.range.midpoint > range.end }
+        let before = words[max(0, firstInside - count)..<firstInside].map(\.text).joined(separator: " ")
+        let after = words[firstAfter..<min(words.count, firstAfter + count)].map(\.text).joined(separator: " ")
+        return (before, after)
+    }
+
+    /// The first word for which `isPast` holds; words are in time order.
+    private func firstWord(in words: [TranscriptWord], where isPast: (TranscriptWord) -> Bool) -> Int {
+        var low = 0
+        var high = words.count
+        while low < high {
+            let middle = (low + high) / 2
+            if isPast(words[middle]) { high = middle } else { low = middle + 1 }
+        }
+        return low
+    }
+
     func seek(toWord index: Int) {
         guard let word = project.transcript?.words[safe: index] else { return }
         transcriptSelection = nil
@@ -116,25 +138,40 @@ extension VideoEditorModel {
         transcriptSelection = nil
     }
 
-    /// Replaces the selected words with `text` (CAP-2). Each new word gets a
-    /// share of the original time proportional to its length, so captions
-    /// stay in sync. Empty text removes the words from the transcript (not
-    /// from the video).
-    func correctWords(_ range: ClosedRange<Int>, to text: String) {
+    /// Replaces the selected words with `text` (CAP-2), and with
+    /// `everywhere` every other run that reads the same (a misheard name).
+    /// Each new word gets a share of the original time proportional to its
+    /// length, so captions stay in sync. Empty text removes the words from
+    /// the transcript (not from the video).
+    func correctWords(_ range: ClosedRange<Int>, to text: String, everywhere: Bool = false) {
         guard var transcript = project.transcript, range.lowerBound >= 0, range.upperBound < transcript.words.count else { return }
-        let original = transcript.words[range]
-        let tokens = text.split(whereSeparator: \.isWhitespace).map(String.init)
-        let start = original.first!.start
-        let end = original.last!.end
-        let total = Double(tokens.reduce(0) { $0 + $1.count })
-        var cursor = start
-        let replacement: [TranscriptWord] = tokens.enumerated().map { offset, token in
-            let share = total > 0 ? Double(token.count) / total : 1 / Double(tokens.count)
-            let wordEnd = offset == tokens.count - 1 ? end : cursor + (end - start) * share
-            defer { cursor = wordEnd }
-            return TranscriptWord(text: token, start: cursor, end: wordEnd, confidence: 1)
-        }
-        transcript.words.replaceSubrange(range, with: replacement)
+        let others = everywhere ? TranscriptEditing.occurrences(of: range, in: transcript.words) : []
+        transcript.words = TranscriptEditing.correcting(transcript.words, range, to: text, alsoAt: others)
+        edit { $0.transcript = transcript }
+        transcriptSelection = nil
+        wordsBeingCorrected = nil
+    }
+
+    /// How many other places read the same as `range` ("Correct all").
+    func otherOccurrences(of range: ClosedRange<Int>) -> Int {
+        guard let words = project.transcript?.words else { return 0 }
+        return TranscriptEditing.occurrences(of: range, in: words).count
+    }
+
+    /// Opens the correction popover over `range` (double-click or Return).
+    func beginCorrecting(_ range: ClosedRange<Int>) {
+        guard let count = project.transcript?.words.count, range.upperBound < count else { return }
+        transcriptSelection = range
+        wordsBeingCorrected = range
+    }
+
+    /// The whole transcript as the user rewrote it (Edit Text mode). One
+    /// undo step; unchanged words keep their times.
+    func applyTranscriptText(_ text: String) {
+        guard var transcript = project.transcript else { return }
+        let words = TranscriptEditing.words(transcript.words, editedTo: text)
+        guard words != transcript.words else { return }
+        transcript.words = words
         edit { $0.transcript = transcript }
         transcriptSelection = nil
     }

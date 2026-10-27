@@ -195,6 +195,8 @@ After the drag, toolbars appear **attached to the selection**: a vertical tools 
 | VE-11 | Speed change for segments (e.g. 2× during boring parts). | Could | M5 ✅ |
 | VE-13 | **Camera layer:** move and resize the webcam in the preview; shape (circle, square, rectangle) with adjustable corner roundness, size, mirror, show/hide. Zooms leave it in place unless the zoom fills the frame. | Must | M5 ✅ |
 | VE-12 | **Edit projects:** edits are saved explicitly (⌘S); closing or quitting with unsaved edits asks to Save / Don't Save / Cancel; unsaved edits survive a crash as a draft. Reopening the recording restores the saved project. | Must | M5 ✅ |
+| VE-14 | **Timeline zoom:** ⌘-scroll or pinch over the timeline zooms around the pointer (down to about 1.5 s across); plain scrolling pans once zoomed. A zoom slider with out / in / fit sits in the transport bar (⌘= / ⌘− / ⌘0). A scroller shows where the view is; playback pages the view along; picking an item elsewhere scrolls the timeline to it. | Must | M8 ✅ |
+| VE-15 | **One inspector pane at a time:** a labeled icon rail on the trailing edge switches the panes (Auto-Edit, Transcript, Captions, Background, Zoom, Speed, Camera, Audio, Cuts; ⌘1–⌘9). A dot marks panes with edits in the video. Selecting a zoom, cut, or auto-edit item on the timeline opens the pane that edits it. | Must | M8 ✅ |
 
 ### 5.10 Capture history (library)
 
@@ -223,7 +225,7 @@ Everything runs on the Mac unless the user configured an AI provider (§5.12). E
 | AE-4 | **Filler words:** "um", "uh", "er", "ah", "hmm" (English) and "eh", "em", "mmm", "este", "o sea", "pues" (Spanish). Ambiguous ones ("like", "you know", "bueno", "este" before a noun) count only when set apart by pauses, and are off by default. | Must | M8 ✅ |
 | AE-5 | **Repeats and stutters:** for repeated words and phrases ("let me, let me"), the last one is kept. Stutters the transcript merges into one word are found from the audio and offered as lower-confidence suggestions. | Should | M8 ✅ |
 | AE-6 | **Mistakes and retakes:** for false starts, corrections ("April. Wait, sorry, I meant May") and sentences said twice, the last take is kept. Rules catch correction phrases and repeated sentence openings; a configured provider catches the rest. | Must | M8 ✅ |
-| AE-7 | **Review:** automatic edits sit on their own layer, struck through in the transcript and shown on a separate timeline lane, colored by kind. They can be toggled by kind (Pauses, Fillers, Repeats, Mistakes) or one at a time, and each says why it was suggested. Re-running the analysis replaces only automatic edits the user hasn't adjusted. | Must | M8 ✅ |
+| AE-7 | **Review:** automatic edits sit on their own layer, struck through in the transcript and shown on a separate timeline lane, colored by kind. They can be toggled by kind (Pauses, Fillers, Repeats, Mistakes) or one at a time, and each says why it was suggested. Re-running the analysis replaces only automatic edits the user hasn't adjusted. The review is Auto-Edit's second step: a card per suggestion with the words around it, filterable by kind, stepped through one at a time; the selected card opens with its reason and choices. Selecting an item on the timeline selects and shows it in the review, and the reverse. | Must | M8 ✅ |
 | AE-8 | **Adjust any segment:** drag either edge of any cut or kept clip, automatic or manual, to extend or shorten it (timeline handles, plus nudge keys at the playhead). The user can restore a removed part or mark a pause "keep as is". An automatic edit the user adjusts becomes theirs and survives re-runs. | Must | M8 ✅ |
 | AE-9 | **Clean joins:** cut points snap to the quietest moment within ±80 ms, and every join gets a short audio fade (5–10 ms), so cuts don't click or clip words. | Must | M8 ✅ |
 | AE-10 | **Edit by transcript:** a transcript panel next to the preview. Click a word to jump there; select words and press ⌫ to cut them; add a zoom over the selection. | Must | M8 ✅ |
@@ -233,7 +235,7 @@ Everything runs on the Mac unless the user configured an AI provider (§5.12). E
 | ID | Requirement | Priority | Milestone |
 |---|---|---|---|
 | CAP-1 | **Captions** from the transcript (English or Spanish), grouped into readable cues (at most 2 lines of about 42 characters, 0.8–6 s each). They follow cuts and speed changes. | Must | M8 ✅ |
-| CAP-2 | **Correct the transcript** in place. Captions use the corrected text and keep their timing; corrections are saved with the project (VE-12). | Must | M8 ✅ |
+| CAP-2 | **Correct the transcript** in place: double-click a word (or press Return on selected words, or use the context menu) to fix it in a popover anchored to it, with **Correct All** for every place that reads the same; or switch to **Edit Text** to rewrite freely. Captions use the corrected text and keep their timing; corrections are saved with the project (VE-12). | Must | M8 ✅ |
 | CAP-3 | **Burn captions** into MP4 and GIF exports, with a few style presets (position, size, background). | Must | M8 ✅ |
 | CAP-4 | Save an **.srt / .vtt** file next to the exported video. | Should | M8 ✅ |
 | CAP-5 | Embedded, switchable subtitle track in the MP4. | Could | later |

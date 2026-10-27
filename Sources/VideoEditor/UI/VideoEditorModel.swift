@@ -83,6 +83,17 @@ final class VideoEditorModel {
     var selectedAutoItem: AutoEditItem?
     /// Words selected in the transcript panel (PRD AE-10).
     var transcriptSelection: ClosedRange<Int>?
+    /// Words being corrected in the transcript's popover (CAP-2).
+    var wordsBeingCorrected: ClosedRange<Int>?
+
+    // MARK: Panels (VE-14, VE-15)
+
+    /// The one inspector pane on screen. Selecting something on the
+    /// timeline shows the pane that edits it.
+    var inspectorSection: InspectorSection = .background
+    var autoEditPage: AutoEditPage = .setup
+    /// What part of the source the timeline shows.
+    var timelineViewport = TimelineViewport()
 
     enum VoiceState: Equatable {
         case idle
@@ -135,6 +146,7 @@ final class VideoEditorModel {
         ) { [weak self] time in
             MainActor.assumeIsolated { self?.playerTimeChanged(time) }
         }
+        inspectorSection = isAutoEditAvailable ? .autoEdit : .background
     }
 
     // MARK: Loading
@@ -397,6 +409,7 @@ final class VideoEditorModel {
         var added: ZoomSegment?
         edit { added = $0.addZoom(at: playhead) }
         selectedZoomID = added?.id
+        if added != nil { inspectorSection = .zoom }
     }
 
     func removeSelectedZoom() {
@@ -505,6 +518,12 @@ final class VideoEditorModel {
         guard currentEdit != nil, time.isNumeric, pendingSeeks == 0 else { return }
         playhead = timeline.sourceTime(forOutput: time.seconds)
         if isPlaying, player.rate == 0 { isPlaying = false }
+        // Page the zoomed timeline along with playback. Copy first, so
+        // observers only hear about real moves.
+        if isPlaying, timelineViewport.isZoomed {
+            var viewport = timelineViewport
+            if viewport.follow(playhead: playhead, duration: duration) { timelineViewport = viewport }
+        }
     }
 
     // MARK: Voice cleanup (PRD AU-1–AU-3)

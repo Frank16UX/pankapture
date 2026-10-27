@@ -43,11 +43,29 @@ struct AutoEditViewTests {
         #expect(model.project.effectiveCuts.count == 4)
         #expect(model.outputDuration < 20)
 
+        // Picking a suggestion on the timeline opens it in the review.
+        model.inspectorSection = .background
+        model.selectAutoItem(.removal(retake.id))
+        #expect(model.inspectorSection == .autoEdit)
+        #expect(model.autoEditPage == .review)
+        model.selectAutoItem(after: 1, in: AutoEditReviewPane.rows(layer).map(\.id))
+        #expect(model.selectedAutoItem == AutoEditReviewPane.rows(layer).map(\.id).last)
+        model.selectedAutoItem = .removal(retake.id)
+
         for appearance in [NSAppearance.Name.aqua, .darkAqua] {
-            let inspector = try render(InspectorView(model: model), size: CGSize(width: 300, height: 1100),
-                                       appearance: appearance, name: "inspector")
-            #expect(Self.distinctColors(inspector) > 20)
-            let timeline = try render(TimelineView(model: model).padding(16), size: CGSize(width: 900, height: 260),
+            for (section, page) in [(InspectorSection.autoEdit, AutoEditPage.review), (.autoEdit, .setup), (.background, .setup), (.zoom, .setup)] {
+                model.inspectorSection = section
+                model.autoEditPage = page
+                let inspector = try render(InspectorView(model: model), size: CGSize(width: 390, height: 900),
+                                           appearance: appearance, name: "inspector-\(section.rawValue)-\(page)")
+                #expect(Self.distinctColors(inspector) > 20)
+            }
+            model.timelineViewport = TimelineViewport(zoom: 3, start: 4)
+            let zoomed = try render(TimelineView(model: model).padding(16), size: CGSize(width: 900, height: 270),
+                                    appearance: appearance, name: "timeline-zoomed")
+            #expect(Self.distinctColors(zoomed) > 20)
+            model.timelineViewport = TimelineViewport()
+            let timeline = try render(TimelineView(model: model).padding(16), size: CGSize(width: 900, height: 272),
                                       appearance: appearance, name: "timeline")
             #expect(Self.distinctColors(timeline) > 20)
         }
@@ -108,6 +126,23 @@ struct AutoEditViewTests {
         #expect(abs(corrected[2].end - words[1].end) < 1e-9)
         model.undo()
         #expect(model.transcript?.words == words)
+
+        // Edit Text: one undo step; untouched words keep their times.
+        model.applyTranscriptText("Hello everybody. The numbers for April. Wait, sorry, I meant May.")
+        #expect(model.transcript?.words[1].text == "everybody.")
+        #expect(model.transcript?.words[1].start == words[1].start)
+        #expect(model.transcript?.words[2] == words[2])
+        model.undo()
+        #expect(model.transcript?.words == words)
+
+        // The popover's correction closes it and clears the selection.
+        model.beginCorrecting(5...5)
+        #expect(model.wordsBeingCorrected == 5...5 && model.transcriptSelection == 5...5)
+        #expect(model.otherOccurrences(of: 5...5) == 0)
+        model.correctWords(5...5, to: "March.")
+        #expect(model.wordsBeingCorrected == nil && model.transcriptSelection == nil)
+        #expect(model.transcript?.words[5].text == "March.")
+        model.undo()
 
         model.transcriptSelection = 2...3
         let panel = try render(TranscriptPanel(model: model), size: CGSize(width: 340, height: 420), appearance: .aqua, name: "transcript")

@@ -34,6 +34,11 @@ public enum PK {
         public static let toolbarOffset: CGFloat = 8
         public static let swatch: CGFloat = 18
         public static let hairline: CGFloat = 0.5
+        /// The labeled icon rail that switches an inspector's panes.
+        public static let railWidth: CGFloat = 64
+        public static let railItemHeight: CGFloat = 46
+        /// Content width of a trailing inspector pane.
+        public static let inspectorWidth: CGFloat = 320
     }
 
     public enum Motion {
