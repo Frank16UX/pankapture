@@ -20,6 +20,10 @@ public enum APIKeyStore {
     /// Keys read or saved during this launch.
     private static let cache = Mutex<[String: String]>([:])
 
+    /// Held while reading a secret, which may wait on a Keychain prompt.
+    /// Separate from `cache` so `hasKey(for:)` never waits behind a prompt.
+    private static let readLock = Mutex(())
+
     /// Whether a key is saved, without reading it (no Keychain prompt).
     public static func hasKey(for presetID: String) -> Bool {
         if cache.withLock({ $0[presetID] }) != nil { return true }
@@ -34,14 +38,19 @@ public enum APIKeyStore {
     /// user answers), so call it off the main actor where possible.
     public static func key(for presetID: String) -> String? {
         if let cached = cache.withLock({ $0[presetID] }) { return cached }
-        var query = baseQuery(presetID)
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data, let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
-        cache.withLock { $0[presetID] = key }
-        return key
+        // One Keychain read at a time: two callers missing the cache together
+        // would otherwise each prompt. The second finds the first's result.
+        return readLock.withLock { _ in
+            if let cached = cache.withLock({ $0[presetID] }) { return cached }
+            var query = baseQuery(presetID)
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            var item: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+                  let data = item as? Data, let key = String(data: data, encoding: .utf8), !key.isEmpty else { return nil }
+            cache.withLock { $0[presetID] = key }
+            return key
+        }
     }
 
     /// Stores `key`, replacing any previous one. An empty key deletes it.

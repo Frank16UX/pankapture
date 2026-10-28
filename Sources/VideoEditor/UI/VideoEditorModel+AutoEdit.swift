@@ -64,7 +64,8 @@ extension VideoEditorModel {
         let provider = autoEditProvider
         let cloudService = aiSettings.cloudService(for: autoEditTranscriber)
         let cloudProviderID: String? = if case .cloud(let id, _) = autoEditTranscriber { id } else { nil }
-        let corrected = project.transcript?.language == language ? project.transcript : nil
+        let transcriptAtStart = project.transcript
+        let corrected = transcriptAtStart?.language == language ? transcriptAtStart : nil
         let cached = retranscribe ? nil : (corrected ?? TranscriptStore.load(for: url, language: language))
         autoEditGeneration += 1
         let generation = autoEditGeneration
@@ -120,7 +121,11 @@ extension VideoEditorModel {
                 self.edit {
                     $0.autoEdit = AutoEditLayer(analysis: result.analysis, envelope: result.envelope, language: language,
                                                 judgedBy: result.judgedBy, keeping: $0.autoEdit)
-                    $0.transcript = result.analysis.transcript
+                    // Corrections made while it ran are newer than the copy it
+                    // analyzed; keep them. Removals are time ranges, and
+                    // corrections keep word times, so the two still line up.
+                    let correctedMeanwhile = $0.transcript != transcriptAtStart && $0.transcript?.language == language
+                    if !correctedMeanwhile { $0.transcript = result.analysis.transcript }
                 }
                 self.transcriptSelection = nil
                 self.autoEditNotice = result.notice
@@ -221,6 +226,7 @@ extension VideoEditorModel {
         selectedCut = nil
         selectedZoomID = nil
         selectedCameraLayoutID = nil
+        transcriptSelection = nil
         selectedAutoItem = item
         inspectorSection = .autoEdit
         autoEditPage = .review

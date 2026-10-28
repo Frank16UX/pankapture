@@ -156,9 +156,9 @@ public enum OnDeviceTranscriber {
             let confidence = run.transcriptionConfidence
             let totalLength = Double(tokens.reduce(0) { $0 + $1.count })
             var cursor = start
-            for token in tokens {
+            for (index, token) in tokens.enumerated() {
                 let share = totalLength > 0 ? Double(token.count) / totalLength : 1 / Double(tokens.count)
-                let tokenEnd = token == tokens.last ? end : cursor + (end - start) * share
+                let tokenEnd = index == tokens.count - 1 ? end : cursor + (end - start) * share
                 words.append(TranscriptWord(text: token, start: cursor, end: tokenEnd, confidence: confidence))
                 cursor = tokenEnd
             }

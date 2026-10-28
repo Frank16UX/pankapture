@@ -20,15 +20,14 @@ extension VideoEditorModel {
 
     var transcript: Transcript? { project.transcript }
 
-    /// The state of every word, in one pass over the sorted cuts.
+    /// The state of every word, in one pass over the sorted cuts. Matches
+    /// playback: auto-edit counts only when `effectiveCuts` applies it, and
+    /// its pause cuts count too (a dragged edge can reach into speech).
     func wordStates() -> [WordState] {
         guard let words = project.transcript?.words else { return [] }
         let trim = project.trim
         let cuts = TimeRange.merged(project.cuts)
-        let layer = project.autoEdit
-        let removals = (layer?.removals ?? [])
-            .filter { $0.isEnabled && layer?.groups.contains($0.group) == true }
-            .sorted { $0.range.start < $1.range.start }
+        let removals = autoRemovals().sorted { $0.range.start < $1.range.start }
         var cutIndex = 0
         var removalIndex = 0
         return words.map { word in
@@ -43,6 +42,19 @@ extension VideoEditorModel {
             }
             return .kept
         }
+    }
+
+    /// What auto-edit removes from playback, by group: nothing when
+    /// `effectiveCuts` sets it aside for leaving too little footage.
+    private func autoRemovals() -> [(range: TimeRange, group: AutoEditGroup)] {
+        guard let layer = project.autoEdit, project.effectiveCuts != project.cuts else { return [] }
+        var ranges = layer.removals
+            .filter { $0.isEnabled && layer.groups.contains($0.group) }
+            .map { (range: $0.range, group: $0.group) }
+        if layer.groups.contains(.pauses) {
+            ranges += layer.pauses.compactMap { $0.cut(pacing: layer.pacing) }.map { (range: $0, group: AutoEditGroup.pauses) }
+        }
+        return ranges
     }
 
     /// The word playing at source `time` (or the last one before it).
@@ -115,15 +127,29 @@ extension VideoEditorModel {
         transcriptSelection = nil
     }
 
-    /// Brings back footage: the user's cuts shrink around it and auto-edit's
-    /// removals there switch off.
+    /// Brings back footage: the trim grows to include it, the user's cuts
+    /// shrink around it, and auto-edit's removals and pause cuts there
+    /// switch off.
     func restore(_ range: TimeRange) {
         edit { project in
+            let trim = project.trim
+            if range.start < trim.start || range.end > trim.end {
+                project.trim = TimeRange(start: max(0, min(trim.start, range.start)),
+                                         end: min(project.sourceDuration, max(trim.end, range.end)))
+            }
             project.cuts = TimeRange.merged(project.cuts.flatMap { $0.subtracting(range) })
             guard var layer = project.autoEdit else { return }
             for index in layer.removals.indices where layer.removals[index].range.overlaps(range) {
                 layer.removals[index].isEnabled = false
                 layer.removals[index].isUserEdited = true
+            }
+            // Only pause cuts over the words themselves: `range` also spans
+            // the pause after them, whose shortening stays.
+            let words = (project.transcript?.words ?? []).map(\.range.midpoint).filter { range.contains($0) }
+            for index in layer.pauses.indices {
+                guard let cut = layer.pauses[index].cut(pacing: layer.pacing), words.contains(where: { cut.contains($0) }) else { continue }
+                layer.pauses[index].keepsLength = true
+                layer.pauses[index].adjustedCut = nil
             }
             project.autoEdit = layer
         }

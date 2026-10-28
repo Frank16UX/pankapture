@@ -10,6 +10,9 @@ struct Sample: Sendable {
     var language: TranscriptLanguage
     var labels: [Label]
 
+    /// Unique across splits: `dev` and `test` may hold folders with the same name.
+    var id: String { "\(split)/\(name)" }
+
     static let movieExtensions: Set<String> = ["mp4", "mov", "m4v"]
 
     struct SampleError: LocalizedError {

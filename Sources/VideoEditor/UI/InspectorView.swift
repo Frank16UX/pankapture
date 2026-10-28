@@ -118,7 +118,7 @@ struct InspectorView: View {
             }
         }
         .padding(.horizontal, PK.Spacing.l)
-        .frame(height: 40)
+        .frame(height: PK.Metrics.paneHeaderHeight)
     }
 
     @ViewBuilder private func pane(_ section: InspectorSection) -> some View {
@@ -175,9 +175,9 @@ private struct InspectorRail: View {
             VStack(spacing: PK.Spacing.xxs) {
                 Image(systemName: section.systemImage)
                     .font(.system(size: PK.Metrics.toolIcon))
-                    .frame(height: 20)
+                    .frame(height: PK.Metrics.railIconHeight)
                 Text(section.title)
-                    .font(.system(size: 10, weight: isCurrent ? .semibold : .regular))
+                    .font(.system(size: PK.Metrics.railLabelSize, weight: isCurrent ? .semibold : .regular))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -192,7 +192,7 @@ private struct InspectorRail: View {
                 if model.hasEdits(in: section) {
                     Circle()
                         .fill(Color.accentColor)
-                        .frame(width: 5, height: 5)
+                        .frame(width: PK.Metrics.badgeDot, height: PK.Metrics.badgeDot)
                         .padding(PK.Spacing.xs + 2)
                         .accessibilityHidden(true)
                 }
@@ -231,7 +231,7 @@ private struct EditSlider: View {
                 Text(format(value))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .frame(width: 38, alignment: .trailing)
+                    .frame(width: PK.Metrics.sliderValueWidth, alignment: .trailing)
             }
         } label: {
             Text(title)
@@ -779,7 +779,7 @@ private struct VoiceControls: View {
         switch model.voiceState {
         case .processing(let fraction):
             HStack(spacing: PK.Spacing.s) {
-                ProgressView(value: fraction).frame(maxWidth: 120)
+                ProgressView(value: fraction).frame(maxWidth: PK.Metrics.inlineProgressWidth)
                 Text("Cleaning up the voice…").font(.caption).foregroundStyle(.secondary)
             }
         case .failed(let message):

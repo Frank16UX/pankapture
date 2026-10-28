@@ -40,7 +40,7 @@ enum ReportWriter {
         text += "deliberate pauses kept ≥ 85%, hesitations shortened ≥ 80%, valid answers 100% cloud / 95% local, stable ≥ 90%. "
         text += "A provider must also beat the rules on mistake recall or deliberate pauses.\n"
 
-        let unsure = context.samples.flatMap { sample in sample.labels.filter(\.isUnsure).map { (sample.name, $0) } }
+        let unsure = context.samples.flatMap { sample in sample.labels.filter(\.isUnsure).map { (sample.id, $0) } }
         if !unsure.isEmpty {
             text += "\n## Unsure labels (not scored)\n\n"
             for (name, label) in unsure {
@@ -52,10 +52,10 @@ enum ReportWriter {
         for sample in context.samples {
             let removals = sample.labels.filter { $0.kind.isRemoval && !$0.isUnsure }.count
             let pauses = sample.labels.filter { $0.kind.isPause && !$0.isUnsure }.count
-            text += "\n### \(sample.name)\n\n"
+            text += "\n### \(sample.id)\n\n"
             text += "\(removals) mistake label\(removals == 1 ? "" : "s"), \(pauses) pause label\(pauses == 1 ? "" : "s")"
             text += removals == 0 ? " (control)\n" : "\n"
-            for (variant, score) in perSample[sample.name] ?? [] {
+            for (variant, score) in perSample[sample.id] ?? [] {
                 let lost = String(format: "%.1f s lost", score.contentLost)
                 text += "\n**\(variant):** \(score.foundMistakes)/\(score.labeledMistakes) found, \(score.falseCuts.count) false cut\(score.falseCuts.count == 1 ? "" : "s"), \(lost), "
                 text += "\(score.deliberateKept)/\(score.deliberateLabeled) deliberate pauses kept\n"

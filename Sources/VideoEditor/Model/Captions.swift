@@ -173,7 +173,8 @@ public enum CaptionBuilder {
             let next = index + 1 < cues.count ? cues[index + 1].output.start : Double.infinity
             var end = max(cues[index].output.end + linger, cues[index].output.start + minimumDuration)
             end = min(end, next - 0.04)
-            cues[index].output.end = max(end, cues[index].output.start + 0.1)
+            // The next cue's start is a hard limit, even over the 0.1 s floor.
+            cues[index].output.end = min(next, max(end, cues[index].output.start + 0.1))
         }
         return cues
     }

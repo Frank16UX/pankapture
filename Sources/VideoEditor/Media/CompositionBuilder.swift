@@ -171,17 +171,23 @@ public enum CompositionBuilder {
             if let cameraTrack, let camera = tracks.camera, let info = source.camera,
                var range = segment.source.intersection(info.timeRange)?.intersection(TimeRange(start: 0, end: source.duration)) {
                 // A camera that started after the screen shows its first frame
-                // until then, rather than popping in late (CAM-7).
-                if range.start < info.firstFrameTime, range.end > info.firstFrameTime {
+                // until then, rather than popping in late (CAM-7). That covers
+                // every kept part before it, including segments ending before it.
+                if range.start < info.firstFrameTime {
+                    let holdEnd = min(range.end, info.firstFrameTime)
                     let at = pieceStart + cmTime(range.start) - cmTime(segment.source.start)
-                    let firstFrame = CMTimeRange(start: cmTime(info.firstFrameTime), duration: CMTime(value: 1, timescale: 600))
-                    try cameraTrack.insertTimeRange(firstFrame, of: camera, at: at)
-                    cameraTrack.scaleTimeRange(CMTimeRange(start: at, duration: firstFrame.duration),
-                                               toDuration: cmTime(info.firstFrameTime) - cmTime(range.start))
-                    range.start = info.firstFrameTime
+                    let hold = cmTime(holdEnd) - cmTime(range.start)
+                    if hold > .zero {
+                        let firstFrame = CMTimeRange(start: cmTime(info.firstFrameTime), duration: CMTime(value: 1, timescale: 600))
+                        try cameraTrack.insertTimeRange(firstFrame, of: camera, at: at)
+                        cameraTrack.scaleTimeRange(CMTimeRange(start: at, duration: firstFrame.duration), toDuration: hold)
+                    }
+                    range.start = holdEnd
                 }
-                let offset = cmTime(range.start) - cmTime(segment.source.start)
-                try cameraTrack.insertTimeRange(cmRange(range), of: camera, at: pieceStart + offset)
+                if range.end > range.start {
+                    let offset = cmTime(range.start) - cmTime(segment.source.start)
+                    try cameraTrack.insertTimeRange(cmRange(range), of: camera, at: pieceStart + offset)
+                }
             }
             for audio in audioTracks {
                 // Never past the last video frame (see `SourceMedia.duration`).

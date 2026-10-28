@@ -78,7 +78,8 @@ struct Options {
         var transcriber: CloudTranscription?
         if let spec = values["transcriber"], !spec.isEmpty {
             let parts = spec.split(separator: ":", maxSplits: 1).map(String.init)
-            guard let service = CloudTranscriptionService.allCases.first(where: { $0.rawValue.lowercased() == parts[0].lowercased() }) else {
+            guard let serviceName = parts.first,
+                  let service = CloudTranscriptionService.allCases.first(where: { $0.rawValue.lowercased() == serviceName.lowercased() }) else {
                 throw UsageError(message: "--transcriber must be elevenLabs, openAI, groq, or openRouter, optionally with :model.")
             }
             guard let key = environment[service.keyEnvironmentVariable], !key.isEmpty else {
@@ -115,16 +116,16 @@ struct Evaluation {
         for sample in samples {
             let cached = sample.cachedTranscript(engine: engine)
             let how = options.transcriber.map { "transcribing with \($0.displayName)…" } ?? "transcribing on device…"
-            print("• \(sample.name): \(cached == nil ? how : "analyzing (cached transcript)…")")
+            print("• \(sample.id): \(cached == nil ? how : "analyzing (cached transcript)…")")
             let prepared = try await AutoEditAnalyzer.prepare(
                 recordingAt: sample.recording, language: sample.language, transcript: cached, cloud: options.transcriber
             )
             if cached == nil { try sample.saveTranscript(prepared.input.transcript, engine: engine) }
-            inputs[sample.name] = prepared.input
+            inputs[sample.id] = prepared.input
             let judged = ModelPass.judgedPauses(prepared.input).count
             print("  \(prepared.input.transcript.words.count) words, \(prepared.input.pauses.count) pauses (\(judged) judged by models), \(prepared.input.ruleSuggestions.count) rule suggestions")
         }
-        let audioSeconds = samples.reduce(0) { $0 + (inputs[$1.name]?.duration ?? 0) }
+        let audioSeconds = samples.reduce(0) { $0 + (inputs[$1.id]?.duration ?? 0) }
 
         var perSample: [String: [(variant: String, score: SampleScore)]] = [:]
         var summaries: [VariantSummary] = []
@@ -132,13 +133,13 @@ struct Evaluation {
         // Baseline: the rules alone.
         var ruleScores: [SampleScore] = []
         for sample in samples {
-            guard let input = inputs[sample.name] else { continue }
+            guard let input = inputs[sample.id] else { continue }
             let analysis = AutoEditAnalysis(rulesOnly: input)
-            let score = Scorer.score(sample: sample.name, analysis: analysis, labels: sample.labels, audioSeconds: input.duration)
+            let score = Scorer.score(sample: sample.id, analysis: analysis, labels: sample.labels, audioSeconds: input.duration)
             ruleScores.append(score)
-            perSample[sample.name, default: []].append(("Rules only", score))
+            perSample[sample.id, default: []].append(("Rules only", score))
             try Self.write(RawResult(analysis: analysis, report: nil, error: nil),
-                           to: output.appendingPathComponent("raw/rules/\(sample.name).json"))
+                           to: output.appendingPathComponent("raw/rules/\(sample.id).json"))
         }
         var baseline = Summarizer.summarize(name: "Rules only", isRules: true, isLocal: true, runs: [ruleScores], calls: nil)
         Summarizer.applyBar(&baseline, baseline: nil)
@@ -157,21 +158,21 @@ struct Evaluation {
             for run in 1...options.runs {
                 var scores: [SampleScore] = []
                 for sample in samples {
-                    guard let input = inputs[sample.name] else { continue }
+                    guard let input = inputs[sample.id] else { continue }
                     let outcome = try await ModelPass.run(input, configuration: spec.configuration, apiKey: spec.apiKey)
                     reports.append(outcome.report)
                     if let error = outcome.error {
                         failures += 1
-                        print("  ✗ run \(run) \(sample.name): \(error)")
+                        print("  ✗ run \(run) \(sample.id): \(error)")
                     } else {
-                        print(String(format: "  ✓ run %d %@ (%.1f s)", run, sample.name, outcome.report.latency))
+                        print(String(format: "  ✓ run %d %@ (%.1f s)", run, sample.id, outcome.report.latency))
                     }
-                    analyses[sample.name, default: []].append(outcome.analysis)
-                    let score = Scorer.score(sample: sample.name, analysis: outcome.analysis, labels: sample.labels, audioSeconds: input.duration)
+                    analyses[sample.id, default: []].append(outcome.analysis)
+                    let score = Scorer.score(sample: sample.id, analysis: outcome.analysis, labels: sample.labels, audioSeconds: input.duration)
                     scores.append(score)
-                    if run == 1 { perSample[sample.name, default: []].append((spec.label, score)) }
+                    if run == 1 { perSample[sample.id, default: []].append((spec.label, score)) }
                     try Self.write(RawResult(analysis: outcome.analysis, report: outcome.report, error: outcome.error),
-                                   to: output.appendingPathComponent("raw/\(spec.slug)/run-\(run)/\(sample.name).json"))
+                                   to: output.appendingPathComponent("raw/\(spec.slug)/run-\(run)/\(sample.id).json"))
                 }
                 runs.append(scores)
             }

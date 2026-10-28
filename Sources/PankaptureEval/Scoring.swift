@@ -255,7 +255,7 @@ enum Summarizer {
         if let value = summary.deliberateKept, value < 0.85 { failures.append("deliberate pauses kept") }
         if let value = summary.hesitationsShortened, value < 0.8 { failures.append("hesitations shortened") }
         if !summary.isRules {
-            if let value = summary.validFinal, value < (summary.isLocal ? 0.95 : 1) { failures.append("valid answers") }
+            if let value = summary.validFirstTry, value < (summary.isLocal ? 0.95 : 1) { failures.append("valid answers") }
             if let value = summary.stability, value < 0.9 { failures.append("stability") }
             if let baseline {
                 let betterRecall = (summary.mistakeRecall ?? 0) > (baseline.mistakeRecall ?? 0)

@@ -8,6 +8,7 @@ import Overlay
 import QuickAccess
 import Recording
 import Synchronization
+import Transcription
 import VideoEditor
 
 /// Routes user intents (shortcuts, menu items, URLs) to capture flows and owns
@@ -49,6 +50,15 @@ final class CaptureCoordinator {
 
     /// Call once at launch.
     func start() {
+        // The editor's per-recording caches go with the recording.
+        library?.onRecordingsRemoved = { urls in
+            Task.detached(priority: .utility) {
+                for url in urls {
+                    TranscriptStore.delete(for: url)
+                    VoiceProcessor.deleteCache(for: url)
+                }
+            }
+        }
         library?.start()
         registerShortcuts()
 

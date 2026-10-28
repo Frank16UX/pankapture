@@ -97,7 +97,7 @@ public struct CameraBackgroundControls: View {
                 Text(Format.percent(value.wrappedValue))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .frame(width: 38, alignment: .trailing)
+                    .frame(width: PK.Metrics.sliderValueWidth, alignment: .trailing)
             }
         } label: {
             Text(title)

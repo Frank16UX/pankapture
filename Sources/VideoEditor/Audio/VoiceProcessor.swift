@@ -139,6 +139,17 @@ public enum VoiceProcessor {
         return Output(url: url, startTime: sidecar.startTime)
     }
 
+    /// Removes every processed voice made from `source` (when the recording
+    /// is deleted).
+    public static func deleteCache(for source: URL) {
+        let prefix = cacheStem(for: source) + "."
+        let manager = FileManager.default
+        guard let files = try? manager.contentsOfDirectory(at: AppPaths.processedAudio, includingPropertiesForKeys: nil) else { return }
+        for file in files where file.lastPathComponent.hasPrefix(prefix) {
+            try? manager.removeItem(at: file)
+        }
+    }
+
     /// Keeps the two most recently made settings of a recording; the rest
     /// are made again if they're chosen again.
     static func pruneVariants(of source: URL, keeping kept: URL) {

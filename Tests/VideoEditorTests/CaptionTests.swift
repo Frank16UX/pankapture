@@ -45,6 +45,31 @@ struct CaptionTests {
         #expect(abs(cues[1].output.start - (script[4].start - 1.0)) < 1e-9)
     }
 
+    @Test func closeCuesNeverOverlap() {
+        // Two sentences 0.05 s apart (fast speech, or a 4× speed-up): the
+        // 0.1 s floor mustn't push the first into the second.
+        let script = [TranscriptWord(text: "Hi.", start: 1.0, end: 1.02), TranscriptWord(text: "Yes.", start: 1.05, end: 1.07)]
+        let cues = CaptionBuilder.cues(words: script, timeline: Timeline(sourceDuration: 5))
+        #expect(cues.count == 2)
+        #expect(cues[0].output.end <= cues[1].output.start)
+        #expect(CaptionTrack(cues: cues, style: .box, position: .bottom, size: .medium).cue(at: 1.06)?.text == "Yes.")
+    }
+
+    @Test func portraitCaptionsFitTheirBitmap() throws {
+        // A full-width line at the large size, on a portrait canvas: the font
+        // shrinks so no glyph is cut at the bitmap's edges.
+        let line = String(repeating: "W", count: 32)
+        let image = try #require(CaptionRasterizer.rasterize(lines: [line], style: .outline, size: .large,
+                                                             canvas: CGSize(width: 1080, height: 1920)))
+        #expect(CGFloat(image.width) <= (1080 * 0.92).rounded(.up))
+        let bytes = try #require(image.dataProvider?.data as Data?)
+        let row = image.bytesPerRow
+        let edgeAlpha = (0..<image.height).reduce(0) { sum, y in
+            sum + Int(bytes[y * row + 3]) + Int(bytes[y * row + (image.width - 1) * 4 + 3])
+        }
+        #expect(edgeAlpha == 0)
+    }
+
     @Test func longCuesWrapIntoTwoBalancedLines() {
         let lines = CaptionBuilder.wrap("Today we will look at the numbers for the second quarter".split(separator: " ").map(String.init),
                                         maxLineLength: 42)

@@ -49,22 +49,34 @@ final class CaptionRasterizer: Sendable {
     }
 
     static func rasterize(lines: [String], style: CaptionSettings.Style, size: CaptionSettings.Size, canvas: CGSize) -> CGImage? {
-        let fontSize = max(12, canvas.height * size.heightFraction)
-        let font = NSFont.systemFont(ofSize: fontSize, weight: .semibold) as CTFont
         let textColor: CGColor = style == .highlight ? CGColor(gray: 0.08, alpha: 1) : CGColor(gray: 1, alpha: 1)
-        let attributes: [NSAttributedString.Key: Any] = [
-            NSAttributedString.Key(kCTFontAttributeName as String): font,
-            NSAttributedString.Key(kCTForegroundColorAttributeName as String): textColor,
-        ]
-        let ctLines = lines.map { CTLineCreateWithAttributedString(NSAttributedString(string: $0, attributes: attributes)) }
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
         var leading: CGFloat = 0
-        let widths = ctLines.map { CGFloat(CTLineGetTypographicBounds($0, &ascent, &descent, &leading)) }
+        func measure(_ fontSize: CGFloat) -> (lines: [CTLine], widths: [CGFloat]) {
+            let font = NSFont.systemFont(ofSize: fontSize, weight: .semibold) as CTFont
+            let attributes: [NSAttributedString.Key: Any] = [
+                NSAttributedString.Key(kCTFontAttributeName as String): font,
+                NSAttributedString.Key(kCTForegroundColorAttributeName as String): textColor,
+            ]
+            let ctLines = lines.map { CTLineCreateWithAttributedString(NSAttributedString(string: $0, attributes: attributes)) }
+            return (ctLines, ctLines.map { CGFloat(CTLineGetTypographicBounds($0, &ascent, &descent, &leading)) })
+        }
+        // The font follows the output height, so a narrow (portrait) canvas
+        // can be too slim for a full line: shrink the font until it fits.
+        // Width grows linearly with the font size, so one rescale does it.
+        let maxWidth = canvas.width * 0.92
+        var fontSize = max(12, canvas.height * size.heightFraction)
+        var (ctLines, widths) = measure(fontSize)
+        let needed = (widths.max() ?? 0) + fontSize
+        if needed > maxWidth {
+            fontSize = max(6, fontSize * maxWidth / needed)
+            (ctLines, widths) = measure(fontSize)
+        }
         let lineHeight = (ascent + descent) * 1.18
         let horizontal = fontSize * 0.5
         let vertical = fontSize * 0.28
-        let width = min(canvas.width * 0.92, (widths.max() ?? 0) + 2 * horizontal)
+        let width = min(maxWidth, (widths.max() ?? 0) + 2 * horizontal)
         let height = CGFloat(ctLines.count) * lineHeight + 2 * vertical
         guard width > 1, height > 1,
               let context = CGContext(data: nil, width: Int(width.rounded(.up)), height: Int(height.rounded(.up)), bitsPerComponent: 8,

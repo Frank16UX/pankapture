@@ -117,6 +117,21 @@ struct AutoEditViewTests {
         model.cutWords(5...9)
         #expect(model.project.cuts.isEmpty)
 
+        // Trimmed-away words come back the same way: the trim grows to include them.
+        model.edit { $0.trim = TimeRange(start: 0, end: 6.0) }
+        #expect(model.wordStates()[10] == .trimmed)
+        model.cutWords(10...10)
+        #expect(model.wordStates()[10] == .kept)
+        model.edit { $0.trim = $0.fullRange }
+
+        // Selecting on the timeline drops the word selection, so ⌫ acts on what's visible.
+        model.transcriptSelection = 2...3
+        model.selection = TimeRange(start: 7, end: 8)
+        #expect(model.transcriptSelection == nil)
+        model.transcriptSelection = 2...3
+        model.clearSelection()
+        #expect(model.transcriptSelection == nil)
+
         // Corrections keep the span and share it out by length.
         model.correctWords(0...1, to: "Hi there, everybody.")
         let corrected = try #require(model.transcript?.words)

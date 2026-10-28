@@ -41,25 +41,26 @@ final class VideoEditorModel {
     private(set) var isPlaying = false
     /// Range selected on the timeline (source seconds), for Cut and Speed.
     /// One thing is selected at a time: selecting a range, cut, or zoom
-    /// deselects auto-edit's item, so ⌫ and [ ] act on what's visible.
+    /// deselects auto-edit's item and the transcript's words, so ⌫ and [ ]
+    /// act on what's visible.
     var selection: TimeRange? {
-        didSet { if selection != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil } }
+        didSet { if selection != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil; transcriptSelection = nil } }
     }
     var selectedCut: TimeRange? {
-        didSet { if selectedCut != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil } }
+        didSet { if selectedCut != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil; transcriptSelection = nil } }
     }
     /// The zoom being edited. While set, the preview shows the unzoomed frame
     /// so the user can position the zoom rectangle over it.
     var selectedZoomID: ZoomSegment.ID? {
         didSet {
             guard oldValue != selectedZoomID else { return }
-            if selectedZoomID != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil }
+            if selectedZoomID != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil; transcriptSelection = nil }
             updatePreviewVideoComposition()
         }
     }
     /// The camera layout being edited (CAM-6).
     var selectedCameraLayoutID: CameraLayoutSegment.ID? {
-        didSet { if selectedCameraLayoutID != nil { selectedAutoItem = nil } }
+        didSet { if selectedCameraLayoutID != nil { selectedAutoItem = nil; transcriptSelection = nil } }
     }
 
     private(set) var filmstrip: [FilmstripFrame] = []
@@ -550,6 +551,7 @@ final class VideoEditorModel {
         selectedZoomID = nil
         selectedCameraLayoutID = nil
         selectedAutoItem = nil
+        transcriptSelection = nil
     }
 
     // MARK: Playback

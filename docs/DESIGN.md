@@ -57,7 +57,12 @@ SF Symbols only, hierarchical rendering, medium weight, 15 pt in toolbars (`PK.M
 | `Metrics.toolButton` | 28 | toolbar hit target |
 | `Metrics.toolbarOffset` | 8 | gap between selection and toolbars |
 | `Metrics.railWidth` / `railItemHeight` | 64 / 46 | inspector pane rail and its items |
+| `Metrics.railIconHeight` / `railLabelSize` | 20 / 10 | a rail item's icon box and label |
+| `Metrics.badgeDot` | 5 | dot marking a pane with edits |
 | `Metrics.inspectorWidth` | 320 | inspector pane content |
+| `Metrics.paneHeaderHeight` | 40 | title bar above an inspector pane |
+| `Metrics.sliderValueWidth` | 38 | value label beside an inspector slider |
+| `Metrics.inlineProgressWidth` | 120 | progress bar beside its status text |
 | `Metrics.floatingPanelWidth` | 248 | floating options panel beside a canvas |
 
 All rounded shapes use `.continuous` corners (squircles), like the system.

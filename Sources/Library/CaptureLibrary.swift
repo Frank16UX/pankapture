@@ -53,6 +53,10 @@ public final class CaptureLibrary {
     /// Tail of the serial OCR queue (one recognition at a time keeps memory flat).
     @ObservationIgnored private var ocrTail: Task<Void, Never>?
     @ObservationIgnored private var maintenanceTask: Task<Void, Never>?
+    /// Called with the files of recordings that left the library (deleted or
+    /// removed by retention), so the app can drop caches kept for them
+    /// elsewhere. Set it before `start()`, which applies retention.
+    @ObservationIgnored public var onRecordingsRemoved: (([URL]) -> Void)?
 
     public init(configuration: LibraryConfiguration = .standard, defaults: UserDefaults = .standard) throws {
         self.configuration = configuration
@@ -436,6 +440,8 @@ public final class CaptureLibrary {
             if alsoTrashExportedFiles {
                 await LibraryIO.moveToTrash(removed.compactMap(\.exportURL))
             }
+            let recordings = removed.filter { $0.kind == .recording }.compactMap(\.exportURL)
+            if !recordings.isEmpty { onRecordingsRemoved?(recordings) }
             Log.library.info("Deleted \(removed.count) item(s)")
         } catch {
             Log.library.error("Delete failed: \(error.localizedDescription, privacy: .public)")

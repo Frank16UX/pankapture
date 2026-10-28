@@ -195,6 +195,18 @@ struct ScoringTests {
         #expect(abs((model.costPerRecording ?? 0) - 0.001) < 1e-12)
         #expect(model.medianSecondsPer10Minutes == 3)
         #expect(model.stability == 1)
+
+        // The bar is on first-try answers: a retry that rescues every one doesn't pass.
+        var retried = report
+        retried.firstTryValid = false
+        retried.attempts = 2
+        var flaky = Summarizer.summarize(
+            name: "flaky", isRules: false, isLocal: false, runs: [[score(found: 5, lost: 0.2)]],
+            calls: .init(reports: [retried], failures: 0, instability: (0, 10), price: nil)
+        )
+        Summarizer.applyBar(&flaky, baseline: rules)
+        #expect(flaky.validFinal == 1)
+        #expect(flaky.failures == ["valid answers"])
     }
 }
 
@@ -213,6 +225,15 @@ struct SampleTests {
         #expect(dev.map(\.name) == ["en-01-tour", "es-02-menu"])
         #expect(dev.map(\.language) == [.english, .spanish])
         #expect(try Sample.load(root: root, split: "all").count == 3)
+
+        // The same folder name in both splits stays two samples.
+        let twin = root.appendingPathComponent("samples/test/en-01-tour")
+        try FileManager.default.createDirectory(at: twin, withIntermediateDirectories: true)
+        try Data().write(to: twin.appendingPathComponent("recording.mp4"))
+        try "start\tend\tkind\tnote\n".write(to: twin.appendingPathComponent("labels.tsv"), atomically: true, encoding: .utf8)
+        let all = try Sample.load(root: root, split: "all")
+        #expect(Set(all.map(\.id)).count == all.count)
+        #expect(all.map(\.id).contains("test/en-01-tour") && all.map(\.id).contains("dev/en-01-tour"))
 
         let bad = root.appendingPathComponent("samples/test/fr-04-nope")
         try FileManager.default.createDirectory(at: bad, withIntermediateDirectories: true)
@@ -239,6 +260,7 @@ struct SampleTests {
         #expect(options?.runs == 2)
         #expect(options?.providers.map(\.label) == ["lmstudio", "ollama"])
         #expect(throws: Options.UsageError.self) { try Options.parse(["--split", "weekly"], environment: [:]) }
+        #expect(throws: Options.UsageError.self) { try Options.parse(["--transcriber", ":"], environment: [:]) }
         #expect(try Options.parse(["--help"], environment: [:]) == nil)
     }
 }

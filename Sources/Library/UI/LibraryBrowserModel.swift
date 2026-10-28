@@ -138,7 +138,14 @@ final class LibraryBrowserModel {
 
     struct PreparedFile: Equatable {
         var version: Date
+        /// The item's `suggestedFileName` when prepared: renaming doesn't
+        /// change `version`, but a temporary file carries the name.
+        var name: String
         var url: URL
+
+        func matches(_ item: CaptureSnapshot) -> Bool {
+            version == item.editedAt && name == item.suggestedFileName
+        }
     }
 
     struct DeletionRequest: Identifiable {
@@ -222,17 +229,17 @@ final class LibraryBrowserModel {
     /// Quick Look are instant.
     func prepareSelectionFiles() async {
         for item in selectedItems.prefix(50) {
-            if preparedFiles[item.id]?.version == item.editedAt { continue }
+            if preparedFiles[item.id]?.matches(item) == true { continue }
             guard let url = await library.fileURL(for: item) else { continue }
             guard !Task.isCancelled else { return }
-            preparedFiles[item.id] = PreparedFile(version: item.editedAt, url: url)
+            preparedFiles[item.id] = PreparedFile(version: item.editedAt, name: item.suggestedFileName, url: url)
         }
         onSelectionFilesChanged?(selectionFileURLs)
     }
 
     func preparedURL(for item: CaptureSnapshot) -> URL? {
         if let url = item.currentUserFileURL { return url }
-        guard let prepared = preparedFiles[item.id], prepared.version == item.editedAt else { return nil }
+        guard let prepared = preparedFiles[item.id], prepared.matches(item) else { return nil }
         return prepared.url
     }
 
@@ -417,6 +424,7 @@ final class LibraryBrowserModel {
 
     private func fileProvider(for item: CaptureSnapshot) -> NSItemProvider {
         if let url = preparedURL(for: item), let provider = NSItemProvider(contentsOf: url) {
+            provider.suggestedName = item.suggestedFileName
             return provider
         }
         let provider = NSItemProvider()
