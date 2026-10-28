@@ -29,7 +29,8 @@ struct RecordingWriterTests {
         from start: Double,
         seconds: Double,
         pauses: [(Double, Double)] = [],
-        muteAt: Double? = nil
+        muteAt: Double? = nil,
+        realTime: Bool = false
     ) async throws {
         let audioStep = 1024.0 / 48_000
         var nextVideo = start
@@ -52,7 +53,10 @@ struct RecordingWriterTests {
             if nextVideo <= nextAudio {
                 await writer.appendVideo(SyntheticMedia.videoFrame(at: t(nextVideo)))
                 nextVideo += 1.0 / 30
-                try await Task.sleep(for: .milliseconds(1))
+                // `realTime`: frames arrive at the capture rate, as from the
+                // screen. Faster, the real-time encoder drops whatever it
+                // can't take yet, and how many depends on the machine's load.
+                try await Task.sleep(for: realTime ? .seconds(1.0 / 30) : .milliseconds(1))
             } else {
                 await writer.appendAudio(SyntheticMedia.audio(at: t(nextAudio)), from: .system)
                 await writer.appendAudio(
@@ -73,13 +77,14 @@ struct RecordingWriterTests {
             url: url, codec: .h264, quality: .medium, framesPerSecond: 30,
             capturesSystemAudio: true, capturesMicrophone: true
         ))
-        try await feed(writer, from: 1000, seconds: 5, pauses: [(1002, 1003)], muteAt: 1004)
+        try await feed(writer, from: 1000, seconds: 5, pauses: [(1002, 1003)], muteAt: 1004, realTime: true)
         let summary = try await writer.finish(at: t(1005))
 
         #expect(abs(summary.duration - 4.0) < 0.05)
         #expect(summary.videoSize == CGSize(width: 320, height: 240))
         // 120 frames arrive outside the pause. The writer drops a frame when the
-        // encoder isn't ready (real-time behavior), which a busy CI runner hits.
+        // encoder isn't ready (real-time behavior); fed at the capture rate, a
+        // busy CI runner still drops a few, never most.
         #expect(summary.framesWritten + summary.framesDropped > 110)
         #expect(summary.framesWritten > 60)
 
