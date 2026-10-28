@@ -69,6 +69,9 @@ public enum PreferenceKey {
     public static let recordingCameraMirrored = "recording.cameraMirrored"
     /// Webcam bubble width in points.
     public static let recordingCameraSize = "recording.cameraSize"
+    /// The camera background new recordings start with: a JSON
+    /// `CameraBackground` (PRD CAM-3). Absent means none.
+    public static let recordingCameraBackground = "recording.cameraBackground"
     /// 30 or 60.
     public static let recordingFrameRate = "recording.frameRate"
     /// `h264` or `hevc`.
@@ -215,4 +218,30 @@ public extension PreferenceKey {
     /// `NSWindow` frame autosave name for the editor window (AppKit stores the
     /// frame under "NSWindow Frame <name>").
     static let videoEditorWindowFrame = "videoEditor.window"
+}
+
+// MARK: Smart editing (M8)
+
+public extension PreferenceKey {
+    /// Providers added in Settings ▸ AI (PRD AI-8), JSON-encoded
+    /// `[AutoEdit.ProviderAccount]` (no secrets; keys live in the Keychain,
+    /// AI-3). Missing = migrate the settings from before ADR-45.
+    static let aiProviders = "ai.providers"
+    /// What judges auto-edit in a new editor, JSON-encoded `AutoEdit.Judge`.
+    /// Missing = the built-in rules (AI-1).
+    static let aiDefaultJudge = "ai.defaultJudge"
+    /// What transcribes in a new editor, JSON-encoded `AutoEdit.Transcriber`.
+    /// Missing = on this Mac (AI-5).
+    static let aiDefaultTranscriber = "ai.defaultTranscriber"
+    /// Before ADR-45: whether the one provider was used. Read once, to migrate.
+    static let legacyAIProviderEnabled = "ai.providerEnabled"
+    /// Before ADR-45: the one provider, a JSON `ProviderConfiguration`. Read once, to migrate.
+    static let legacyAIProviderConfiguration = "ai.providerConfiguration"
+    /// Last pacing preset used by auto-edit (AE-3): "tight", "natural", or "relaxed".
+    static let autoEditPacing = "autoEdit.pacing"
+    /// Last language analyzed: "en" or "es". Missing = the system language.
+    static let autoEditLanguage = "autoEdit.language"
+    /// Before ADR-45: the cloud transcription service, "elevenLabs", "openAI",
+    /// or "groq". Read once, to migrate.
+    static let legacyCloudTranscriptionService = "ai.cloudTranscriptionService"
 }

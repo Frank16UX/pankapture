@@ -106,7 +106,7 @@ enum LibraryFormat {
     }
 }
 
-/// One grid cell (HI-2): thumbnail with kind / duration / missing badges, name, and date.
+/// One grid cell (HI-2): thumbnail with kind / duration / missing badges, name (HI-7), and date.
 struct CaptureCard: View {
     let item: CaptureSnapshot
     let isSelected: Bool
@@ -141,9 +141,10 @@ struct CaptureCard: View {
                 }
 
             VStack(alignment: .leading, spacing: PK.Spacing.xxs) {
-                Text(item.title)
+                // Two lines, always reserved, so long names stay readable and rows stay even.
+                Text(item.displayName)
                     .font(.callout)
-                    .lineLimit(1)
+                    .lineLimit(2, reservesSpace: true)
                     .truncationMode(.middle)
                 Text(item.createdAt, format: .dateTime.month(.abbreviated).day().hour().minute())
                     .font(.caption)
@@ -168,7 +169,8 @@ struct CaptureCard: View {
     }
 
     private var accessibilityLabel: String {
-        var parts = [item.kind.title, item.title]
+        var parts = [item.kind.title, item.displayName]
+        if !item.tags.isEmpty { parts.append("tags: " + item.tags.joined(separator: ", ")) }
         if let duration = item.duration { parts.append(LibraryFormat.duration(duration)) }
         if item.isUnavailable { parts.append("file missing") }
         return parts.joined(separator: ", ")

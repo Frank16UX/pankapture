@@ -15,6 +15,12 @@ public enum AppPaths {
         applicationSupport.appendingPathComponent("Recordings/InProgress", isDirectory: true)
     }
 
+    /// OpenRouter's public model list with prices (PRD AI-8), refetched daily.
+    public static var modelCatalog: URL {
+        let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("Pankapture/openrouter-models.json")
+    }
+
     /// Per-recording metadata (`RecordingSidecar`) for the video editor.
     public static var sidecars: URL {
         applicationSupport.appendingPathComponent("Sidecars", isDirectory: true)
@@ -23,6 +29,18 @@ public enum AppPaths {
     /// Capture history: originals, annotations, thumbnails, and the index.
     public static var library: URL {
         applicationSupport.appendingPathComponent("Library", isDirectory: true)
+    }
+
+    /// On-device transcripts of recordings, `<video>.<language>.json` (PRD AE-1),
+    /// cached so auto-edit and captions don't transcribe twice.
+    public static var transcripts: URL {
+        applicationSupport.appendingPathComponent("Transcripts", isDirectory: true)
+    }
+
+    /// Cleaned-up copies of recordings' microphone tracks (noise removal,
+    /// loudness), one per setting; deletable, regenerated on demand (PRD AU-1).
+    public static var processedAudio: URL {
+        applicationSupport.appendingPathComponent("ProcessedAudio", isDirectory: true)
     }
 
     /// Layered originals of recordings made with the camera as its own track

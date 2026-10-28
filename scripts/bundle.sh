@@ -29,6 +29,15 @@ echo "▸ Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/Pankapture" "$APP/Contents/MacOS/Pankapture"
+# SwiftPM records the deployment target as the binary's SDK version, so macOS
+# would run the app in its macOS 15 compatibility appearance: legacy toolbars
+# and split views, plus glitches like an empty, unseparated toolbar area over
+# inspectors. Record the SDK it was actually built with (ADR-46).
+SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
+MIN_VERSION="$(otool -l "$APP/Contents/MacOS/Pankapture" | awk '/LC_BUILD_VERSION/ { found = 1 } found && $1 == "minos" { print $2; exit }')"
+xcrun vtool -set-build-version macos "$MIN_VERSION" "$SDK_VERSION" -replace \
+  -output "$APP/Contents/MacOS/Pankapture.stamped" "$APP/Contents/MacOS/Pankapture" 2>/dev/null
+mv "$APP/Contents/MacOS/Pankapture.stamped" "$APP/Contents/MacOS/Pankapture"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 if [[ -n "${PK_VERSION:-}" ]]; then
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $PK_VERSION" "$APP/Contents/Info.plist"

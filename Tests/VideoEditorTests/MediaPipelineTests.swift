@@ -1,3 +1,4 @@
+import AppCore
 import AVFoundation
 import CoreGraphics
 import Foundation
@@ -40,6 +41,34 @@ struct MediaPipelineTests {
         project.setSpeed(2, for: TimeRange(start: 1.0, end: 2.0))
         let fast = try await CompositionBuilder.build(source: source, project: project, options: .init())
         #expect(abs(fast.duration - 1.0) < 0.05)
+    }
+
+    /// Recordings made before CAM-7 start the camera a moment after the
+    /// screen; the composition shows its first frame from the start.
+    @Test func lateCameraShowsItsFirstFrameFromTheStart() async throws {
+        let directory = try TestMovie.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try await TestMovie.make(.init(duration: 2, cameraColor: (0, 255, 0), cameraStart: 0.2), in: directory)
+        let source = try await SourceMedia.load(url: url)
+        let camera = try #require(source.camera)
+        #expect(abs(camera.firstFrameTime - 0.2) < 0.02)
+
+        var project = VideoEditProject(sourceURL: url, sourceDuration: source.duration)
+        project.camera = .standard
+        let edit = try await CompositionBuilder.build(source: source, project: project, options: .init())
+        let track = try #require(edit.composition.tracks(withMediaType: .video).first { $0.trackID == edit.cameraTrackID })
+        let first = try #require(track.segments.first)
+        #expect(!first.isEmpty)
+        #expect(first.timeMapping.target.start == .zero)
+        // The held frame runs into the rest without a gap.
+        #expect(track.segments.dropFirst().allSatisfy { !$0.isEmpty })
+        #expect(abs(track.timeRange.end.seconds - edit.duration) < 0.05)
+
+        // A trim past the camera's start needs no hold.
+        project.setTrimStart(0.5)
+        let trimmed = try await CompositionBuilder.build(source: source, project: project, options: .init())
+        let trimmedTrack = try #require(trimmed.composition.tracks(withMediaType: .video).first { $0.trackID == trimmed.cameraTrackID })
+        #expect(trimmedTrack.segments.allSatisfy { !$0.isEmpty })
     }
 
     @Test func mutedTracksAreLeftOutOfExports() async throws {

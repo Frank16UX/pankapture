@@ -1,3 +1,4 @@
+import AppCore
 import AVFoundation
 import CoreGraphics
 import ImageIO
@@ -20,6 +21,19 @@ public struct CameraTrackInfo: Sendable, Equatable {
     public let size: CGSize
     public let orientation: CGImagePropertyOrientation
     public let timeRange: TimeRange
+    /// Where the first frame is. Recordings made before CAM-7 start the
+    /// camera a moment after the screen (an empty edit before it); the
+    /// editor shows this frame from the start instead of nothing.
+    public let firstFrameTime: Double
+
+    public init(trackID: CMPersistentTrackID, size: CGSize, orientation: CGImagePropertyOrientation,
+                timeRange: TimeRange, firstFrameTime: Double? = nil) {
+        self.trackID = trackID
+        self.size = size
+        self.orientation = orientation
+        self.timeRange = timeRange
+        self.firstFrameTime = firstFrameTime ?? timeRange.start
+    }
 }
 
 /// The source's tracks, resolved for one composition build. Not `Sendable`
@@ -28,6 +42,33 @@ public struct LoadedTracks {
     public let video: AVAssetTrack
     public let audio: [CMPersistentTrackID: AVAssetTrack]
     public var camera: AVAssetTrack?
+    /// The cleaned-up microphone (PRD AU-1), used instead of the recorded
+    /// one when the project asks for it.
+    public var processedVoice: ProcessedVoice?
+
+    public init(video: AVAssetTrack, audio: [CMPersistentTrackID: AVAssetTrack], camera: AVAssetTrack? = nil) {
+        self.video = video
+        self.audio = audio
+        self.camera = camera
+    }
+
+}
+
+/// A processed voice file, loaded for a composition.
+public struct ProcessedVoice {
+    /// Held so `track` stays usable: a track only holds its asset weakly.
+    public let asset: AVURLAsset
+    public let track: AVAssetTrack
+    /// Where the file's first sample sits on the recording's timeline.
+    public let startTime: Double
+
+    public static func load(_ output: VoiceProcessor.Output) async throws -> ProcessedVoice {
+        let asset = AVURLAsset(url: output.url)
+        guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
+            throw VoiceProcessor.Failure.renderFailed("the processed voice has no audio")
+        }
+        return ProcessedVoice(asset: asset, track: track, startTime: output.startTime)
+    }
 }
 
 /// The loaded properties of a source movie, gathered once with the async
@@ -60,7 +101,7 @@ public struct SourceMedia: Sendable {
         var screenTracks: [AVAssetTrack] = []
         var cameraTrack: AVAssetTrack?
         for track in try await asset.loadTracks(withMediaType: .video) {
-            if cameraTrack == nil, await Self.name(of: track)?.lowercased() == Self.cameraTrackName {
+            if cameraTrack == nil, await RecordingTracks.name(of: track)?.lowercased() == RecordingTracks.cameraName {
                 cameraTrack = track
             } else {
                 screenTracks.append(track)
@@ -90,16 +131,16 @@ public struct SourceMedia: Sendable {
         var names: [String?] = []
         var ranges: [TimeRange] = []
         for track in try await asset.loadTracks(withMediaType: .audio) {
-            let name = await Self.name(of: track)
+            let name = await RecordingTracks.name(of: track)
             // The recorder's "Mix" track (system + mic for players that play
             // one track) duplicates the separate tracks the editor mixes itself.
-            if name?.lowercased() == Self.mixTrackName { continue }
+            if name?.lowercased() == RecordingTracks.mixName { continue }
             audio.append(track)
             names.append(name)
             let range = try await track.load(.timeRange)
             ranges.append(TimeRange(start: range.start.seconds, end: range.end.seconds))
         }
-        let roles = Self.resolveRoles(names: names)
+        let roles = RecordingTracks.resolveRoles(names: names)
         let audioTracks = audio.indices.map { index in
             AudioTrackInfo(
                 trackID: audio[index].trackID,
@@ -117,15 +158,17 @@ public struct SourceMedia: Sendable {
 
         var camera: CameraTrackInfo?
         if let cameraTrack {
-            let (size, transform, range) = try await cameraTrack.load(.naturalSize, .preferredTransform, .timeRange)
+            let (size, transform, range, segments) = try await cameraTrack.load(.naturalSize, .preferredTransform, .timeRange, .segments)
             let orientation = Self.orientation(for: transform)
             let upright: CGSize = switch orientation {
             case .left, .right, .leftMirrored, .rightMirrored: CGSize(width: size.height, height: size.width)
             default: size
             }
+            let firstFrame = segments.first { !$0.isEmpty }?.timeMapping.target.start.seconds
             camera = CameraTrackInfo(
                 trackID: cameraTrack.trackID, size: upright, orientation: orientation,
-                timeRange: TimeRange(start: range.start.seconds, end: range.end.seconds)
+                timeRange: TimeRange(start: range.start.seconds, end: range.end.seconds),
+                firstFrameTime: firstFrame.flatMap { $0.isFinite ? $0 : nil }
             )
         }
 
@@ -145,11 +188,6 @@ public struct SourceMedia: Sendable {
         )
     }
 
-    /// Title of the recorder's mixed track (`RecordingWriter.TrackName.mix`), lowercased.
-    static let mixTrackName = "mix"
-    /// Title of the recorder's webcam track (`RecordingWriter.TrackName.camera`), lowercased.
-    static let cameraTrackName = "camera"
-
     /// Resolves the AVFoundation tracks (cheap: the asset has them loaded).
     public func loadTracks() async throws -> sending LoadedTracks {
         guard let video = try await asset.loadTrack(withTrackID: videoTrackID) else {
@@ -162,27 +200,6 @@ public struct SourceMedia: Sendable {
         var camera: AVAssetTrack?
         if let info = self.camera { camera = try await asset.loadTrack(withTrackID: info.trackID) }
         return LoadedTracks(video: video, audio: audio, camera: camera)
-    }
-
-    /// Track roles from track names when present ("…mic…" / "…system…");
-    /// otherwise by order (first = system, second = microphone, REC-4) with
-    /// neutral labels, since the order is only a convention.
-    static func resolveRoles(names: [String?]) -> [(role: AudioRole, label: String)] {
-        var result: [(role: AudioRole, label: String)?] = Array(repeating: nil, count: names.count)
-        for (index, name) in names.enumerated() {
-            guard let name = name?.lowercased() else { continue }
-            if name.contains("mic") || name.contains("voice") {
-                result[index] = (.microphone, "Microphone")
-            } else if name.contains("system") {
-                result[index] = (.system, "System Audio")
-            }
-        }
-        var free = AudioRole.allCases.filter { role in !result.contains { $0?.role == role } }
-        for index in result.indices where result[index] == nil {
-            let role = free.isEmpty ? AudioRole.system : free.removeFirst()
-            result[index] = (role, names.count == 1 ? "Audio" : "Audio \(index + 1)")
-        }
-        return result.map { $0 ?? (.system, "Audio") }
     }
 
     static func orientation(for transform: CGAffineTransform) -> CGImagePropertyOrientation {
@@ -199,19 +216,5 @@ public struct SourceMedia: Sendable {
     static func normalized(_ transform: CGAffineTransform, naturalSize: CGSize) -> CGAffineTransform {
         let bounds = CGRect(origin: .zero, size: naturalSize).applying(transform)
         return transform.concatenating(CGAffineTransform(translationX: -bounds.minX, y: -bounds.minY))
-    }
-
-    private static func name(of track: AVAssetTrack) async -> String? {
-        guard let items = try? await track.load(.metadata) else { return nil }
-        let identifiers: Set<AVMetadataIdentifier> = [
-            .quickTimeUserDataTrackName, .commonIdentifierTitle, .quickTimeMetadataDisplayName,
-        ]
-        for item in items {
-            // MP4 stores the recorder's titles as ISO user data (`uiso/titl`),
-            // which only matches by common key.
-            guard item.commonKey == .commonKeyTitle || item.identifier.map(identifiers.contains) == true else { continue }
-            if let value = try? await item.load(.stringValue), !value.isEmpty { return value }
-        }
-        return nil
     }
 }

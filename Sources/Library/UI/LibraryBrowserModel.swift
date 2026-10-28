@@ -2,10 +2,11 @@ import AppCore
 import AppKit
 import DesignSystem
 import Observation
+import SwiftUI
 import UniformTypeIdentifiers
 
-/// Sidebar filters (HI-2).
-enum LibraryFilter: String, CaseIterable, Hashable, Identifiable {
+/// Sidebar filters (HI-2), plus the user's folders and tags (HI-8, HI-9).
+enum LibraryFilter: Hashable, Identifiable {
     case all
     case screenshots
     case recordings
@@ -13,12 +14,15 @@ enum LibraryFilter: String, CaseIterable, Hashable, Identifiable {
     case today
     case last7Days
     case last30Days
+    case folder(UUID)
+    case tag(String)
 
-    var id: String { rawValue }
+    var id: Self { self }
 
     static let kindFilters: [LibraryFilter] = [.all, .screenshots, .recordings, .gifs]
     static let dateFilters: [LibraryFilter] = [.today, .last7Days, .last30Days]
 
+    /// Built-in filters' titles; folders are titled by `LibraryBrowserModel.title(for:)`.
     var title: String {
         switch self {
         case .all: "All Captures"
@@ -28,6 +32,8 @@ enum LibraryFilter: String, CaseIterable, Hashable, Identifiable {
         case .today: "Today"
         case .last7Days: "Last 7 Days"
         case .last30Days: "Last 30 Days"
+        case .folder: "Folder"
+        case let .tag(name): name
         }
     }
 
@@ -40,6 +46,8 @@ enum LibraryFilter: String, CaseIterable, Hashable, Identifiable {
         case .today: "calendar"
         case .last7Days: "calendar.badge.clock"
         case .last30Days: "clock.arrow.circlepath"
+        case .folder: "folder"
+        case .tag: "tag"
         }
     }
 
@@ -50,6 +58,14 @@ enum LibraryFilter: String, CaseIterable, Hashable, Identifiable {
         case .gifs: .gif
         default: nil
         }
+    }
+
+    var folderID: UUID? {
+        if case let .folder(id) = self { id } else { nil }
+    }
+
+    var tag: String? {
+        if case let .tag(name) = self { name } else { nil }
     }
 
     func dateRange(now: Date, calendar: Calendar = .current) -> Range<Date>? {
@@ -64,6 +80,18 @@ enum LibraryFilter: String, CaseIterable, Hashable, Identifiable {
         guard let start = calendar.date(byAdding: .day, value: -daysBack, to: startOfToday) else { return nil }
         return start..<Date.distantFuture
     }
+}
+
+/// A sidebar row being renamed in place.
+enum SidebarRenameTarget: Hashable {
+    case folder(UUID)
+    case tag(String)
+}
+
+/// Inspector fields other parts of the window can ask to focus.
+enum InspectorField: Hashable {
+    case name
+    case tag
 }
 
 /// State and actions of the library window. Owns no data: it queries
@@ -83,10 +111,17 @@ final class LibraryBrowserModel {
     var isInspectorPresented = true
     var selection: Set<UUID> = []
     var deletionRequest: DeletionRequest?
+    var folderDeletionRequest: LibraryFolder?
     var isGridFocused = false
+    /// The sidebar row showing a name field, if any.
+    var renamingTarget: SidebarRenameTarget?
+    /// Set to move focus into the inspector (Rename…, Add Tag…); the inspector clears it.
+    var pendingInspectorFocus: InspectorField?
 
     private(set) var items: [CaptureSnapshot] = []
     private(set) var totalCount = 0
+    private(set) var folders: [LibraryFolder] = []
+    private(set) var tags: [LibraryTag] = []
     private(set) var hasLoaded = false
     /// Files ready for share / drag / Quick Look, per item and edit version.
     private(set) var preparedFiles: [UUID: PreparedFile] = [:]
@@ -103,7 +138,14 @@ final class LibraryBrowserModel {
 
     struct PreparedFile: Equatable {
         var version: Date
+        /// The item's `suggestedFileName` when prepared: renaming doesn't
+        /// change `version`, but a temporary file carries the name.
+        var name: String
         var url: URL
+
+        func matches(_ item: CaptureSnapshot) -> Bool {
+            version == item.editedAt && name == item.suggestedFileName
+        }
     }
 
     struct DeletionRequest: Identifiable {
@@ -128,6 +170,19 @@ final class LibraryBrowserModel {
         ReloadKey(filter: filter, searchText: searchText, sort: sort, revision: library.revision)
     }
 
+    func title(for filter: LibraryFilter) -> String {
+        guard let id = filter.folderID else { return filter.title }
+        return folders.first { $0.id == id }?.name ?? filter.title
+    }
+
+    /// "Library", or the folder or tag being shown.
+    var windowTitle: String {
+        switch filter {
+        case .folder, .tag: title(for: filter)
+        default: "Library"
+        }
+    }
+
     var selectedItems: [CaptureSnapshot] {
         items.filter { selection.contains($0.id) }
     }
@@ -145,33 +200,52 @@ final class LibraryBrowserModel {
         if let lastQueryText, lastQueryText != text {
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
         }
-        let query = LibraryQuery(text: text, kind: filter.kind, dateRange: filter.dateRange(now: Date()), sort: sort)
+        let query = LibraryQuery(
+            text: text, kind: filter.kind, dateRange: filter.dateRange(now: Date()),
+            folderID: filter.folderID, tag: filter.tag, sort: sort
+        )
         let results = await library.search(query)
         let count = await library.count()
+        let folders = await library.folders()
+        let tags = await library.tags()
         guard !Task.isCancelled else { return }
         lastQueryText = text
         items = results
         totalCount = count
+        self.folders = folders
+        self.tags = tags
         hasLoaded = true
+        // A deleted folder, or a tag no item has anymore, falls back to everything.
+        if let id = filter.folderID, !folders.contains(where: { $0.id == id }) { filter = .all }
+        if let tag = filter.tag {
+            let match = tags.first { LibraryTag.isSame($0.name, tag) }
+            if match?.name != tag { filter = match.map { .tag($0.name) } ?? .all }
+        }
         let visible = Set(results.map(\.id))
         if !selection.isSubset(of: visible) { selection.formIntersection(visible) }
+    }
+
+    /// What `prepareSelectionFiles()` depends on: the selection, and each
+    /// selected capture's edit and name (a rename needs a new temporary file).
+    var selectionPreparationKey: [String] {
+        selectedItems.map { "\($0.id)|\($0.editedAt.timeIntervalSince1970)|\($0.suggestedFileName)" }
     }
 
     /// Resolves (or renders) files for the selection so share, drag, copy, and
     /// Quick Look are instant.
     func prepareSelectionFiles() async {
         for item in selectedItems.prefix(50) {
-            if preparedFiles[item.id]?.version == item.editedAt { continue }
+            if preparedFiles[item.id]?.matches(item) == true { continue }
             guard let url = await library.fileURL(for: item) else { continue }
             guard !Task.isCancelled else { return }
-            preparedFiles[item.id] = PreparedFile(version: item.editedAt, url: url)
+            preparedFiles[item.id] = PreparedFile(version: item.editedAt, name: item.suggestedFileName, url: url)
         }
         onSelectionFilesChanged?(selectionFileURLs)
     }
 
     func preparedURL(for item: CaptureSnapshot) -> URL? {
         if let url = item.currentUserFileURL { return url }
-        guard let prepared = preparedFiles[item.id], prepared.version == item.editedAt else { return nil }
+        guard let prepared = preparedFiles[item.id], prepared.matches(item) else { return nil }
         return prepared.url
     }
 
@@ -343,17 +417,24 @@ final class LibraryBrowserModel {
 
     /// File providers for ⌘C (`onCopyCommand`).
     func copyProviders() -> [NSItemProvider] {
-        selectedItems.map(itemProvider(for:))
+        selectedItems.map(fileProvider(for:))
     }
 
     /// Drag-out provider (OUT-7 for history). Uses the ready file when there is
     /// one, otherwise renders lazily when the drop target asks for the data.
     func itemProvider(for item: CaptureSnapshot) -> NSItemProvider {
+        let provider = fileProvider(for: item)
+        CaptureDrag.register(targets(for: item).map(\.id), on: provider)
+        return provider
+    }
+
+    private func fileProvider(for item: CaptureSnapshot) -> NSItemProvider {
         if let url = preparedURL(for: item), let provider = NSItemProvider(contentsOf: url) {
+            provider.suggestedName = item.suggestedFileName
             return provider
         }
         let provider = NSItemProvider()
-        provider.suggestedName = (item.title as NSString).deletingPathExtension
+        provider.suggestedName = item.suggestedFileName
         guard item.kind == .screenshot else { return provider }
         let library = library
         provider.registerFileRepresentation(forTypeIdentifier: UTType.png.identifier, fileOptions: [], visibility: .all) { completion in
@@ -375,7 +456,7 @@ final class LibraryBrowserModel {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.canCreateDirectories = true
-        panel.nameFieldStringValue = (item.title as NSString).deletingPathExtension + ".png"
+        panel.nameFieldStringValue = item.suggestedFileName + ".png"
         panel.directoryURL = Preferences.saveDirectory()
         let library = library
         let handler: (NSApplication.ModalResponse) -> Void = { response in
@@ -405,6 +486,125 @@ final class LibraryBrowserModel {
         let urls = selectionFileURLs
         guard !urls.isEmpty else { return }
         onQuickLook?(urls)
+    }
+
+    // MARK: Organizing (HI-7…HI-9)
+
+    /// Selects `item`, shows the inspector, and focuses its name field.
+    func beginRename(_ item: CaptureSnapshot) {
+        selection = [item.id]
+        selectionAnchor = item.id
+        focusInspector(.name)
+    }
+
+    /// Shows the inspector with the tag field focused for `items`.
+    func beginAddTag(_ items: [CaptureSnapshot]) {
+        if Set(items.map(\.id)) != selection {
+            selection = Set(items.map(\.id))
+            selectionAnchor = items.first?.id
+        }
+        focusInspector(.tag)
+    }
+
+    private func focusInspector(_ field: InspectorField) {
+        withAnimation(PK.Motion.standard) { isInspectorPresented = true }
+        pendingInspectorFocus = field
+    }
+
+    func rename(_ item: CaptureSnapshot, to name: String) {
+        let current = item.displayName
+        guard name.trimmingCharacters(in: .whitespacesAndNewlines) != current else { return }
+        Task { await library.rename(item.id, to: name) }
+    }
+
+    func addTag(_ tag: String, to items: [CaptureSnapshot]) {
+        guard LibraryTag.normalizedName(tag) != nil, !items.isEmpty else { return }
+        Task { await library.addTag(tag, to: items.map(\.id)) }
+    }
+
+    func removeTag(_ tag: String, from items: [CaptureSnapshot]) {
+        Task { await library.removeTag(tag, from: items.map(\.id)) }
+    }
+
+    /// Adds the tag to all of `items` unless they all have it, then removes it.
+    func toggleTag(_ tag: String, on items: [CaptureSnapshot]) {
+        if Self.allHave(tag, items) {
+            removeTag(tag, from: items)
+        } else {
+            addTag(tag, to: items)
+        }
+    }
+
+    static func allHave(_ tag: String, _ items: [CaptureSnapshot]) -> Bool {
+        !items.isEmpty && items.allSatisfy { $0.tags.contains { LibraryTag.isSame($0, tag) } }
+    }
+
+    /// Tags on every one of `items`.
+    static func commonTags(_ items: [CaptureSnapshot]) -> [String] {
+        guard let first = items.first else { return [] }
+        return first.tags.filter { allHave($0, items) }
+    }
+
+    func move(_ items: [CaptureSnapshot], toFolder folderID: UUID?) {
+        guard !items.isEmpty else { return }
+        Task { await library.move(items.map(\.id), toFolder: folderID) }
+    }
+
+    func move(ids: [UUID], toFolder folderID: UUID?) {
+        guard !ids.isEmpty else { return }
+        Task { await library.move(ids, toFolder: folderID) }
+    }
+
+    func addTag(_ tag: String, toIDs ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        Task { await library.addTag(tag, to: ids) }
+    }
+
+    /// Creates a folder (holding `items`, if any) and starts renaming it in the sidebar.
+    func newFolder(containing items: [CaptureSnapshot] = []) {
+        Task {
+            guard let id = await library.createFolder(containing: items.map(\.id)) else {
+                NSSound.beep()
+                return
+            }
+            renamingTarget = .folder(id)
+        }
+    }
+
+    /// Ends an in-place rename. `name` nil cancels.
+    func commitRename(_ target: SidebarRenameTarget, name: String?) {
+        guard renamingTarget == target else { return }
+        renamingTarget = nil
+        guard let name, let normalized = LibraryTag.normalizedName(name) else { return }
+        switch target {
+        case let .folder(id):
+            guard folders.first(where: { $0.id == id })?.name != normalized else { return }
+            Task { await library.renameFolder(id, to: normalized) }
+        case let .tag(tag):
+            guard tag != normalized else { return }
+            if filter == .tag(tag) { filter = .tag(normalized) }
+            Task { await library.renameTag(tag, to: normalized) }
+        }
+    }
+
+    /// Folders with items ask first; empty ones go at once.
+    func requestDeleteFolder(_ folder: LibraryFolder) {
+        if folder.itemCount == 0 {
+            confirmDeleteFolder(folder)
+        } else {
+            folderDeletionRequest = folder
+        }
+    }
+
+    func confirmDeleteFolder(_ folder: LibraryFolder) {
+        folderDeletionRequest = nil
+        if filter == .folder(folder.id) { filter = .all }
+        Task { await library.deleteFolder(folder.id) }
+    }
+
+    func deleteTag(_ tag: String) {
+        if filter == .tag(tag) { filter = .all }
+        Task { await library.deleteTag(tag) }
     }
 
     // MARK: Deleting

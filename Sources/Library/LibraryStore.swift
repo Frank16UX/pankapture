@@ -115,6 +115,113 @@ actor LibraryStore: ModelActor {
         if size > 0 { item.fileByteSize = size }
     }
 
+    // MARK: Organizing (HI-7…HI-9)
+
+    /// Runs a change on the store's executor (lets `CaptureLibrary` share error handling).
+    func perform(_ change: @Sendable (isolated LibraryStore) throws -> Void) throws {
+        try change(self)
+    }
+
+    /// Sets the library name; an empty name goes back to the file name.
+    func setCustomName(id: UUID, name: String) throws {
+        guard let item = try item(id: id) else { return }
+        let name = LibraryTag.normalizedName(name) ?? ""
+        item.customName = name == item.title ? "" : name
+        try modelContext.save()
+    }
+
+    func addTag(_ tag: String, to ids: [UUID]) throws {
+        guard let name = LibraryTag.normalizedName(tag), !ids.isEmpty else { return }
+        // Reuse an existing tag's spelling so "design" doesn't become a second "Design".
+        let canonical = try tagCounts().first { LibraryTag.isSame($0.name, name) }?.name ?? name
+        for item in try items(ids: ids) where !item.tags.contains(where: { LibraryTag.isSame($0, canonical) }) {
+            item.tags = Self.sortedTags(item.tags + [canonical])
+        }
+        try modelContext.save()
+    }
+
+    func removeTag(_ tag: String, from ids: [UUID]) throws {
+        for item in try items(ids: ids) {
+            item.tags = item.tags.filter { !LibraryTag.isSame($0, tag) }
+        }
+        try modelContext.save()
+    }
+
+    /// Renames a tag on every item; renaming onto an existing tag merges them.
+    func renameTag(_ tag: String, to newName: String) throws {
+        guard let name = LibraryTag.normalizedName(newName) else { return }
+        let canonical = try tagCounts().first { LibraryTag.isSame($0.name, name) && !LibraryTag.isSame($0.name, tag) }?.name ?? name
+        for item in try items(taggedWith: tag) {
+            let others = item.tags.filter { !LibraryTag.isSame($0, tag) && !LibraryTag.isSame($0, canonical) }
+            item.tags = Self.sortedTags(others + [canonical])
+        }
+        try modelContext.save()
+    }
+
+    func deleteTag(_ tag: String) throws {
+        for item in try items(taggedWith: tag) {
+            item.tags = item.tags.filter { !LibraryTag.isSame($0, tag) }
+        }
+        try modelContext.save()
+    }
+
+    /// Every tag in use with its item count, sorted by name.
+    func tagCounts() throws -> [LibraryTag] {
+        var descriptor = FetchDescriptor<CaptureItem>(predicate: #Predicate { $0.tagsKey != "" })
+        descriptor.propertiesToFetch = [\.tagsKey]
+        var counts: [String: Int] = [:]
+        for item in try modelContext.fetch(descriptor) {
+            for tag in item.tags { counts[tag, default: 0] += 1 }
+        }
+        return counts.map { LibraryTag(name: $0.key, itemCount: $0.value) }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    /// Folders sorted by name, with how many items each holds.
+    func folders() throws -> [LibraryFolder] {
+        try modelContext.fetch(FetchDescriptor<CaptureFolder>()).map { folder in
+            let id: UUID? = folder.id
+            let count = try modelContext.fetchCount(FetchDescriptor<CaptureItem>(predicate: #Predicate { $0.folderID == id }))
+            return LibraryFolder(id: folder.id, name: folder.name, itemCount: count)
+        }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    func createFolder(id: UUID, name: String, createdAt: Date) throws {
+        modelContext.insert(CaptureFolder(id: id, name: name, createdAt: createdAt))
+        try modelContext.save()
+    }
+
+    func renameFolder(id: UUID, name: String) throws {
+        guard let name = LibraryTag.normalizedName(name), let folder = try folder(id: id) else { return }
+        folder.name = name
+        try modelContext.save()
+    }
+
+    /// Deletes a folder; its items stay in the library, outside any folder.
+    func deleteFolder(id: UUID) throws {
+        guard let folder = try folder(id: id) else { return }
+        let folderID: UUID? = id
+        for item in try modelContext.fetch(FetchDescriptor<CaptureItem>(predicate: #Predicate { $0.folderID == folderID })) {
+            item.folderID = nil
+        }
+        modelContext.delete(folder)
+        try modelContext.save()
+    }
+
+    /// Puts items in a folder, or takes them out of any with nil.
+    func moveItems(_ ids: [UUID], toFolder folderID: UUID?) throws {
+        if let folderID, try folder(id: folderID) == nil { return }
+        for item in try items(ids: ids) {
+            item.folderID = folderID
+        }
+        try modelContext.save()
+    }
+
+    private static func sortedTags(_ tags: [String]) -> [String] {
+        tags.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
     /// Deletes index entries and their library folders. Returns the removed items.
     @discardableResult
     func delete(ids: [UUID]) throws -> [CaptureSnapshot] {
@@ -218,6 +325,22 @@ actor LibraryStore: ModelActor {
         return try modelContext.fetch(descriptor).first
     }
 
+    private func items(ids: [UUID]) throws -> [CaptureItem] {
+        guard !ids.isEmpty else { return [] }
+        return try modelContext.fetch(FetchDescriptor<CaptureItem>(predicate: #Predicate { ids.contains($0.id) }))
+    }
+
+    private func items(taggedWith tag: String) throws -> [CaptureItem] {
+        let needle = TagCoding.needle(for: tag)
+        return try modelContext.fetch(FetchDescriptor<CaptureItem>(predicate: #Predicate { $0.tagsKey.localizedStandardContains(needle) }))
+    }
+
+    private func folder(id: UUID) throws -> CaptureFolder? {
+        var descriptor = FetchDescriptor<CaptureFolder>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
     static func sortDescriptors(for sort: LibrarySort) -> [SortDescriptor<CaptureItem>] {
         switch sort {
         case .newest: [SortDescriptor(\.createdAt, order: .reverse)]
@@ -234,16 +357,27 @@ actor LibraryStore: ModelActor {
         let text = query.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let anyText = text.isEmpty
 
+        let anyFolder = query.folderID == nil
+        let folderID = query.folderID
+        let anyTag = query.tag == nil
+        let tagNeedle = query.tag.map(TagCoding.needle(for:)) ?? ""
+
         let scope = #Predicate<CaptureItem> { item in
             (anyKind || item.kindRaw == kind) && item.createdAt >= start && item.createdAt < end
+        }
+        // Tag lookups are case- and accent-insensitive, like `LibraryTag.isSame`.
+        let organized = #Predicate<CaptureItem> { item in
+            (anyFolder || item.folderID == folderID) && (anyTag || item.tagsKey.localizedStandardContains(tagNeedle))
         }
         let matchesText = #Predicate<CaptureItem> { item in
             anyText
                 || item.title.localizedStandardContains(text)
+                || item.customName.localizedStandardContains(text)
+                || item.tagsKey.localizedStandardContains(text)
                 || item.ocrText.localizedStandardContains(text)
         }
         return #Predicate<CaptureItem> { item in
-            scope.evaluate(item) && matchesText.evaluate(item)
+            scope.evaluate(item) && organized.evaluate(item) && matchesText.evaluate(item)
         }
     }
 }

@@ -34,6 +34,26 @@ public enum PK {
         public static let toolbarOffset: CGFloat = 8
         public static let swatch: CGFloat = 18
         public static let hairline: CGFloat = 0.5
+        /// The labeled icon rail that switches an inspector's panes.
+        public static let railWidth: CGFloat = 64
+        public static let railItemHeight: CGFloat = 46
+        /// A rail item's icon box and label size.
+        public static let railIconHeight: CGFloat = 20
+        public static let railLabelSize: CGFloat = 10
+        /// The dot marking a rail item (or row) that has edits.
+        public static let badgeDot: CGFloat = 5
+        /// Content width of a trailing inspector pane.
+        public static let inspectorWidth: CGFloat = 320
+        /// The title bar above an inspector pane.
+        public static let paneHeaderHeight: CGFloat = 40
+        /// The value printed beside an inspector slider ("100%", "2.0×").
+        public static let sliderValueWidth: CGFloat = 38
+        /// An inline progress bar beside its status text.
+        public static let inlineProgressWidth: CGFloat = 120
+        /// A floating options panel beside a canvas (image editor background).
+        public static let floatingPanelWidth: CGFloat = 248
+        /// A sheet listing many rows to choose from (the model browser).
+        public static let listSheetSize = CGSize(width: 640, height: 520)
     }
 
     public enum Motion {

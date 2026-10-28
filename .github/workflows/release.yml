@@ -60,7 +60,40 @@ jobs:
 
       - name: Test
         if: steps.changes.outputs.code == 'true'
-        run: swift test
+        timeout-minutes: 20
+        run: |
+          # Tests normally finish in about a minute. If they're still running
+          # after 10, print every thread's stack from the test process, so a
+          # hang names the call it's stuck in, then fail.
+          #
+          # Serially: run in parallel on the runner's virtual machine, a dozen
+          # media tests open asset readers and writers at once and every one
+          # of them stalls inside CoreMedia, so the run never finishes.
+          swift build --build-tests
+          LOG="$RUNNER_TEMP/test.log"
+          swift test --skip-build --no-parallel > "$LOG" 2>&1 &
+          TEST=$!
+          tail -n +1 -f "$LOG" &
+          TAIL=$!
+          for _ in $(seq 60); do
+            kill -0 "$TEST" 2>/dev/null || break
+            sleep 10
+          done
+          if kill -0 "$TEST" 2>/dev/null; then
+            echo "::error::Tests still running after 10 minutes; dumping thread stacks."
+            for PID in $(pgrep -f 'swiftpm-testing-helper|xctest'); do
+              echo "=== $PID: $(ps -o command= -p "$PID")"
+              # spindump takes kernel stack snapshots, so it works on the
+              # signed test helper that a debugger can't attach to.
+              sudo spindump "$PID" 5 -noFile 2>&1 || sample "$PID" 3 2>&1 || true
+            done
+            kill "$TEST" 2>/dev/null; pkill -f swiftpm-testing-helper || true
+            STATUS=1
+          else
+            wait "$TEST"; STATUS=$?
+          fi
+          sleep 1; kill "$TAIL" 2>/dev/null || true
+          exit "$STATUS"
 
       - name: Build the disk image (dry run)
         if: steps.changes.outputs.code == 'true' && env.EVENT == 'pull_request'

@@ -1,3 +1,4 @@
+import AppCore
 import Foundation
 
 /// Maps between **source** time (seconds in the original file) and **output**
@@ -31,8 +32,8 @@ public struct Timeline: Sendable, Equatable {
         self.init(
             sourceDuration: project.sourceDuration,
             trim: project.trim,
-            cuts: project.cuts,
-            speedSegments: project.speedSegments
+            cuts: project.effectiveCuts,
+            speedSegments: project.effectiveSpeedSegments
         )
     }
 
@@ -60,10 +61,14 @@ public struct Timeline: Sendable, Equatable {
     public static func keptRanges(sourceDuration: Double, trim: TimeRange?, cuts: [TimeRange]) -> [TimeRange] {
         let full = TimeRange(start: 0, end: max(0, sourceDuration))
         guard let trimmed = (trim ?? full).clamped(to: full) else { return [] }
-        var kept = [trimmed]
-        for cut in TimeRange.merged(cuts.compactMap { $0.clamped(to: full) }) {
-            kept = kept.flatMap { $0.subtracting(cut) }
+        // Cuts are merged and sorted, so one pass does it (auto-edit can add hundreds).
+        var kept: [TimeRange] = []
+        var cursor = trimmed.start
+        for cut in TimeRange.merged(cuts.compactMap { $0.clamped(to: full) }) where cut.end > trimmed.start && cut.start < trimmed.end {
+            if cut.start > cursor { kept.append(TimeRange(start: cursor, end: cut.start)) }
+            cursor = max(cursor, cut.end)
         }
+        if cursor < trimmed.end { kept.append(TimeRange(start: cursor, end: trimmed.end)) }
         return kept.filter { $0.duration > 1e-6 }
     }
 

@@ -40,6 +40,8 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
     /// side (0 = sharp corners, 0.5 = fully rounded ends).
     public var roundness: Double
     public var isMirrored: Bool
+    /// Blur, replace, or remove what's behind the person (PRD CAM-1).
+    public var background: CameraBackground
 
     public init(
         isVisible: Bool = true,
@@ -47,7 +49,8 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
         size: Double,
         shape: Shape = .circle,
         roundness: Double = CameraOverlay.defaultRoundness,
-        isMirrored: Bool = true
+        isMirrored: Bool = true,
+        background: CameraBackground = CameraBackground()
     ) {
         self.isVisible = isVisible
         self.center = center
@@ -55,6 +58,7 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
         self.shape = shape
         self.roundness = roundness
         self.isMirrored = isMirrored
+        self.background = background
     }
 
     /// Where the bubble was on screen while recording.
@@ -68,10 +72,10 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case isVisible, center, size, shape, roundness, isMirrored
+        case isVisible, center, size, shape, roundness, isMirrored, background
     }
 
-    /// Projects saved before `roundness` existed still open.
+    /// Projects saved before `roundness` or `background` existed still open.
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         isVisible = try container.decode(Bool.self, forKey: .isVisible)
@@ -80,6 +84,7 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
         shape = try container.decode(Shape.self, forKey: .shape)
         roundness = try container.decodeIfPresent(Double.self, forKey: .roundness) ?? Self.defaultRoundness
         isMirrored = try container.decode(Bool.self, forKey: .isMirrored)
+        background = try container.decodeIfPresent(CameraBackground.self, forKey: .background) ?? CameraBackground()
     }
 
     /// Corner radius for a layer of `size`, in the same units.
@@ -90,7 +95,7 @@ public struct CameraOverlay: Codable, Hashable, Sendable {
 
     /// Bottom-left of the video, when the recording didn't say.
     public static let standard = CameraOverlay(center: CGPoint(x: 0.12, y: 0.8), size: 0.25)
-    public static let sizeRange: ClosedRange<Double> = 0.08...0.6
+    public static let sizeRange: ClosedRange<Double> = 0.08...1
     public static let roundnessRange: ClosedRange<Double> = 0...0.5
     public static let defaultRoundness = 0.18
 

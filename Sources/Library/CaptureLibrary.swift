@@ -53,6 +53,10 @@ public final class CaptureLibrary {
     /// Tail of the serial OCR queue (one recognition at a time keeps memory flat).
     @ObservationIgnored private var ocrTail: Task<Void, Never>?
     @ObservationIgnored private var maintenanceTask: Task<Void, Never>?
+    /// Called with the files of recordings that left the library (deleted or
+    /// removed by retention), so the app can drop caches kept for them
+    /// elsewhere. Set it before `start()`, which applies retention.
+    @ObservationIgnored public var onRecordingsRemoved: (([URL]) -> Void)?
 
     public init(configuration: LibraryConfiguration = .standard, defaults: UserDefaults = .standard) throws {
         self.configuration = configuration
@@ -60,7 +64,7 @@ public final class CaptureLibrary {
         let files = LibraryFiles(root: configuration.rootDirectory)
         self.files = files
 
-        let schema = Schema(versionedSchema: LibrarySchemaV1.self)
+        let schema = Schema(versionedSchema: LibrarySchemaV2.self)
         let modelConfiguration: ModelConfiguration
         if configuration.isStoredInMemoryOnly {
             modelConfiguration = ModelConfiguration(
@@ -311,7 +315,7 @@ public final class CaptureLibrary {
             RecentCapture(
                 id: $0.id,
                 kind: $0.kind,
-                title: $0.title,
+                title: $0.displayName,
                 createdAt: $0.createdAt,
                 thumbnailURL: $0.thumbnailURL,
                 exportURL: $0.exportURL,
@@ -343,6 +347,88 @@ public final class CaptureLibrary {
         return await LibraryIO.flattenedImage(snapshot: snapshot, files: files)
     }
 
+    // MARK: Organizing (HI-7…HI-9)
+
+    /// Names an item in the library (HI-7). An empty name goes back to the file
+    /// name. The file on disk keeps its name.
+    public func rename(_ id: UUID, to name: String) async {
+        await organize("Rename") { try $0.setCustomName(id: id, name: name) }
+    }
+
+    /// Adds a tag (HI-8), reusing an existing tag's spelling when one matches.
+    public func addTag(_ tag: String, to ids: [UUID]) async {
+        await organize("Add tag") { try $0.addTag(tag, to: ids) }
+    }
+
+    public func removeTag(_ tag: String, from ids: [UUID]) async {
+        await organize("Remove tag") { try $0.removeTag(tag, from: ids) }
+    }
+
+    /// Renames a tag everywhere; renaming onto an existing tag merges the two.
+    public func renameTag(_ tag: String, to name: String) async {
+        await organize("Rename tag") { try $0.renameTag(tag, to: name) }
+    }
+
+    /// Removes a tag from every item. The items stay.
+    public func deleteTag(_ tag: String) async {
+        await organize("Delete tag") { try $0.deleteTag(tag) }
+    }
+
+    /// Tags in use, by name, with how many items carry each.
+    public func tags() async -> [LibraryTag] {
+        (try? await store().tagCounts()) ?? []
+    }
+
+    /// Library folders (HI-9), by name, with their item counts.
+    public func folders() async -> [LibraryFolder] {
+        (try? await store().folders()) ?? []
+    }
+
+    /// Creates a folder (default "New Folder", numbered if taken) holding `ids`.
+    @discardableResult
+    public func createFolder(named name: String? = nil, containing ids: [UUID] = []) async -> UUID? {
+        let existing = await folders().map(\.name)
+        let name = name.flatMap(LibraryTag.normalizedName) ?? LibraryFolder.untitledName(existing: existing)
+        let id = UUID()
+        let createdAt = configuration.now()
+        do {
+            let store = await store()
+            try await store.createFolder(id: id, name: name, createdAt: createdAt)
+            if !ids.isEmpty { try await store.moveItems(ids, toFolder: id) }
+        } catch {
+            Log.library.error("Couldn't create folder: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+        await didChange()
+        return id
+    }
+
+    /// Renames a folder; empty names are ignored.
+    public func renameFolder(_ id: UUID, to name: String) async {
+        await organize("Rename folder") { try $0.renameFolder(id: id, name: name) }
+    }
+
+    /// Deletes a folder. Its captures stay in the library, outside any folder.
+    public func deleteFolder(_ id: UUID) async {
+        await organize("Delete folder") { try $0.deleteFolder(id: id) }
+    }
+
+    /// Puts items in a folder, or takes them out with nil.
+    public func move(_ ids: [UUID], toFolder folderID: UUID?) async {
+        await organize("Move to folder") { try $0.moveItems(ids, toFolder: folderID) }
+    }
+
+    private func organize(_ action: String, _ change: @Sendable (isolated LibraryStore) throws -> Void) async {
+        do {
+            let store = await store()
+            try await store.perform(change)
+        } catch {
+            Log.library.error("\(action, privacy: .public) failed: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        await didChange()
+    }
+
     // MARK: Deleting
 
     /// Removes items and their library files. Exported files are left alone
@@ -354,6 +440,8 @@ public final class CaptureLibrary {
             if alsoTrashExportedFiles {
                 await LibraryIO.moveToTrash(removed.compactMap(\.exportURL))
             }
+            let recordings = removed.filter { $0.kind == .recording }.compactMap(\.exportURL)
+            if !recordings.isEmpty { onRecordingsRemoved?(recordings) }
             Log.library.info("Deleted \(removed.count) item(s)")
         } catch {
             Log.library.error("Delete failed: \(error.localizedDescription, privacy: .public)")

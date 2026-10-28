@@ -1,0 +1,14 @@
+# Automated pull request review settings. Read from the base branch, so edits
+# here take effect after they merge to main. Project guidance comes from
+# CLAUDE.md (no root REVIEW.md, which would replace it).
+version: 2
+
+check_run:
+  enabled: true
+  # Every merge to main ships a release, so a critical finding blocks the PR.
+  fail_on:
+    - critical
+
+trigger:
+  # Review each push too, covering only the commits since the last review.
+  on: push

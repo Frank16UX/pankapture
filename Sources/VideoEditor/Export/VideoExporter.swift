@@ -32,11 +32,14 @@ public enum VideoExporter {
         defer { Log.signposter.endInterval("exportMP4", interval) }
 
         let fps = settings.mp4FrameRate(sourceFrameRate: source.frameRate)
-        let tracks = try await source.loadTracks()
-        let background = await BackgroundVideo.load(for: project)
-        let edit = try CompositionBuilder.build(
+        // Loads the tracks and the background, and the cleaned-up voice if the
+        // project has one. Making that voice, when it isn't cached, takes the
+        // first quarter of the progress.
+        let microphone = source.audioTracks.first { $0.role == .microphone }
+        let voiceShare = project.voice.map { $0.isActive && microphone != nil && VoiceProcessor.cached(for: source.url, settings: $0) == nil } == true
+            ? 0.25 : 0
+        let edit = try await CompositionBuilder.build(
             source: source,
-            tracks: tracks,
             project: project,
             options: .init(
                 shortSideCap: settings.mp4ShortSideCap,
@@ -44,13 +47,15 @@ public enum VideoExporter {
                 scale: settings.mp4Scale,
                 frameRate: fps
             ),
-            background: background
+            voiceProgress: { progress($0 * voiceShare) }
         )
         let encoding = settings.mp4Encoding
         let bitrate = ExportEstimator.videoBitrate(renderSize: edit.plan.renderSize, fps: fps, bitsPerPixel: encoding.bitsPerPixel)
 
         try? FileManager.default.removeItem(at: url)
-        let job = try MP4WriterJob(edit: edit, url: url, fps: fps, bitrate: bitrate, encoding: encoding, progress: progress)
+        let job = try MP4WriterJob(edit: edit, url: url, fps: fps, bitrate: bitrate, encoding: encoding) {
+            progress(voiceShare + (1 - voiceShare) * $0)
+        }
         Log.editor.info("MP4 export started: \(Int(edit.plan.renderSize.width))×\(Int(edit.plan.renderSize.height)) @ \(fps) fps, \(Int(bitrate / 1000)) kbps\(settings.optimizeForSharing ? ", optimized for sharing" : "")")
         do {
             try await job.run()

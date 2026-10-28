@@ -10,6 +10,7 @@ struct RecordingSettingsView: View {
     @AppStorage(PreferenceKey.recordingFrameRate) private var frameRate = 60
     @AppStorage(PreferenceKey.recordingQuality) private var quality = "medium"
     @AppStorage(PreferenceKey.recordingCameraCompositeResolution) private var compositeResolution = ExportResolution.original.rawValue
+    @State private var cameraBackground = CameraBackground.savedDefault()
 
     var body: some View {
         Form {
@@ -47,6 +48,19 @@ struct RecordingSettingsView: View {
                 Text("When the camera is saved as a layer, the video you share is re-rendered with the camera after you stop. Smaller sizes are ready sooner; the editable original keeps full size. Never larger than the recording.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            }
+
+            if #available(macOS 26, *) {
+                Section {
+                    CameraBackgroundControls(background: $cameraBackground)
+                } header: {
+                    Text("Camera Background")
+                } footer: {
+                    Text("New recordings with the camera saved as a layer start with this background, and the video you share has it. Change it per recording in the editor.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .onChange(of: cameraBackground) { _, background in CameraBackground.saveDefault(background) }
             }
 
             Section {

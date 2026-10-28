@@ -24,6 +24,9 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
     }
 
     private var entries: [URL: Entry] = [:]
+    /// An editor was built in this launch (or `warmUp()` ran), so building
+    /// another is quick and the window can skip the skeleton.
+    private static var isEditorWarm = false
 
     override public init() {
         super.init()
@@ -42,21 +45,27 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             show(entry.window)
             return
         }
+        let signpost = Log.signposter.beginInterval("openVideoEditor")
+        defer { Log.signposter.endInterval("openVideoEditor", signpost) }
 
         let model = VideoEditorModel(url: key)
         model.onExportFinished = { [weak self] result in self?.onExportFinished?(result) }
+        model.isEditorMounted = Self.isEditorWarm
 
-        let hosting = NSHostingController(rootView: EditorView(model: model))
+        let hosting = NSHostingController(rootView: EditorWindowContent(model: model))
         hosting.sceneBridgingOptions = [.toolbars, .title]
 
         let window = NSWindow(contentViewController: hosting)
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.toolbarStyle = .unified
+        // A toolbar from the start, so the title bar doesn't grow when the
+        // editor's own toolbar arrives after the skeleton.
+        if window.toolbar == nil { window.toolbar = NSToolbar(identifier: "videoEditor.placeholder") }
         window.title = key.deletingPathExtension().lastPathComponent
         window.representedURL = key
         window.isReleasedWhenClosed = false
         window.delegate = self
-        window.minSize = NSSize(width: 900, height: 600)
+        window.minSize = NSSize(width: 1000, height: 600)
         window.setContentSize(NSSize(width: 1200, height: 780))
         // The autosave name can be used by one window at a time; extra editor
         // windows cascade from the first instead.
@@ -71,7 +80,48 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
         model.onUnsavedChangesChanged = { [weak window] edited in window?.isDocumentEdited = edited }
         entries[key] = Entry(window: window, model: model, keyMonitor: installKeyMonitor(window: window, model: model))
         show(window)
+        if !model.isEditorMounted { mountEditor(model) }
         Log.editor.info("Editor opened for \(key.lastPathComponent, privacy: .public)")
+    }
+
+    /// Builds the editor once its skeleton is on screen (VE-18).
+    private func mountEditor(_ model: VideoEditorModel) {
+        Task { @MainActor in
+            // A couple of frames for the window to draw the skeleton: building
+            // the first editor of a launch holds the main thread for a moment.
+            try? await Task.sleep(for: .milliseconds(50))
+            model.isEditorMounted = true
+            Self.isEditorWarm = true
+        }
+    }
+
+    /// Builds an editor off screen, once, so the first one the user opens
+    /// comes up at once. The first editor of a launch loads frameworks and
+    /// sets up every view type for the first time, which takes a second or
+    /// two; later ones take about a tenth of a second (ADR-42). Call it while
+    /// the app is idle: it holds the main thread for that second or two.
+    public func warmUp() {
+        guard !Self.isEditorWarm, entries.isEmpty else { return }
+        let signpost = Log.signposter.beginInterval("warmUpVideoEditor")
+        defer { Log.signposter.endInterval("warmUpVideoEditor", signpost) }
+        let start = ContinuousClock.now
+
+        // Never loaded: it only lends the views something to show.
+        let model = VideoEditorModel(url: URL(fileURLWithPath: "/dev/null"))
+        model.isEditorMounted = true
+        let hosting = NSHostingController(rootView: EditorView(model: model))
+        hosting.sceneBridgingOptions = [.toolbars, .title]
+        let window = NSWindow(contentViewController: hosting)
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.toolbarStyle = .unified
+        window.isReleasedWhenClosed = false
+        window.setContentSize(NSSize(width: 1200, height: 780))
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.close()
+        model.close()
+        Self.isEditorWarm = true
+        let elapsed = ContinuousClock.now - start
+        Log.editor.info("Video editor warmed up in \(elapsed.formatted(.units(allowed: [.milliseconds])), privacy: .public)")
     }
 
     /// The window and model editing `url` (internal: tests and diagnostics).
@@ -155,8 +205,10 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
     private func installKeyMonitor(window: NSWindow, model: VideoEditorModel) -> Any? {
         // Local monitors run on the main thread, inside the app's event loop.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak window, weak model] event in
+            // Text being edited keeps its keys; the read-only transcript doesn't.
+            let isEditingText = (window?.firstResponder as? NSTextView)?.isEditable ?? (window?.firstResponder is NSText)
             guard let window, let model, event.window === window, window.attachedSheet == nil,
-                  !(window.firstResponder is NSText) else { return event }
+                  !isEditingText else { return event }
             return Self.handle(event, model: model, window: window) ? nil : event
         }
     }
@@ -170,6 +222,10 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
 
         if flags == .command {
             switch key {
+            case "=", "+": model.zoomTimeline(by: 1.5)
+            case "-": model.zoomTimeline(by: 1 / 1.5)
+            case "0": model.fitTimeline()
+            case "1", "2", "3", "4", "5", "6", "7", "8", "9": model.showInspectorSection(number: Int(key) ?? 0)
             case "z": model.undo()
             case "s": model.save()
             case "x": model.cutSelection()
@@ -183,6 +239,11 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             model.redo()
             return true
         }
+        // ⌘+ arrives with Shift on most layouts.
+        if flags == [.command, .shift], key == "+" || key == "=" {
+            model.zoomTimeline(by: 1.5)
+            return true
+        }
         guard flags.subtracting(.shift).isEmpty else { return false }
 
         switch Int(event.keyCode) {
@@ -191,6 +252,9 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
         case kVK_RightArrow: flags.contains(.shift) ? model.jump(by: 1) : model.stepFrames(1)
         case kVK_Delete, kVK_ForwardDelete: model.deleteSelected()
         case kVK_Escape: model.clearSelection()
+        case kVK_Return, kVK_ANSI_KeypadEnter:
+            guard model.inspectorSection == .transcript, let words = model.transcriptSelection, !flags.contains(.shift) else { return false }
+            model.beginCorrecting(words)
         default:
             switch key {
             case "i": model.setTrimInAtPlayhead()
@@ -200,6 +264,8 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
             case "l": model.playFaster()
             case "z": model.addZoomAtPlayhead()
             case "s": model.splitAtPlayhead()
+            case "[": model.setSelectedEdgeToPlayhead(start: true)
+            case "]": model.setSelectedEdgeToPlayhead(start: false)
             default: return false
             }
         }

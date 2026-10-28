@@ -25,11 +25,18 @@ public struct RenderPlan: Sendable, Equatable {
     public var zooms: [ZoomSegment]
     /// Zoom moves a camera over the whole canvas (see `VideoEditProject.zoomFillsFrame`).
     public var zoomFillsFrame: Bool
-    /// The webcam layer to draw (visible, and the source has a camera track).
+    /// The webcam layer to draw (shown somewhere, and the source has a
+    /// camera track).
     public var camera: CameraOverlay?
+    /// Where the camera fills the frame or is hidden (PRD CAM-6).
+    public var cameraLayouts: [CameraLayoutSegment]
     /// Rotation that turns camera frames upright.
     public var cameraOrientation: CGImagePropertyOrientation
+    /// How finely the camera background is separated (PRD CAM-1).
+    public var cameraMatteQuality: CameraMatte.Quality
     public var timeline: Timeline
+    /// Burned-in captions (PRD CAP-3), when on and there's a transcript.
+    public var captions: CaptionTrack?
     /// The editor turns zoom off while the user positions a zoom rectangle.
     public var zoomEnabled: Bool
     public var altersFrame: Bool
@@ -52,7 +59,8 @@ public struct RenderPlan: Sendable, Equatable {
         zoomEnabled: Bool = true,
         backgroundOrientation: CGImagePropertyOrientation = .up,
         hasCameraTrack: Bool = false,
-        cameraOrientation: CGImagePropertyOrientation = .up
+        cameraOrientation: CGImagePropertyOrientation = .up,
+        cameraMatteQuality: CameraMatte.Quality = .balanced
     ) {
         let background = project.background
         let canvas = CanvasLayout.canvasSize(source: sourceSize, aspect: background.aspect)
@@ -74,9 +82,12 @@ public struct RenderPlan: Sendable, Equatable {
         self.zooms = project.zooms
         self.zoomFillsFrame = project.zoomFillsFrame
         let camera = hasCameraTrack ? (project.camera ?? .standard) : nil
-        self.camera = camera?.isVisible == true ? camera : nil
+        self.camera = camera.flatMap { CameraLayoutMath.showsCamera(segments: project.cameraLayouts, isVisible: $0.isVisible) ? $0 : nil }
+        self.cameraLayouts = project.cameraLayouts
         self.cameraOrientation = cameraOrientation
+        self.cameraMatteQuality = cameraMatteQuality
         self.timeline = Timeline(project: project)
+        self.captions = project.captionTrack(timeline: self.timeline, portrait: renderSize.height > renderSize.width)
         self.zoomEnabled = zoomEnabled
         self.altersFrame = background.altersFrame
     }
@@ -84,11 +95,12 @@ public struct RenderPlan: Sendable, Equatable {
     /// When false, frames are a plain scaled copy of the source and the much
     /// cheaper built-in compositor is used instead of `VideoEditCompositor`.
     public var needsCustomCompositor: Bool {
-        altersFrame || camera != nil || (zoomEnabled && !zooms.isEmpty)
+        altersFrame || camera != nil || captions != nil || (zoomEnabled && !zooms.isEmpty)
     }
 
-    /// Where the camera layer sits in the output, pixels, **bottom-left**
-    /// origin (Core Image), before any full-frame zoom.
+    /// Where the camera layer usually sits in the output, pixels,
+    /// **bottom-left** origin (Core Image), before any full-frame zoom or
+    /// camera layout.
     public var cameraRect: CGRect? {
         guard let camera else { return nil }
         // `videoRect` is centered, so it's the same in both origins.
@@ -156,13 +168,16 @@ public struct FrameRenderer: Sendable {
 
     /// Composes the output frame at output `time` (seconds). `background` is
     /// the background video's frame when the fill is a video; `camera` the
-    /// webcam track's frame.
+    /// webcam track's frame. `matteSmoother` steadies the camera person's
+    /// outline over the frames it has seen (the compositor's own).
     public func render(
         source: CIImage,
         outputTime time: Double,
         backdrop: CIImage? = nil,
         background: CIImage? = nil,
-        camera cameraFrame: CIImage? = nil
+        camera cameraFrame: CIImage? = nil,
+        caption: CIImage? = nil,
+        matteSmoother: MatteSmoother? = nil
     ) -> CIImage {
         let upright = source.oriented(plan.orientation)
         let frame = upright.transformed(by: CGAffineTransform(translationX: -upright.extent.minX, y: -upright.extent.minY))
@@ -225,25 +240,56 @@ public struct FrameRenderer: Sendable {
         }
         // The webcam stays put while the video zooms; a full-frame zoom
         // moves it along with everything else.
-        if let cameraFrame, let layer = cameraLayer(cameraFrame) {
-            frameImage = layer.transformed(by: camera).composited(over: frameImage)
+        if let cameraFrame, let layer = cameraLayer(cameraFrame, at: sourceTime, zoom: camera, smoother: matteSmoother) {
+            frameImage = layer.composited(over: frameImage)
         }
+        // Captions sit on the canvas, unaffected by zooms.
+        if let caption { frameImage = caption.composited(over: frameImage) }
         return frameImage.cropped(to: canvas)
     }
 
     /// The webcam frame cropped to the layer's shape, with a soft shadow,
-    /// placed at `plan.cameraRect`.
-    func cameraLayer(_ frame: CIImage) -> CIImage? {
-        guard let overlay = plan.camera, let rect = plan.cameraRect, rect.width > 1, rect.height > 1 else { return nil }
+    /// at source `time`: at `plan.cameraRect` (moved by `zoom`, a full-frame
+    /// zoom's camera), or on its way to filling the canvas or hiding (CAM-6).
+    func cameraLayer(_ frame: CIImage, at time: Double = 0, zoom: CGAffineTransform = .identity, smoother: MatteSmoother? = nil) -> CIImage? {
+        guard let overlay = plan.camera, let usual = plan.cameraRect?.applying(zoom), usual.width > 1, usual.height > 1 else { return nil }
+        let state = CameraLayoutMath.state(at: time, segments: plan.cameraLayouts, isVisible: overlay.isVisible)
+        guard state.visibility > 0.001 else { return nil }
+        let fullness = CGFloat(state.fullness)
+        let canvas = canvasRect
+        let rect = CGRect(
+            x: usual.minX + (canvas.minX - usual.minX) * fullness,
+            y: usual.minY + (canvas.minY - usual.minY) * fullness,
+            width: usual.width + (canvas.width - usual.width) * fullness,
+            height: usual.height + (canvas.height - usual.height) * fullness
+        )
+        guard let layer = cameraLayer(frame, overlay: overlay, in: rect, cornerRadius: overlay.cornerRadius(for: usual.size) * (1 - fullness),
+                                      shadow: 1 - fullness, time: time, smoother: smoother) else { return nil }
+        guard state.visibility < 0.999 else { return layer }
+        let fade = CIFilter.colorMatrix()
+        fade.inputImage = layer
+        fade.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(state.visibility))
+        return fade.outputImage ?? layer
+    }
+
+    /// The webcam frame filling `rect` (center-cropped to its shape), masked
+    /// to `cornerRadius`, over a soft shadow of strength `shadow` (0…1).
+    private func cameraLayer(_ frame: CIImage, overlay: CameraOverlay, in rect: CGRect, cornerRadius radius: CGFloat, shadow: CGFloat,
+                             time: Double, smoother: MatteSmoother?) -> CIImage? {
         var image = frame.oriented(plan.cameraOrientation)
         image = image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
         if overlay.isMirrored {
             image = image.transformed(by: CGAffineTransform(scaleX: -1, y: 1).translatedBy(x: -image.extent.width, y: 0))
         }
-        // Center-crop to the shape's aspect, then fill the layer.
+        // Blur, replace, or remove the background on the upright frame, so
+        // a replacement picture is never turned or mirrored.
+        if let processed = CameraMatte.apply(overlay.background, to: image, quality: plan.cameraMatteQuality, smoother: smoother, time: time) {
+            image = processed
+        }
+        // Center-crop to the layer's aspect, then fill the layer.
         let size = image.extent.size
         guard size.width > 0, size.height > 0 else { return nil }
-        let aspect = CGFloat(overlay.shape.aspect)
+        let aspect = rect.width / rect.height
         let cropSize = size.width / size.height > aspect
             ? CGSize(width: size.height * aspect, height: size.height)
             : CGSize(width: size.width, height: size.width / aspect)
@@ -256,22 +302,46 @@ public struct FrameRenderer: Sendable {
                 .concatenating(CGAffineTransform(translationX: rect.minX, y: rect.minY)))
             .cropped(to: rect)
 
-        let radius = overlay.cornerRadius(for: rect.size)
-        let blend = CIFilter.blendWithAlphaMask()
-        blend.inputImage = placed
-        blend.backgroundImage = CIImage.empty()
-        blend.maskImage = roundedRect(rect, radius: radius, color: CIColor(red: 1, green: 1, blue: 1))
-        let masked = blend.outputImage ?? placed
-
         let sigma = Double(rect.height) * 0.04
         let reach = CGFloat(sigma * 4)
         let padded = rect.insetBy(dx: -reach, dy: -reach)
-        let shadow = roundedRect(rect, radius: radius, color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.35))
+        let offset = CGAffineTransform(translationX: 0, y: -rect.height * 0.02)
+
+        // A removed background shows only the person, shadowed by their outline.
+        guard overlay.background.drawsShape else {
+            guard shadow > 0.001 else { return placed }
+            let silhouette = placed.applyingFilter("CIColorMatrix", parameters: [
+                "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0.35 * shadow),
+            ])
+            let outline = silhouette
+                .composited(over: CIImage(color: .clear).cropped(to: padded))
+                .applyingGaussianBlur(sigma: sigma * 0.5)
+                .cropped(to: padded)
+                .transformed(by: offset)
+            return placed.composited(over: outline)
+        }
+
+        let masked: CIImage
+        if radius > 0.5 {
+            let blend = CIFilter.blendWithAlphaMask()
+            blend.inputImage = placed
+            blend.backgroundImage = CIImage.empty()
+            blend.maskImage = roundedRect(rect, radius: radius, color: CIColor(red: 1, green: 1, blue: 1))
+            masked = blend.outputImage ?? placed
+        } else {
+            masked = placed
+        }
+        guard shadow > 0.001 else { return masked }
+
+        let shadowImage = roundedRect(rect, radius: radius, color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.35 * shadow))
             .composited(over: CIImage(color: .clear).cropped(to: padded))
             .applyingGaussianBlur(sigma: sigma)
             .cropped(to: padded)
-            .transformed(by: CGAffineTransform(translationX: 0, y: -rect.height * 0.02))
-        return masked.composited(over: shadow)
+            .transformed(by: offset)
+        return masked.composited(over: shadowImage)
     }
 
     // MARK: Pieces

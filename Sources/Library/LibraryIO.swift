@@ -112,7 +112,9 @@ enum LibraryIO {
     /// dragging, opening, and Quick Look of screenshots that have no current export.
     @concurrent
     static func temporaryFlattenedFile(snapshot: CaptureSnapshot, files: LibraryFiles) async -> URL? {
-        let base = (snapshot.title as NSString).deletingPathExtension
+        // Named as the library shows it, so a renamed capture drags out under
+        // its new name (and gets its own file: the name is part of the path).
+        let base = snapshot.suggestedFileName
         let name = (base.isEmpty ? "Capture" : base) + ".png"
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("Pankapture Library", isDirectory: true)

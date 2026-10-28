@@ -1,8 +1,10 @@
 import AppCore
 import AppKit
+import AutoEdit
 import AVFoundation
 import Observation
 import Synchronization
+import Transcription
 
 /// State and actions of one editor window. Owns the preview player and keeps
 /// it in sync with the edit project: timeline edits rebuild the player item,
@@ -23,6 +25,11 @@ final class VideoEditorModel {
 
     private(set) var media: SourceMedia?
     private(set) var loadError: String?
+    /// The editor's controls are built (VE-18). The first editor of a launch
+    /// takes a moment to build, so the window shows a skeleton of it first.
+    var isEditorMounted = false
+    /// What opening is waiting on, for the loading status.
+    private(set) var loadingStage: LoadingStage = .buildingEditor
     private(set) var project: VideoEditProject
     /// The project as last saved (VE-12); edits beyond it are unsaved.
     private(set) var savedProject: VideoEditProject
@@ -33,15 +40,29 @@ final class VideoEditorModel {
     private(set) var playhead: Double = 0
     private(set) var isPlaying = false
     /// Range selected on the timeline (source seconds), for Cut and Speed.
-    var selection: TimeRange?
-    var selectedCut: TimeRange?
+    /// One thing is selected at a time: selecting a range, cut, or zoom
+    /// deselects auto-edit's item and the transcript's words, so ⌫ and [ ]
+    /// act on what's visible.
+    var selection: TimeRange? {
+        didSet { if selection != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil; transcriptSelection = nil } }
+    }
+    var selectedCut: TimeRange? {
+        didSet { if selectedCut != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil; transcriptSelection = nil } }
+    }
     /// The zoom being edited. While set, the preview shows the unzoomed frame
     /// so the user can position the zoom rectangle over it.
     var selectedZoomID: ZoomSegment.ID? {
         didSet {
+            // Before the guard: clicking the zoom that's already selected
+            // must still deselect the rest.
+            if selectedZoomID != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil; transcriptSelection = nil }
             guard oldValue != selectedZoomID else { return }
             updatePreviewVideoComposition()
         }
+    }
+    /// The camera layout being edited (CAM-6).
+    var selectedCameraLayoutID: CameraLayoutSegment.ID? {
+        didSet { if selectedCameraLayoutID != nil { selectedAutoItem = nil; transcriptSelection = nil } }
     }
 
     private(set) var filmstrip: [FilmstripFrame] = []
@@ -57,6 +78,56 @@ final class VideoEditorModel {
     /// When the running export started, for the time-left estimate.
     private(set) var exportStartDate: Date?
     var isShowingExportSheet = false
+
+    // MARK: Auto-edit (PRD §5.11; actions in VideoEditorModel+AutoEdit.swift)
+
+    enum AutoEditState: Equatable {
+        case idle
+        case running(stage: String, fraction: Double?)
+        case failed(String)
+    }
+
+    var autoEditState: AutoEditState = .idle
+    /// Why the provider's answer wasn't used, or what its checks dropped.
+    var autoEditNotice: String?
+    var autoEditLanguage: TranscriptLanguage
+    /// This editor's own choice of judge and transcriber (PRD AI-8); `nil`
+    /// follows Settings ▸ AI's default, live.
+    var judgeOverride: Judge?
+    var transcriberOverride: Transcriber?
+    /// The auto-edit pause or removal selected on the timeline or in the review list.
+    var selectedAutoItem: AutoEditItem?
+    /// Words selected in the transcript panel (PRD AE-10).
+    var transcriptSelection: ClosedRange<Int>?
+    /// Words being corrected in the transcript's popover (CAP-2).
+    var wordsBeingCorrected: ClosedRange<Int>?
+
+    // MARK: Panels (VE-16, VE-17)
+
+    /// The one inspector pane on screen. Selecting something on the
+    /// timeline shows the pane that edits it.
+    var inspectorSection: InspectorSection = .background
+    var autoEditPage: AutoEditPage = .setup
+    /// What part of the source the timeline shows.
+    var timelineViewport = TimelineViewport()
+
+    enum VoiceState: Equatable {
+        case idle
+        case processing(Double)
+        case failed(String)
+    }
+
+    /// Voice cleanup (PRD AU-3): processing runs in the background; the
+    /// preview uses the original voice until the cleaned one is ready.
+    private(set) var voiceState: VoiceState = .idle
+    @ObservationIgnored private var voiceTask: Task<Void, Never>?
+    /// Each voice change gets a number; only the latest may touch the state.
+    @ObservationIgnored private var voiceRun = 0
+    @ObservationIgnored private var waveformTasks: [CMPersistentTrackID: Task<Void, Never>] = [:]
+    @ObservationIgnored var autoEditTask: Task<Void, Never>?
+    /// Each analysis run gets a generation; a cancelled run that is still
+    /// winding down must not touch the state of a newer one.
+    @ObservationIgnored var autoEditGeneration = 0
 
     @ObservationIgnored var onExportFinished: ((VideoExportResult) -> Void)?
     /// Called when `hasUnsavedChanges` flips (the window's edited dot).
@@ -74,6 +145,10 @@ final class VideoEditorModel {
     @ObservationIgnored private var analysisTasks: [Task<Void, Never>] = []
     @ObservationIgnored private var isContinuousEdit = false
     @ObservationIgnored private let store: ProjectStore
+    /// When the window asked for the recording, to log how long opening took.
+    @ObservationIgnored private let openedAt = ContinuousClock.now
+    @ObservationIgnored private var didAppear = false
+    @ObservationIgnored private var didLogReady = false
 
     init(url: URL, store: ProjectStore = ProjectStore()) {
         sourceURL = url
@@ -82,6 +157,8 @@ final class VideoEditorModel {
         project = empty
         savedProject = empty
         exportSettings = Self.loadExportSettings()
+        autoEditLanguage = UserDefaults.standard.string(forKey: PreferenceKey.autoEditLanguage)
+            .flatMap(TranscriptLanguage.init(rawValue:)) ?? .preferred
         player.actionAtItemEnd = .pause
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(value: 1, timescale: 30),
@@ -89,9 +166,22 @@ final class VideoEditorModel {
         ) { [weak self] time in
             MainActor.assumeIsolated { self?.playerTimeChanged(time) }
         }
+        inspectorSection = isAutoEditAvailable ? .autoEdit : .background
     }
 
     // MARK: Loading
+
+    enum LoadingStage: Equatable {
+        case buildingEditor
+        case readingRecording
+
+        var message: String {
+            switch self {
+            case .buildingEditor: "Opening the editor…"
+            case .readingRecording: "Loading the recording…"
+            }
+        }
+    }
 
     var duration: Double { project.sourceDuration }
     var timeline: Timeline { currentEdit?.timeline ?? project.timeline }
@@ -107,6 +197,13 @@ final class VideoEditorModel {
     }
     var clickCount: Int { sidecar?.clicks.count ?? 0 }
     var selectedZoom: ZoomSegment? { project.zooms.first { $0.id == selectedZoomID } }
+    var selectedCameraLayout: CameraLayoutSegment? { project.cameraLayouts.first { $0.id == selectedCameraLayoutID } }
+    /// The camera is in its usual place at the playhead, so the preview can
+    /// offer to drag and resize it.
+    var isCameraInUsualPlace: Bool {
+        guard let camera = project.camera else { return false }
+        return CameraLayoutMath.state(at: playhead, segments: project.cameraLayouts, isVisible: camera.isVisible) == .usual
+    }
     var hasUnsavedChanges: Bool { media != nil && project != savedProject }
 
     /// Preview render plan (for overlay geometry: canvas and video rect).
@@ -118,7 +215,28 @@ final class VideoEditorModel {
         )
     }
 
+    /// The editor's controls are on screen.
+    func editorDidAppear() {
+        didAppear = true
+        logReadyIfComplete()
+    }
+
+    /// Logs how long opening took once the editor shows the recording
+    /// (VE-18 budget, PRD §6.1).
+    private func logReadyIfComplete() {
+        guard didAppear, media != nil, !didLogReady else { return }
+        didLogReady = true
+        // After this update's layout and drawing, which cost the most.
+        DispatchQueue.main.async { [openedAt, sourceURL] in
+            let elapsed = ContinuousClock.now - openedAt
+            Log.editor.info("Editor ready for \(sourceURL.lastPathComponent, privacy: .public) in \(elapsed.formatted(.units(allowed: [.milliseconds])), privacy: .public)")
+        }
+    }
+
     func load() async {
+        let signpost = Log.signposter.beginInterval("loadRecording")
+        defer { Log.signposter.endInterval("loadRecording", signpost) }
+        loadingStage = .readingRecording
         do {
             let media = try await SourceMedia.load(url: sourceURL)
             tracks = try await media.loadTracks()
@@ -136,14 +254,23 @@ final class VideoEditorModel {
                 project = saved
             }
             self.media = media
+            if let language = project.autoEdit?.language { autoEditLanguage = language }
             notifyUnsavedChanges()
             self.sidecar = sidecar
             if let url = project.background.fill.videoURL {
                 backgroundVideo = try? await BackgroundVideo.load(url: url)
             }
+            if media.camera != nil, let background = project.camera?.background,
+               background.isActive, background.effectiveMatte == .person {
+                // Before the first preview frame needs the model (CAM-7).
+                Task.detached(priority: .userInitiated) { CameraMatte.prepare(quality: .fast) }
+            }
             rebuildPlayerItem(seekToSource: project.trim.start)
             startAnalysis(media)
-            Log.editor.info("Opened \(self.sourceURL.lastPathComponent, privacy: .public): \(media.duration)s, \(media.audioTracks.count) audio track(s)")
+            logReadyIfComplete()
+            if project.voice?.isActive == true { updateVoice() }
+            let elapsed = ContinuousClock.now - openedAt
+            Log.editor.info("Opened \(self.sourceURL.lastPathComponent, privacy: .public) in \(elapsed.formatted(.units(allowed: [.milliseconds])), privacy: .public): \(media.duration)s, \(media.audioTracks.count) audio track(s)")
         } catch {
             loadError = error.localizedDescription
             Log.editor.error("Couldn't open \(self.sourceURL.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
@@ -167,13 +294,7 @@ final class VideoEditorModel {
             self?.filmstrip = frames
         })
         for track in media.audioTracks {
-            let extraction = Task.detached(priority: .utility) {
-                try await WaveformExtractor.waveform(asset: asset, trackID: track.trackID)
-            }
-            analysisTasks.append(Task { [weak self] in
-                let waveform = try? await withTaskCancellationHandler { try await extraction.value } onCancel: { extraction.cancel() }
-                if let waveform { self?.waveforms[track.trackID] = waveform }
-            })
+            loadWaveform(for: track, asset: asset, trackID: track.trackID, startTime: nil)
         }
     }
 
@@ -244,9 +365,12 @@ final class VideoEditorModel {
         project = updated
         refreshUndoState()
         if let id = selectedZoomID, !updated.zooms.contains(where: { $0.id == id }) { selectedZoomID = nil }
+        if let id = selectedCameraLayoutID, !updated.cameraLayouts.contains(where: { $0.id == id }) { selectedCameraLayoutID = nil }
         if let cut = selectedCut, !updated.cuts.contains(cut) { selectedCut = nil }
+        if let item = selectedAutoItem, updated.autoEdit?.range(of: item) == nil { selectedAutoItem = nil }
 
-        let timelineChanged = old.trim != updated.trim || old.cuts != updated.cuts || old.speedSegments != updated.speedSegments
+        // Timelines compare by their segments (auto-edit derives cuts and speeds).
+        let timelineChanged = Timeline(project: old) != Timeline(project: updated)
         if old.background.fill.videoURL != updated.background.fill.videoURL {
             // A background movie is a track of the composition.
             loadBackgroundVideo(updated.background.fill.videoURL)
@@ -255,12 +379,15 @@ final class VideoEditorModel {
             // timeline redraws immediately and the preview follows shortly.
             scheduleRebuild(delay: isContinuousEdit ? .milliseconds(200) : .zero)
         } else if old.background != updated.background || old.zoomFillsFrame != updated.zoomFillsFrame || old.camera != updated.camera
+                    || old.cameraLayouts != updated.cameraLayouts
+                    || old.captions != updated.captions || (updated.captions?.isEnabled == true && old.transcript != updated.transcript)
                     || (old.zooms != updated.zooms && selectedZoomID == nil) {
             // While a zoom is being edited the preview ignores zooms, so
             // dragging its rectangle doesn't need a new video composition.
             updatePreviewVideoComposition()
         }
         if old.trackVolumes != updated.trackVolumes { updatePreviewAudioMix() }
+        if old.voice != updated.voice { updateVoice() }
         scheduleSave()
         notifyUnsavedChanges()
     }
@@ -351,11 +478,43 @@ final class VideoEditorModel {
         var added: ZoomSegment?
         edit { added = $0.addZoom(at: playhead) }
         selectedZoomID = added?.id
+        if added != nil { inspectorSection = .zoom }
     }
 
     func removeSelectedZoom() {
         guard let id = selectedZoomID else { return }
         edit { $0.removeZoom(id: id) }
+    }
+
+    /// Adds a camera layout at the playhead (CAM-6), or selects the one
+    /// already there.
+    func addCameraLayoutAtPlayhead(_ layout: CameraLayoutSegment.Layout) {
+        if let existing = project.cameraLayouts.first(where: { playhead >= $0.range.start && playhead < $0.range.end }) {
+            selectCameraLayout(existing.id)
+            return
+        }
+        var added: CameraLayoutSegment?
+        edit { added = $0.addCameraLayout(layout, at: playhead) }
+        if let added { selectCameraLayout(added.id) } else { NSSound.beep() }
+    }
+
+    func selectCameraLayout(_ id: CameraLayoutSegment.ID) {
+        selection = nil
+        selectedCut = nil
+        selectedZoomID = nil
+        selectedCameraLayoutID = id
+        inspectorSection = .camera
+    }
+
+    func setSelectedCameraLayout(_ layout: CameraLayoutSegment.Layout) {
+        guard var segment = selectedCameraLayout, segment.layout != layout else { return }
+        segment.layout = layout
+        edit { $0.updateCameraLayout(segment) }
+    }
+
+    func removeSelectedCameraLayout() {
+        guard let id = selectedCameraLayoutID else { return }
+        edit { $0.removeCameraLayout(id: id) }
     }
 
     func applyAutoZoom() {
@@ -370,9 +529,16 @@ final class VideoEditorModel {
     }
 
     /// Deletes whatever is selected (zoom, cut, or the selection as a cut).
+    /// For an auto-edit item, ⌫ restores what it removed (AE-8).
     func deleteSelected() {
-        if selectedZoomID != nil {
+        if let words = transcriptSelection {
+            cutWords(words)
+        } else if let item = selectedAutoItem {
+            restoreAutoItem(item)
+        } else if selectedZoomID != nil {
             removeSelectedZoom()
+        } else if selectedCameraLayoutID != nil {
+            removeSelectedCameraLayout()
         } else if let cut = selectedCut {
             removeCut(cut)
         } else if selection != nil {
@@ -385,6 +551,9 @@ final class VideoEditorModel {
         selection = nil
         selectedCut = nil
         selectedZoomID = nil
+        selectedCameraLayoutID = nil
+        selectedAutoItem = nil
+        transcriptSelection = nil
     }
 
     // MARK: Playback
@@ -453,6 +622,83 @@ final class VideoEditorModel {
         guard currentEdit != nil, time.isNumeric, pendingSeeks == 0 else { return }
         playhead = timeline.sourceTime(forOutput: time.seconds)
         if isPlaying, player.rate == 0 { isPlaying = false }
+        // Page the zoomed timeline along with playback. Copy first, so
+        // observers only hear about real moves.
+        if isPlaying, timelineViewport.isZoomed {
+            var viewport = timelineViewport
+            if viewport.follow(playhead: playhead, duration: duration) { timelineViewport = viewport }
+        }
+    }
+
+    // MARK: Voice cleanup (PRD AU-1–AU-3)
+
+    var microphoneTrack: AudioTrackInfo? { media?.audioTracks.first { $0.role == .microphone } }
+
+    /// Makes the preview match `project.voice`: processes the microphone in
+    /// the background (or takes it from the cache) and swaps it in. Until a
+    /// new setting is ready, the original voice plays.
+    private func updateVoice() {
+        voiceTask?.cancel()
+        voiceRun += 1
+        guard media != nil, let microphone = microphoneTrack else { return }
+        let settings = project.voice
+        let cached = settings.flatMap { $0.isActive ? VoiceProcessor.cached(for: sourceURL, settings: $0) : nil }
+        if cached == nil, tracks?.processedVoice != nil {
+            tracks?.processedVoice = nil
+            rebuildPlayerItem(seekToSource: playhead)
+            loadWaveform(for: microphone, asset: AVURLAsset(url: sourceURL), trackID: microphone.trackID, startTime: nil)
+        }
+        guard let settings, settings.isActive else {
+            voiceState = .idle
+            return
+        }
+        let url = sourceURL
+        let run = voiceRun
+        voiceState = .processing(0)
+        let work = Task.detached(priority: .userInitiated) { [weak self] in
+            try await VoiceProcessor.process(source: url, microphoneTrackID: microphone.trackID, settings: settings) { fraction in
+                Task { @MainActor in
+                    guard let self, self.voiceRun == run, case .processing = self.voiceState else { return }
+                    self.voiceState = .processing(fraction)
+                }
+            }
+        }
+        voiceTask = Task { [weak self] in
+            do {
+                let output = try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+                let voice = try await ProcessedVoice.load(output)
+                // A newer change may have come in during either wait.
+                guard let self, !Task.isCancelled, self.voiceRun == run, self.project.voice == settings else { return }
+                self.tracks?.processedVoice = voice
+                self.voiceState = .idle
+                self.rebuildPlayerItem(seekToSource: self.playhead)
+                self.loadWaveform(for: microphone, asset: voice.asset, trackID: voice.track.trackID, startTime: voice.startTime)
+            } catch is CancellationError {
+            } catch {
+                guard let self, !Task.isCancelled, self.voiceRun == run else { return }
+                self.voiceState = .failed(error.localizedDescription)
+                Log.editor.error("Voice processing failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Draws a lane's waveform from `asset` (the recording, or the processed
+    /// voice placed at `startTime`). A newer request for the lane replaces
+    /// an older one still running.
+    private func loadWaveform(for lane: AudioTrackInfo, asset: AVURLAsset, trackID: CMPersistentTrackID, startTime: Double?) {
+        waveformTasks[lane.trackID]?.cancel()
+        let extraction = Task.detached(priority: .utility) {
+            try await WaveformExtractor.waveform(asset: asset, trackID: trackID)
+        }
+        waveformTasks[lane.trackID] = Task { [weak self] in
+            let extracted = try? await withTaskCancellationHandler { try await extraction.value } onCancel: { extraction.cancel() }
+            guard let self, !Task.isCancelled, var waveform = extracted else { return }
+            if let startTime {
+                waveform = Waveform(startTime: waveform.startTime + startTime, bucketDuration: waveform.bucketDuration,
+                                    peaks: waveform.peaks, loudestPeak: waveform.loudestPeak)
+            }
+            self.waveforms[lane.trackID] = waveform
+        }
     }
 
     // MARK: Preview player
@@ -511,7 +757,8 @@ final class VideoEditorModel {
             zoomEnabled: options.zoomEnabled,
             backgroundOrientation: backgroundVideo?.orientation ?? .up,
             hasCameraTrack: edit.cameraTrackID != nil,
-            cameraOrientation: media.camera?.orientation ?? .up
+            cameraOrientation: media.camera?.orientation ?? .up,
+            cameraMatteQuality: options.cameraMatteQuality
         )
         item.videoComposition = CompositionBuilder.makeVideoComposition(
             plan: plan,
@@ -531,7 +778,9 @@ final class VideoEditorModel {
 
     private func updatePreviewAudioMix() {
         guard let media, let edit = currentEdit else { return }
-        player.currentItem?.audioMix = CompositionBuilder.audioMix(for: edit.composition, source: media, volumes: project.trackVolumes)
+        player.currentItem?.audioMix = CompositionBuilder.audioMix(
+            for: edit.composition, source: media, volumes: project.trackVolumes, timeline: edit.timeline
+        )
     }
 
     // MARK: Persistence
@@ -701,6 +950,7 @@ final class VideoEditorModel {
                     try? FileManager.default.removeItem(at: result.url)
                     return
                 }
+                if settings.format == .mp4 { Self.writeCaptionsFile(for: project, nextTo: result.url) }
                 self.exportState = .finished(result)
                 self.onExportFinished?(result)
             } catch {
@@ -716,6 +966,21 @@ final class VideoEditorModel {
     }
 
     @ObservationIgnored private var exportGeneration = 0
+
+    /// Saves the captions as `.srt` or `.vtt` beside an MP4 export (CAP-4),
+    /// timed like the exported video.
+    nonisolated static func writeCaptionsFile(for project: VideoEditProject, nextTo video: URL) {
+        guard let settings = project.captions, settings.isEnabled, settings.fileFormat != .none,
+              let words = project.transcript?.words else { return }
+        let cues = CaptionBuilder.cues(words: words, timeline: project.timeline)
+        let (text, fileExtension) = settings.fileFormat == .srt ? (CaptionBuilder.srt(cues), "srt") : (CaptionBuilder.vtt(cues), "vtt")
+        let url = video.deletingPathExtension().appendingPathExtension(fileExtension)
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            Log.editor.error("Couldn't save the captions file: \(error.localizedDescription, privacy: .public)")
+        }
+    }
 
     func cancelExport() {
         exportTask?.cancel()
@@ -751,6 +1016,9 @@ final class VideoEditorModel {
         rebuildTask?.cancel()
         backgroundTask?.cancel()
         exportTask?.cancel()
+        autoEditTask?.cancel()
+        voiceTask?.cancel()
+        waveformTasks.values.forEach { $0.cancel() }
         analysisTasks.forEach { $0.cancel() }
         if let timeObserver { player.removeTimeObserver(timeObserver) }
         timeObserver = nil

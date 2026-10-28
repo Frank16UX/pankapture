@@ -1,3 +1,4 @@
+import AppCore
 import CoreGraphics
 import Foundation
 import Testing
@@ -175,23 +176,23 @@ struct WaveformTests {
 @Suite("Audio track roles")
 struct AudioRoleTests {
     @Test func namedTracksWin() {
-        let roles = SourceMedia.resolveRoles(names: ["Microphone", "System Audio"])
+        let roles = RecordingTracks.resolveRoles(names: ["Microphone", "System Audio"])
         #expect(roles.map(\.role) == [.microphone, .system])
         #expect(roles.map(\.label) == ["Microphone", "System Audio"])
     }
 
     @Test func unnamedTracksFollowOrderWithNeutralLabels() {
-        let roles = SourceMedia.resolveRoles(names: [nil, nil])
+        let roles = RecordingTracks.resolveRoles(names: [nil, nil])
         #expect(roles.map(\.role) == [.system, .microphone])
         #expect(roles.map(\.label) == ["Audio 1", "Audio 2"])
-        let single = SourceMedia.resolveRoles(names: [nil])
+        let single = RecordingTracks.resolveRoles(names: [nil])
         #expect(single.map(\.role) == [.system])
         #expect(single.map(\.label) == ["Audio"])
     }
 
     @Test func singleNamedMicTrack() {
-        #expect(SourceMedia.resolveRoles(names: ["mic"]).map(\.role) == [.microphone])
-        let mixed = SourceMedia.resolveRoles(names: [nil, "Mic"])
+        #expect(RecordingTracks.resolveRoles(names: ["mic"]).map(\.role) == [.microphone])
+        let mixed = RecordingTracks.resolveRoles(names: [nil, "Mic"])
         #expect(mixed.map(\.role) == [.system, .microphone])
     }
 }

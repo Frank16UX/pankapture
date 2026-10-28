@@ -41,8 +41,9 @@ final class VideoEditInstruction: NSObject, AVVideoCompositionInstructionProtoco
 /// export alike, so what you see is what you export.
 ///
 /// AVFoundation calls this object from its own (arbitrary) queues. It's
-/// `Sendable` because its only mutable state, the backdrop cache, lives in a
-/// `Mutex`; `CIContext` and `CIImage` are thread-safe.
+/// `Sendable` because its mutable state, the backdrop cache and the camera
+/// matte's last frame, lives behind `Mutex`es; `CIContext` and `CIImage`
+/// are thread-safe.
 final class VideoEditCompositor: NSObject, AVVideoCompositing, Sendable {
     /// One GPU context for the whole app: creating one is expensive (ARCH §10).
     static let ciContext = CIContext(options: [
@@ -57,6 +58,8 @@ final class VideoEditCompositor: NSObject, AVVideoCompositing, Sendable {
     }
 
     private let backdrop = Mutex<Backdrop?>(nil)
+    /// One per compositor: the preview and each export see their own frames in order.
+    private let matteSmoother = MatteSmoother()
 
     private static let pixelFormat: [String: any Sendable] = [
         kCVPixelBufferPixelFormatTypeKey as String: [kCVPixelFormatType_32BGRA],
@@ -89,15 +92,21 @@ final class VideoEditCompositor: NSObject, AVVideoCompositing, Sendable {
         let camera = instruction.cameraTrackID
             .flatMap { request.sourceFrame(byTrackID: $0) }
             .map { CIImage(cvPixelBuffer: $0) }
+        let outputTime = request.compositionTime.seconds
+        let caption = renderer.plan.captions.flatMap { track in
+            track.cue(at: outputTime).flatMap { CaptionRasterizer.shared.image(for: $0, track: track, canvas: renderer.plan.renderSize) }
+        }
         var image: CIImage
         let sourceBuffer = request.sourceFrame(byTrackID: instruction.sourceTrackID)
         if let sourceBuffer {
             image = renderer.render(
                 source: CIImage(cvPixelBuffer: sourceBuffer),
-                outputTime: request.compositionTime.seconds,
+                outputTime: outputTime,
                 backdrop: backdrop,
                 background: background,
-                camera: camera
+                camera: camera,
+                caption: caption,
+                matteSmoother: matteSmoother
             )
         } else if let background {
             image = backdrop.composited(over: renderer.aspectFill(background, in: renderer.canvasRect))

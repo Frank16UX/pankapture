@@ -1,6 +1,8 @@
 import AppCore
+import AutoEdit
 import CoreGraphics
 import Foundation
+import Transcription
 
 /// A zoom & pan segment (VE-4). Times are **source** seconds so edits to cuts
 /// or trim never shift a zoom off the content it was made for.
@@ -82,12 +84,6 @@ public struct TrackVolume: Codable, Hashable, Sendable {
     public var effectiveVolume: Double { isMuted ? 0 : volume.clamped(to: 0...1) }
 }
 
-/// Which recorded source an audio track carries (REC-4).
-public enum AudioRole: String, Codable, CaseIterable, Sendable {
-    case system
-    case microphone
-}
-
 public struct TrackVolumes: Codable, Hashable, Sendable {
     public var system: TrackVolume
     public var microphone: TrackVolume
@@ -136,6 +132,19 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
     public var splits: [Double]
     /// The webcam layer, for recordings with a camera track (ADR-25).
     public var camera: CameraOverlay?
+    /// Where the camera fills the frame or is hidden (PRD CAM-6), sorted,
+    /// never overlapping.
+    public var cameraLayouts: [CameraLayoutSegment]
+    /// Auto-edit's suggestions (PRD §5.11), on their own layer: the
+    /// timeline removes what's enabled there on top of `cuts`.
+    public var autoEdit: AutoEditLayer?
+    /// The recording's transcript with the user's corrections (PRD CAP-2),
+    /// saved with the edits so corrections follow Save and undo.
+    public var transcript: Transcript?
+    /// Burned-in captions and the captions file (PRD CAP-1–CAP-4).
+    public var captions: CaptionSettings?
+    /// Noise removal and loudness for the microphone (PRD AU-1, AU-2).
+    public var voice: VoiceProcessing?
 
     public init(
         sourceURL: URL,
@@ -148,7 +157,12 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         trackVolumes: TrackVolumes = TrackVolumes(),
         zoomFillsFrame: Bool = false,
         splits: [Double] = [],
-        camera: CameraOverlay? = nil
+        camera: CameraOverlay? = nil,
+        cameraLayouts: [CameraLayoutSegment] = [],
+        autoEdit: AutoEditLayer? = nil,
+        transcript: Transcript? = nil,
+        captions: CaptionSettings? = nil,
+        voice: VoiceProcessing? = nil
     ) {
         self.version = Self.currentVersion
         self.sourceURL = sourceURL
@@ -162,11 +176,16 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         self.zoomFillsFrame = zoomFillsFrame
         self.splits = splits
         self.camera = camera
+        self.cameraLayouts = cameraLayouts
+        self.autoEdit = autoEdit
+        self.transcript = transcript
+        self.captions = captions
+        self.voice = voice
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, sourceURL, sourceDuration, trim, cuts, zooms, speedSegments, background, trackVolumes
-        case zoomFillsFrame, splits, camera
+        case zoomFillsFrame, splits, camera, cameraLayouts, autoEdit, transcript, captions, voice
     }
 
     /// Keys added after version 1 are optional, so older saved projects open.
@@ -184,23 +203,57 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
         zoomFillsFrame = try container.decodeIfPresent(Bool.self, forKey: .zoomFillsFrame) ?? false
         splits = try container.decodeIfPresent([Double].self, forKey: .splits) ?? []
         camera = try container.decodeIfPresent(CameraOverlay.self, forKey: .camera)
+        cameraLayouts = try container.decodeIfPresent([CameraLayoutSegment].self, forKey: .cameraLayouts) ?? []
+        autoEdit = try container.decodeIfPresent(AutoEditLayer.self, forKey: .autoEdit)
+        transcript = try container.decodeIfPresent(Transcript.self, forKey: .transcript)
+        captions = try container.decodeIfPresent(CaptionSettings.self, forKey: .captions)
+        voice = try container.decodeIfPresent(VoiceProcessing.self, forKey: .voice)
+    }
+
+    /// The user's cuts plus auto-edit's enabled ones: what the timeline
+    /// removes. Auto-edit is ignored if it would leave almost nothing.
+    public var effectiveCuts: [TimeRange] {
+        guard let auto = autoEdit?.cuts, !auto.isEmpty else { return cuts }
+        let combined = TimeRange.merged(cuts + auto)
+        let kept = Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: combined)
+        return kept.reduce(0) { $0 + $1.duration } >= Self.minimumKeptDuration ? combined : cuts
+    }
+
+    /// The user's speed changes plus auto-edit's faster screen actions; the
+    /// user's win where they overlap.
+    public var effectiveSpeedSegments: [SpeedSegment] {
+        let auto = (autoEdit?.speedSegments ?? []).filter { segment in
+            !speedSegments.contains { $0.range.overlaps(segment.range) }
+        }
+        return speedSegments + auto
     }
 
     public var fullRange: TimeRange { TimeRange(start: 0, end: sourceDuration) }
 
     /// A fresh project for `source`, with the webcam layer where the bubble
     /// was while recording (from the recording's sidecar).
-    public static func initial(for source: SourceMedia, sidecar: RecordingSidecar? = nil) -> VideoEditProject {
+    /// - Parameter cameraBackground: the default from Settings ▸ Recording
+    ///   (PRD CAM-3), so the automatic camera composite gets it too.
+    public static func initial(
+        for source: SourceMedia,
+        sidecar: RecordingSidecar? = nil,
+        cameraBackground: CameraBackground = .savedDefault()
+    ) -> VideoEditProject {
         var project = VideoEditProject(sourceURL: source.url, sourceDuration: source.duration)
         if source.camera != nil {
-            project.camera = (sidecar ?? RecordingSidecar.load(for: source.url))?.camera.map(CameraOverlay.init) ?? .standard
+            var camera = (sidecar ?? RecordingSidecar.load(for: source.url))?.camera.map(CameraOverlay.init) ?? .standard
+            camera.background = cameraBackground
+            project.camera = camera
         }
         return project
     }
 
     /// True when nothing was changed (export can be a straight copy).
     public var isUnedited: Bool {
-        cuts.isEmpty && zooms.isEmpty && speedSegments.isEmpty && camera?.isVisible != true
+        cuts.isEmpty && zooms.isEmpty && speedSegments.isEmpty && camera?.isVisible != true && cameraLayouts.isEmpty
+            && (autoEdit.map { $0.cuts.isEmpty && $0.speedSegments.isEmpty } ?? true)
+            && !(captions?.isEnabled == true && transcript != nil)
+            && voice?.isActive != true
             && !background.altersFrame && trackVolumes == TrackVolumes()
             && abs(trim.start) < 1e-6 && abs(trim.end - sourceDuration) < 1e-6
     }
@@ -225,7 +278,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
     }
 
     private func keptDuration(trim: TimeRange) -> Double {
-        Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: cuts).reduce(0) { $0 + $1.duration }
+        Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: effectiveCuts).reduce(0) { $0 + $1.duration }
     }
 
     /// Fits a saved project to the media's actual duration: clamps trim,
@@ -249,7 +302,29 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
             segment.range = range
             return segment
         }
+        cameraLayouts = cameraLayouts.compactMap { segment in
+            guard let range = segment.range.clamped(to: full), range.duration > 0 else { return nil }
+            var segment = segment
+            segment.range = range
+            return segment
+        }
         splits = splits.filter { $0 > 0 && $0 < duration }
+        if var layer = autoEdit {
+            layer.pauses = layer.pauses.compactMap { item in
+                guard let range = item.pause.range.clamped(to: full) else { return nil }
+                var item = item
+                item.pause.range = range
+                item.adjustedCut = item.adjustedCut?.clamped(to: full)
+                return item
+            }
+            layer.removals = layer.removals.compactMap { removal in
+                guard let range = removal.range.clamped(to: full) else { return nil }
+                var removal = removal
+                removal.suggestion.range = range
+                return removal
+            }
+            autoEdit = layer
+        }
         if Timeline(project: self).outputDuration < Self.minimumKeptDuration { cuts = [] }
     }
 
@@ -261,7 +336,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
     public mutating func addCut(_ range: TimeRange) -> Bool {
         guard let clamped = range.clamped(to: fullRange) else { return false }
         let merged = TimeRange.merged(cuts + [clamped])
-        let kept = Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: merged)
+        let kept = Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: merged + (autoEdit?.cuts ?? []))
         guard kept.reduce(0, { $0 + $1.duration }) >= Self.minimumKeptDuration else { return false }
         cuts = merged
         return true
@@ -295,7 +370,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
     /// The kept footage (trim minus cuts) divided at the split points, in
     /// source seconds. Deleting a segment cuts it.
     public var segments: [TimeRange] {
-        let kept = Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: cuts)
+        let kept = Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: effectiveCuts)
         return kept.flatMap { range in
             var pieces: [TimeRange] = []
             var start = range.start
@@ -310,7 +385,7 @@ public struct VideoEditProject: Codable, Hashable, Sendable {
 
     /// Split points that currently divide kept footage (others sit in removed parts).
     public var visibleSplits: [Double] {
-        let kept = Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: cuts)
+        let kept = Timeline.keptRanges(sourceDuration: sourceDuration, trim: trim, cuts: effectiveCuts)
         return splits.filter { split in kept.contains { split > $0.start && split < $0.end } }
     }
 

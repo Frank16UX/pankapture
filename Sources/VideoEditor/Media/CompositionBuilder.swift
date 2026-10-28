@@ -46,6 +46,8 @@ public enum CompositionBuilder {
         public var forceVideoComposition: Bool
         /// The preview keeps muted tracks so volume changes don't need a rebuild.
         public var includeMutedAudio: Bool
+        /// The preview separates the camera background faster and coarser.
+        public var cameraMatteQuality: CameraMatte.Quality
 
         public init(
             shortSideCap: Double? = nil,
@@ -55,7 +57,8 @@ public enum CompositionBuilder {
             frameRate: Int = 30,
             zoomEnabled: Bool = true,
             forceVideoComposition: Bool = true,
-            includeMutedAudio: Bool = false
+            includeMutedAudio: Bool = false,
+            cameraMatteQuality: CameraMatte.Quality = .balanced
         ) {
             self.shortSideCap = shortSideCap
             self.shortSide = shortSide
@@ -65,6 +68,7 @@ public enum CompositionBuilder {
             self.zoomEnabled = zoomEnabled
             self.forceVideoComposition = forceVideoComposition
             self.includeMutedAudio = includeMutedAudio
+            self.cameraMatteQuality = cameraMatteQuality
         }
 
         public static func preview(frameRate: Double, zoomEnabled: Bool = true) -> Options {
@@ -75,7 +79,8 @@ public enum CompositionBuilder {
                 frameRate: Int(frameRate.rounded()).clamped(to: 24...60),
                 zoomEnabled: zoomEnabled,
                 forceVideoComposition: false,
-                includeMutedAudio: true
+                includeMutedAudio: true,
+                cameraMatteQuality: .fast
             )
         }
     }
@@ -88,8 +93,21 @@ public enum CompositionBuilder {
         CMTimeRange(start: cmTime(range.start), end: cmTime(range.end))
     }
 
-    public static func build(source: SourceMedia, project: VideoEditProject, options: Options) async throws -> sending EditComposition {
-        let tracks = try await source.loadTracks()
+    /// - Parameter voiceProgress: 0…1 while the cleaned-up voice is made
+    ///   (only when it isn't cached yet).
+    public static func build(
+        source: SourceMedia,
+        project: VideoEditProject,
+        options: Options,
+        voiceProgress: @escaping @Sendable (Double) -> Void = { _ in }
+    ) async throws -> sending EditComposition {
+        var tracks = try await source.loadTracks()
+        // Exports get the cleaned-up voice, processing it now if needed.
+        if let voice = project.voice, voice.isActive, let microphone = source.audioTracks.first(where: { $0.role == .microphone }) {
+            let output = try await VoiceProcessor.process(source: source.url, microphoneTrackID: microphone.trackID,
+                                                          settings: voice, progress: voiceProgress)
+            tracks.processedVoice = try await ProcessedVoice.load(output)
+        }
         let background = await BackgroundVideo.load(for: project)
         return try build(source: source, tracks: tracks, project: project, options: options, background: background)
     }
@@ -123,13 +141,20 @@ public enum CompositionBuilder {
         }
 
         // Audio tracks, each tagged with its role for the mix.
-        var audioTracks: [(composition: AVMutableCompositionTrack, source: AudioTrackInfo, track: AVAssetTrack, volume: Double)] = []
+        // `shift`: where the inserted track's time 0 sits on the source timeline
+        // (the processed voice file starts at the microphone track's start).
+        var audioTracks: [(composition: AVMutableCompositionTrack, source: AudioTrackInfo, track: AVAssetTrack, volume: Double, shift: Double)] = []
         for info in source.audioTracks {
-            guard let sourceTrack = tracks.audio[info.trackID] else { continue }
+            guard var sourceTrack = tracks.audio[info.trackID] else { continue }
+            var shift = 0.0
+            if info.role == .microphone, project.voice?.isActive == true, let voice = tracks.processedVoice {
+                sourceTrack = voice.track
+                shift = voice.startTime
+            }
             let volume = project.trackVolumes[info.role].effectiveVolume
             guard options.includeMutedAudio || volume > 0 else { continue }
             guard let track = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else { continue }
-            audioTracks.append((track, info, sourceTrack, volume))
+            audioTracks.append((track, info, sourceTrack, volume, shift))
         }
 
         // Insert kept pieces back to back; scale the ones with a speed change.
@@ -144,16 +169,39 @@ public enum CompositionBuilder {
                 try videoTrack.insertTimeRange(cmRange(range), of: tracks.video, at: pieceStart + offset)
             }
             if let cameraTrack, let camera = tracks.camera, let info = source.camera,
-               let range = segment.source.intersection(info.timeRange)?.intersection(TimeRange(start: 0, end: source.duration)) {
-                let offset = cmTime(range.start) - cmTime(segment.source.start)
-                try cameraTrack.insertTimeRange(cmRange(range), of: camera, at: pieceStart + offset)
+               var range = segment.source.intersection(info.timeRange)?.intersection(TimeRange(start: 0, end: source.duration)) {
+                // A camera that started after the screen shows its first frame
+                // until then, rather than popping in late (CAM-7). That covers
+                // every kept part before it, including segments ending before it.
+                if range.start < info.firstFrameTime {
+                    let holdEnd = min(range.end, info.firstFrameTime)
+                    let at = pieceStart + cmTime(range.start) - cmTime(segment.source.start)
+                    let hold = cmTime(holdEnd) - cmTime(range.start)
+                    if hold > .zero {
+                        let firstFrame = CMTimeRange(start: cmTime(info.firstFrameTime), duration: CMTime(value: 1, timescale: 600))
+                        try cameraTrack.insertTimeRange(firstFrame, of: camera, at: at)
+                        cameraTrack.scaleTimeRange(CMTimeRange(start: at, duration: firstFrame.duration), toDuration: hold)
+                    }
+                    range.start = holdEnd
+                }
+                if range.end > range.start {
+                    let offset = cmTime(range.start) - cmTime(segment.source.start)
+                    try cameraTrack.insertTimeRange(cmRange(range), of: camera, at: pieceStart + offset)
+                }
             }
             for audio in audioTracks {
                 // Never past the last video frame (see `SourceMedia.duration`).
                 guard let range = segment.source.intersection(audio.source.timeRange)?
                     .intersection(TimeRange(start: 0, end: source.duration)) else { continue }
-                let offset = cmTime(range.start) - cmTime(segment.source.start)
-                try audio.composition.insertTimeRange(cmRange(range), of: audio.track, at: pieceStart + offset)
+                var offset = cmTime(range.start) - cmTime(segment.source.start)
+                var shifted = TimeRange(start: range.start - audio.shift, end: range.end - audio.shift)
+                // A file starting after the track's nominal start has nothing before its first sample.
+                if shifted.start < 0 {
+                    offset = offset + cmTime(-shifted.start)
+                    shifted.start = 0
+                }
+                guard shifted.end > shifted.start else { continue }
+                try audio.composition.insertTimeRange(cmRange(shifted), of: audio.track, at: pieceStart + offset)
             }
 
             if abs(segment.rate - 1) > 1e-6 {
@@ -192,7 +240,8 @@ public enum CompositionBuilder {
             zoomEnabled: options.zoomEnabled,
             backgroundOrientation: background?.orientation ?? .up,
             hasCameraTrack: cameraTrack != nil,
-            cameraOrientation: source.camera?.orientation ?? .up
+            cameraOrientation: source.camera?.orientation ?? .up,
+            cameraMatteQuality: options.cameraMatteQuality
         )
         let videoComposition = makeVideoComposition(
             plan: plan,
@@ -208,11 +257,9 @@ public enum CompositionBuilder {
         var audioMix: AVMutableAudioMix?
         if !audioTracks.isEmpty {
             let mix = AVMutableAudioMix()
+            let joins = joinTimes(timeline)
             mix.inputParameters = audioTracks.map { audio in
-                let parameters = AVMutableAudioMixInputParameters(track: audio.composition)
-                parameters.setVolume(Float(audio.volume), at: .zero)
-                parameters.audioTimePitchAlgorithm = .spectral
-                return parameters
+                mixParameters(for: audio.composition, volume: audio.volume, joins: joins)
             }
             audioMix = mix
         }
@@ -289,16 +336,46 @@ public enum CompositionBuilder {
     }
 
     /// A fresh audio mix for the preview player when only volumes changed.
-    public static func audioMix(for composition: AVComposition, source: SourceMedia, volumes: TrackVolumes) -> AVAudioMix? {
+    public static func audioMix(for composition: AVComposition, source: SourceMedia, volumes: TrackVolumes, timeline: Timeline) -> AVAudioMix? {
         let compositionTracks = composition.tracks(withMediaType: .audio)
         guard compositionTracks.count == source.audioTracks.count, !compositionTracks.isEmpty else { return nil }
         let mix = AVMutableAudioMix()
+        let joins = joinTimes(timeline)
         mix.inputParameters = zip(compositionTracks, source.audioTracks).map { track, info in
-            let parameters = AVMutableAudioMixInputParameters(track: track)
-            parameters.setVolume(Float(volumes[info.role].effectiveVolume), at: .zero)
-            parameters.audioTimePitchAlgorithm = .spectral
-            return parameters
+            mixParameters(for: track, volume: volumes[info.role].effectiveVolume, joins: joins)
         }
         return mix
+    }
+
+    /// Length of the fade out and back in at each join (AE-9): long enough
+    /// that a cut doesn't click, too short to hear as a dip.
+    public static let joinFade = 0.008
+
+    /// Output times where removed footage was spliced out: consecutive
+    /// segments that aren't contiguous in the source. Speed changes alone
+    /// don't make a join.
+    public static func joinTimes(_ timeline: Timeline) -> [Double] {
+        zip(timeline.segments, timeline.segments.dropFirst()).compactMap { previous, next in
+            abs(previous.source.end - next.source.start) > 1e-6 ? next.outputStart : nil
+        }
+    }
+
+    /// Constant volume with a short fade out and in around every join.
+    static func mixParameters(for track: AVAssetTrack, volume: Double, joins: [Double]) -> AVMutableAudioMixInputParameters {
+        let parameters = AVMutableAudioMixInputParameters(track: track)
+        let level = Float(volume)
+        parameters.setVolume(level, at: .zero)
+        parameters.audioTimePitchAlgorithm = .spectral
+        guard level > 0 else { return parameters }
+        var lastEnd = 0.0
+        for join in joins.sorted() {
+            // Joins closer together than two fades keep the previous ramp.
+            let fadeStart = max(lastEnd, join - joinFade)
+            guard join - fadeStart > 0.001 else { continue }
+            parameters.setVolumeRamp(fromStartVolume: level, toEndVolume: 0, timeRange: CMTimeRange(start: cmTime(fadeStart), end: cmTime(join)))
+            parameters.setVolumeRamp(fromStartVolume: 0, toEndVolume: level, timeRange: CMTimeRange(start: cmTime(join), end: cmTime(join + joinFade)))
+            lastEnd = join + joinFade
+        }
+        return parameters
     }
 }
