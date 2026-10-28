@@ -53,8 +53,10 @@ final class VideoEditorModel {
     /// so the user can position the zoom rectangle over it.
     var selectedZoomID: ZoomSegment.ID? {
         didSet {
-            guard oldValue != selectedZoomID else { return }
+            // Before the guard: clicking the zoom that's already selected
+            // must still deselect the rest.
             if selectedZoomID != nil { selectedAutoItem = nil; selectedCameraLayoutID = nil; transcriptSelection = nil }
+            guard oldValue != selectedZoomID else { return }
             updatePreviewVideoComposition()
         }
     }

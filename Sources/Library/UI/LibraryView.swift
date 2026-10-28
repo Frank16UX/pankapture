@@ -23,7 +23,7 @@ struct LibraryView: View {
         .navigationSubtitle(model.subtitle)
         .toolbar { LibraryToolbar(model: model) }
         .task(id: model.reloadKey) { await model.reload() }
-        .task(id: model.selection) { await model.prepareSelectionFiles() }
+        .task(id: model.selectionPreparationKey) { await model.prepareSelectionFiles() }
         .confirmationDialog(
             deletionTitle,
             isPresented: Binding(

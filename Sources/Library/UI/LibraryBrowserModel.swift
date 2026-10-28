@@ -225,6 +225,12 @@ final class LibraryBrowserModel {
         if !selection.isSubset(of: visible) { selection.formIntersection(visible) }
     }
 
+    /// What `prepareSelectionFiles()` depends on: the selection, and each
+    /// selected capture's edit and name (a rename needs a new temporary file).
+    var selectionPreparationKey: [String] {
+        selectedItems.map { "\($0.id)|\($0.editedAt.timeIntervalSince1970)|\($0.suggestedFileName)" }
+    }
+
     /// Resolves (or renders) files for the selection so share, drag, copy, and
     /// Quick Look are instant.
     func prepareSelectionFiles() async {

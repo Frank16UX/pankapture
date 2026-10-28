@@ -131,6 +131,13 @@ struct AutoEditViewTests {
         model.transcriptSelection = 2...3
         model.clearSelection()
         #expect(model.transcriptSelection == nil)
+        // Even when the zoom clicked is the one already selected.
+        model.addZoomAtPlayhead()
+        let zoom = try #require(model.selectedZoomID)
+        model.transcriptSelection = 2...3
+        model.selectedZoomID = zoom
+        #expect(model.transcriptSelection == nil)
+        model.undo()
 
         // Corrections keep the span and share it out by length.
         model.correctWords(0...1, to: "Hi there, everybody.")
