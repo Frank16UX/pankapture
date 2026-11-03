@@ -379,7 +379,7 @@ final class CaptureCoordinator {
         if recent.kind == .screenshot, let library {
             openLibraryScreenshot(id: recent.id, from: library) {
                 // Nothing to show after all: drop the Dock icon raised for it.
-                DockPresence.shared.update()
+                DockPresence.shared.windowWillNotOpen()
                 NSSound.beep()
             }
         } else if let url = recent.exportURL {
