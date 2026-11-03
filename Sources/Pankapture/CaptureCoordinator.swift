@@ -377,10 +377,10 @@ final class CaptureCoordinator {
     /// Opens a recent capture from the menu bar (HI-6).
     func open(_ recent: RecentCapture) {
         if recent.kind == .screenshot, let library {
-            Task {
-                if let shot = await library.screenshotForEditing(id: recent.id) {
-                    openEditor(original: shot.original, scale: shot.scale, annotations: shot.annotations, libraryID: shot.id)
-                }
+            openEditor(libraryID: recent.id, from: library) {
+                // Nothing to show after all: drop the Dock icon raised for it.
+                DockPresence.shared.update()
+                NSSound.beep()
             }
         } else if let url = recent.exportURL {
             openRecording(url)
@@ -390,6 +390,23 @@ final class CaptureCoordinator {
     }
 
     // MARK: Editor (ED-1…ED-3)
+
+    /// Opens a history screenshot (original + live annotations, ED-3) in the editor.
+    ///
+    /// Activates before loading, while the click that asked for the editor is
+    /// still being handled. Activating after the load is a request macOS can
+    /// decline (ADR-21), and the editor then opens behind the frontmost app.
+    private func openEditor(libraryID id: UUID, from library: CaptureLibrary, ifUnavailable fallback: @escaping () -> Void) {
+        DockPresence.shared.becomeRegular()
+        NSApp.activate()
+        Task {
+            if let shot = await library.screenshotForEditing(id: id) {
+                openEditor(original: shot.original, scale: shot.scale, annotations: shot.annotations, libraryID: id)
+            } else {
+                fallback()
+            }
+        }
+    }
 
     func openEditor(original: CGImage, scale: CGFloat, annotations: AnnotationDocument, libraryID: UUID?) {
         // The editor may produce several outputs; the first one records the item.
@@ -601,12 +618,8 @@ final class CaptureCoordinator {
         case .edit:
             // Re-edit the history item (original + live annotations) when we have one.
             if let libraryID, let library {
-                Task {
-                    if let shot = await library.screenshotForEditing(id: libraryID) {
-                        openEditor(original: shot.original, scale: shot.scale, annotations: shot.annotations, libraryID: libraryID)
-                    } else {
-                        openEditor(original: image, scale: scale, annotations: capture.annotations, libraryID: nil)
-                    }
+                openEditor(libraryID: libraryID, from: library) { [weak self] in
+                    self?.openEditor(original: image, scale: scale, annotations: capture.annotations, libraryID: nil)
                 }
             } else {
                 openEditor(original: capture.original, scale: scale, annotations: capture.annotations, libraryID: nil)
@@ -633,12 +646,8 @@ final class CaptureCoordinator {
         case let (.edit, .image(image, scale)):
             quickAccess.dismiss(item)
             if let id = item.libraryID, let library {
-                Task {
-                    if let shot = await library.screenshotForEditing(id: id) {
-                        openEditor(original: shot.original, scale: shot.scale, annotations: shot.annotations, libraryID: id)
-                    } else {
-                        openEditor(original: image, scale: scale, annotations: AnnotationDocument(), libraryID: nil)
-                    }
+                openEditor(libraryID: id, from: library) { [weak self] in
+                    self?.openEditor(original: image, scale: scale, annotations: AnnotationDocument(), libraryID: nil)
                 }
             } else {
                 openEditor(original: image, scale: scale, annotations: AnnotationDocument(), libraryID: nil)
