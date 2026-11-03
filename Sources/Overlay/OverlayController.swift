@@ -295,9 +295,14 @@ public struct LastSelection: Codable, Sendable {
 
 /// Borderless, full-display panel that can become key (for keyboard input)
 /// and floats above everything, on every Space, including full-screen apps.
+///
+/// Non-activating, so it takes the keyboard (Esc, Return, tool keys) even when
+/// macOS declines the app's activation: the overlay asks only after the async
+/// snapshot, once the shortcut or menu click has been handled (ADR-11). The
+/// style must be set here; adding it after creation doesn't take effect.
 final class OverlayPanel: NSPanel {
     init(screen: NSScreen) {
-        super.init(contentRect: screen.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        super.init(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         setFrame(screen.frame, display: false)
         level = OverlayController.windowLevel
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
