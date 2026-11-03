@@ -377,7 +377,7 @@ final class CaptureCoordinator {
     /// Opens a recent capture from the menu bar (HI-6).
     func open(_ recent: RecentCapture) {
         if recent.kind == .screenshot, let library {
-            openEditor(libraryID: recent.id, from: library) {
+            openLibraryScreenshot(id: recent.id, from: library) {
                 // Nothing to show after all: drop the Dock icon raised for it.
                 DockPresence.shared.update()
                 NSSound.beep()
@@ -396,11 +396,14 @@ final class CaptureCoordinator {
     /// Activates before loading, while the click that asked for the editor is
     /// still being handled. Activating after the load is a request macOS can
     /// decline (ADR-21), and the editor then opens behind the frontmost app.
-    private func openEditor(libraryID id: UUID, from library: CaptureLibrary, ifUnavailable fallback: @escaping () -> Void) {
-        DockPresence.shared.becomeRegular()
-        NSApp.activate()
+    private func openLibraryScreenshot(id: UUID, from library: CaptureLibrary,
+                                       ifUnavailable fallback: @escaping @MainActor () -> Void) {
+        DockPresence.shared.activateForWindow()
         Task {
-            if let shot = await library.screenshotForEditing(id: id) {
+            let signpost = Log.signposter.beginInterval("library screenshot → editor")
+            let loaded = await library.screenshotForEditing(id: id)
+            Log.signposter.endInterval("library screenshot → editor", signpost)
+            if let shot = loaded {
                 openEditor(original: shot.original, scale: shot.scale, annotations: shot.annotations, libraryID: id)
             } else {
                 fallback()
@@ -616,14 +619,20 @@ final class CaptureCoordinator {
                 CaptureNotifier.shared.notify(savedURL: url, copied: false, image: image)
             }
         case .edit:
-            // Re-edit the history item (original + live annotations) when we have one.
-            if let libraryID, let library {
-                openEditor(libraryID: libraryID, from: library) { [weak self] in
-                    self?.openEditor(original: image, scale: scale, annotations: capture.annotations, libraryID: nil)
-                }
-            } else {
-                openEditor(original: capture.original, scale: scale, annotations: capture.annotations, libraryID: nil)
-            }
+            editFloatingImage(image, scale: scale, libraryID: libraryID)
+        }
+    }
+
+    /// Edit from a pin or quick-access thumbnail: re-edits its history item
+    /// (original + live annotations) when there is one, else the image itself.
+    private func editFloatingImage(_ image: CGImage, scale: CGFloat, libraryID: UUID?) {
+        let openImage: @MainActor () -> Void = { [weak self] in
+            self?.openEditor(original: image, scale: scale, annotations: AnnotationDocument(), libraryID: nil)
+        }
+        if let libraryID, let library {
+            openLibraryScreenshot(id: libraryID, from: library, ifUnavailable: openImage)
+        } else {
+            openImage()
         }
     }
 
@@ -645,13 +654,7 @@ final class CaptureCoordinator {
             CaptureNotifier.shared.notify(savedURL: url, copied: false, image: image)
         case let (.edit, .image(image, scale)):
             quickAccess.dismiss(item)
-            if let id = item.libraryID, let library {
-                openEditor(libraryID: id, from: library) { [weak self] in
-                    self?.openEditor(original: image, scale: scale, annotations: AnnotationDocument(), libraryID: nil)
-                }
-            } else {
-                openEditor(original: image, scale: scale, annotations: AnnotationDocument(), libraryID: nil)
-            }
+            editFloatingImage(image, scale: scale, libraryID: item.libraryID)
         case let (.edit, .video(url, _)):
             quickAccess.dismiss(item)
             openRecording(url)

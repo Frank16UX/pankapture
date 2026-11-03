@@ -26,10 +26,13 @@ final class DockPresence {
         update()
     }
 
-    /// Shows the Dock icon ahead of a window that's about to open, so
-    /// activation brings that window in front of other apps.
-    func becomeRegular() {
+    /// Shows the Dock icon and activates the app ahead of a standard window
+    /// that's about to open, so it comes up in front of other apps. Call it in
+    /// the click that asked for the window, before any async work: macOS can
+    /// decline an activation requested after that click has been handled (ADR-21).
+    func activateForWindow() {
         setPolicy(.regular)
+        NSApp.activate()
     }
 
     func update() {
@@ -71,8 +74,7 @@ final class SettingsWindow {
 
     static func show(tab: Tab? = nil) {
         if let tab { shared.tab = tab }
-        DockPresence.shared.becomeRegular()
-        NSApp.activate()
+        DockPresence.shared.activateForWindow()
         shared.openSettings?()
     }
 }
