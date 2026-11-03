@@ -4,6 +4,7 @@ import AppCore
 import CoreGraphics
 import Foundation
 import ImageIO
+import Synchronization
 import UniformTypeIdentifiers
 import Vision
 
@@ -11,6 +12,7 @@ enum MediaProcessingError: Error, Sendable {
     case encodingFailed
     case unreadableImage
     case noVideoTrack
+    case timedOut
 }
 
 /// Image/video work for the library. Every entry point is `nonisolated` and the
@@ -119,6 +121,49 @@ enum MediaProcessing {
         return observations
             .compactMap { $0.topCandidates(1).first?.string }
             .joined(separator: "\n")
+    }
+
+    // MARK: Time limits
+
+    /// Runs `operation`, or throws `MediaProcessingError.timedOut` once `limit`
+    /// passes. A late operation is cancelled and abandoned, not awaited: a task
+    /// group would wait for it, and a call that never returns (Vision has been
+    /// seen to) would then block the caller forever.
+    static func withTimeout<Value: Sendable>(
+        _ limit: Duration,
+        operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        try await withCheckedThrowingContinuation { continuation in
+            let outcome = FirstOutcome(continuation)
+            let work = Task {
+                do {
+                    outcome.resume(with: .success(try await operation()))
+                } catch {
+                    outcome.resume(with: .failure(error))
+                }
+            }
+            Task {
+                try? await Task.sleep(for: limit)
+                if outcome.resume(with: .failure(MediaProcessingError.timedOut)) { work.cancel() }
+            }
+        }
+    }
+
+    /// Resumes a continuation with whichever result arrives first; later ones are dropped.
+    private final class FirstOutcome<Value: Sendable>: Sendable {
+        private let continuation: Mutex<CheckedContinuation<Value, any Error>?>
+
+        init(_ continuation: CheckedContinuation<Value, any Error>) {
+            self.continuation = Mutex(continuation)
+        }
+
+        /// Returns true if this result was the first, and so was delivered.
+        @discardableResult
+        func resume(with result: Result<Value, any Error>) -> Bool {
+            guard let continuation = continuation.withLock({ $0.take() }) else { return false }
+            continuation.resume(with: result)
+            return true
+        }
     }
 
     // MARK: Recordings and GIFs
