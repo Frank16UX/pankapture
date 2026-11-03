@@ -75,6 +75,7 @@ public final class ImageEditorWindowController: NSWindowController, NSWindowDele
         hosting.sceneBridgingOptions = [.toolbars, .title]
         window.contentViewController = hosting
         window.setContentSize(CGSize(width: 1100, height: 760))
+        if !SoftwareUpdate.isReleaseBuild { window.addDevelopmentBadge() }
 
         model.perform = { [weak self] action in self?.run(action) }
         model.editorState.perform = { [weak self] command in

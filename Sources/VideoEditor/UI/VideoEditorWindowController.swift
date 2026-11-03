@@ -1,6 +1,7 @@
 import AppCore
 import AppKit
 import Carbon.HIToolbox
+import DesignSystem
 import SwiftUI
 
 /// Opens and manages video editor windows (one per file). Keep one instance
@@ -54,6 +55,7 @@ public final class VideoEditorWindowController: NSObject, NSWindowDelegate {
         window.toolbarStyle = .unified
         window.title = key.deletingPathExtension().lastPathComponent
         window.representedURL = key
+        if !SoftwareUpdate.isReleaseBuild { window.addDevelopmentBadge() }
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.minSize = NSSize(width: 900, height: 600)

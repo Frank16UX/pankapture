@@ -10,7 +10,17 @@ struct MenuBarContent: View {
 
     private let store = ShortcutStore()
 
+    private static var developmentBuildTitle: String {
+        guard let version = SoftwareUpdate.currentVersion else { return "Development Build" }
+        return "Development Build (\(version))"
+    }
+
     var body: some View {
+        if !SoftwareUpdate.isReleaseBuild {
+            // Local builds only: release builds (and so everyone else) never show it.
+            Label(Self.developmentBuildTitle, systemImage: "hammer")
+            Divider()
+        }
         updateItems
 
         Section("Screenshot") {
