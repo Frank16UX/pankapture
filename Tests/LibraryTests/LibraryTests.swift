@@ -368,3 +368,33 @@ struct RetentionPlannerTests {
         #expect(seconds == 3_600 + 300)
     }
 }
+
+@Suite("MediaProcessing.withTimeout")
+struct TimeoutTests {
+    @Test func returnsTheResultWhenInTime() async throws {
+        let value = try await MediaProcessing.withTimeout(.seconds(5)) { 42 }
+        #expect(value == 42)
+    }
+
+    @Test func passesTheOperationsErrorThrough() async {
+        await #expect(throws: MediaProcessingError.unreadableImage) {
+            try await MediaProcessing.withTimeout(.seconds(5)) { () async throws -> Int in
+                throw MediaProcessingError.unreadableImage
+            }
+        }
+    }
+
+    /// The wedged-OCR case: an operation that never returns and ignores
+    /// cancellation must not hold up the caller.
+    @Test(.timeLimit(.minutes(1)))
+    func givesUpOnAnOperationThatNeverReturns() async {
+        let clock = ContinuousClock()
+        let start = clock.now
+        await #expect(throws: MediaProcessingError.timedOut) {
+            try await MediaProcessing.withTimeout(.milliseconds(200)) { () async -> Int in
+                await withUnsafeContinuation { (_: UnsafeContinuation<Int, Never>) in }
+            }
+        }
+        #expect(clock.now - start < .seconds(5))
+    }
+}

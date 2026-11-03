@@ -503,9 +503,17 @@ public final class CaptureLibrary {
         }
     }
 
+    /// How long one OCR may take before it's marked failed and the queue moves
+    /// on. Generous: the first recognition after launch also loads Vision's
+    /// model, which has taken about 40 s. A recognition that never returned
+    /// once left every later capture unsearchable until the app quit.
+    static let textRecognitionTimeout: Duration = .seconds(120)
+
     private func enqueueTextRecognition(id: UUID, image: CGImage?, fileURL: URL?) {
         let previous = ocrTail
-        ocrTail = Task { [weak self] in
+        // Utility priority: OCR is background work and shouldn't compete with
+        // the click (or capture) that queued it.
+        ocrTail = Task(priority: .utility) { [weak self] in
             await previous?.value
             guard let self else { return }
             var source = image
@@ -514,7 +522,9 @@ public final class CaptureLibrary {
             var status = OCRStatus.failed
             if let source {
                 do {
-                    text = try await MediaProcessing.recognizeText(in: source)
+                    text = try await MediaProcessing.withTimeout(Self.textRecognitionTimeout) {
+                        try await MediaProcessing.recognizeText(in: source)
+                    }
                     status = .done
                 } catch {
                     Log.library.error("OCR failed: \(error.localizedDescription, privacy: .public)")

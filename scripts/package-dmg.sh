@@ -28,8 +28,20 @@ ditto "$APP" "$STAGE/Pankapture.app"
 ln -s /Applications "$STAGE/Applications"
 
 rm -f "$DMG"
-hdiutil create -quiet -volname "Pankapture $VERSION" -srcfolder "$STAGE" \
-  -fs HFS+ -format UDZO -ov "$DMG"
+# hdiutil's own size estimate for -srcfolder can come out too small for some
+# app sizes, and create then fails; size the image from the staged folder with
+# headroom instead. Not -quiet, so a failure says why. One retry covers a
+# transient "Resource busy" on CI runners.
+SIZE_MB=$(( $(du -sm "$STAGE" | cut -f1) * 12 / 10 + 20 ))
+create_dmg() {
+  hdiutil create -volname "Pankapture $VERSION" -srcfolder "$STAGE" -size "${SIZE_MB}m" \
+    -fs HFS+ -format UDZO -ov "$DMG"
+}
+if ! create_dmg; then
+  echo "⚠︎ hdiutil create failed; retrying in 5 s" >&2
+  sleep 5
+  create_dmg
+fi
 hdiutil verify -quiet "$DMG"
 
 echo "✓ $DMG"

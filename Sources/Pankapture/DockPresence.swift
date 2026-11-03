@@ -9,6 +9,13 @@ final class DockPresence {
     static let shared = DockPresence()
 
     private var observers: [NSObjectProtocol] = []
+    /// Set by `activateForWindow()` until the promised window opens, the opener
+    /// gives up, or `pendingWindowLimit` passes.
+    private var pendingWindow: Task<Void, Never>?
+
+    /// How long a promised window may take before the hold lapses, so a window
+    /// that never comes can't leave the Dock icon up for good.
+    static let pendingWindowLimit: Duration = .seconds(10)
 
     func start() {
         let center = NotificationCenter.default
@@ -26,14 +33,43 @@ final class DockPresence {
         update()
     }
 
-    /// Shows the Dock icon ahead of a window that's about to open, so
-    /// activation brings that window in front of other apps.
-    func becomeRegular() {
+    /// Shows the Dock icon and activates the app ahead of a standard window
+    /// that's about to open, so it comes up in front of other apps. Call it in
+    /// the click that asked for the window, before any async work: macOS can
+    /// decline an activation requested after that click has been handled (ADR-21).
+    ///
+    /// The app stays regular until the window opens. Without that hold, the
+    /// menu or thumbnail closing in the meantime triggers `update()`, which
+    /// finds no window yet, drops back to accessory and hands the front to the
+    /// previous app; the window then opens behind it.
+    func activateForWindow() {
+        pendingWindow?.cancel()
+        pendingWindow = Task { [weak self] in
+            try? await Task.sleep(for: Self.pendingWindowLimit)
+            guard !Task.isCancelled else { return }
+            self?.windowWillNotOpen()
+        }
         setPolicy(.regular)
+        NSApp.activate()
+    }
+
+    /// Ends the hold from `activateForWindow()` when the window won't open
+    /// after all (e.g. the capture it was for is gone).
+    func windowWillNotOpen() {
+        pendingWindow?.cancel()
+        pendingWindow = nil
+        update()
     }
 
     func update() {
-        setPolicy(NSApp.windows.contains(where: Self.isStandardWindow) ? .regular : .accessory)
+        if NSApp.windows.contains(where: Self.isStandardWindow) {
+            // The promised window (or another) is up; the hold has done its job.
+            pendingWindow?.cancel()
+            pendingWindow = nil
+            setPolicy(.regular)
+        } else {
+            setPolicy(pendingWindow == nil ? .accessory : .regular)
+        }
     }
 
     private func setPolicy(_ policy: NSApplication.ActivationPolicy) {
@@ -71,8 +107,7 @@ final class SettingsWindow {
 
     static func show(tab: Tab? = nil) {
         if let tab { shared.tab = tab }
-        DockPresence.shared.becomeRegular()
-        NSApp.activate()
+        DockPresence.shared.activateForWindow()
         shared.openSettings?()
     }
 }

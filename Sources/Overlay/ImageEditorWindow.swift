@@ -138,6 +138,7 @@ public final class ImageEditorWindowController: NSWindowController, NSWindowDele
         window.toolbar = NSToolbar(identifier: "imageEditor.placeholder")
         window.contentViewController = hosting
         window.setContentSize(CGSize(width: 1100, height: 760))
+        if !SoftwareUpdate.isReleaseBuild { window.addDevelopmentBadge() }
 
         model.perform = { [weak self] action in self?.run(action) }
         model.editorState.perform = { [weak self] command in
